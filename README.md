@@ -67,12 +67,12 @@ PocketBase 默认运行在 `http://127.0.0.1:8090`。
 **首次设置（重要）**：
 
 1. 访问 `http://127.0.0.1:8090/_/` 创建管理员账号
-2. 在 Admin UI 创建以下 Collections：
-   - `users`（扩展内置 Auth 集合，添加 `name: text` 和 `role: select[admin,proofreader,reviewer]` 字段）
-   - `projects`（name, description, admin→users）
-   - `project_files`（project→projects, file, original_filename, status）
-   - `pages`（project, project_file, page_number, image, ocr_text, proofread_text, status, proofreader→users, reviewer→users, proofread_at, reviewed_at）
-3. 按照 `backend/pb_hooks/main.pb.js` 中的注释，为每个 Collection 设置访问规则
+2. 以下 Collections 由 `backend/pb_migrations/1_init_schema.js` 迁移脚本自动创建，**无需在 Admin UI 手动新建或添加字段**：
+   - `users`：使用内置 Auth 集合，包含 PocketBase 自带的 `name` 字段，并通过迁移脚本扩展了 `role: select[admin,proofreader,reviewer]` 字段
+   - `projects`：项目基本信息（name, description, admin→users）
+   - `project_files`：项目文件（project→projects, file, original_filename, status）
+   - `pages`：页面内容与状态（project, project_file, page_number, image, ocr_text, proofread_text, status, proofreader→users, reviewer→users, proofread_at, reviewed_at）
+3. 按照 `backend/pb_hooks/main.pb.js` 中的注释，为每个 Collection 在 Admin UI 手动配置/校验访问规则
 
 ### 2. 启动前端
 

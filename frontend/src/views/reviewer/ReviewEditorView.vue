@@ -129,21 +129,34 @@ const diffParts = computed(() => {
 })
 
 const isFinished = computed(() => {
-  return page.value && ['approved', 'rejected'].includes(page.value.status)
+  return page.value && (
+    ['approved', 'rejected'].includes(page.value.status) ||
+    (page.value.status === 'reviewing' && page.value.reviewer !== auth.user.id)
+  )
 })
 
 onMounted(async () => {
   try {
     page.value = await pb.collection('pages').getOne(route.params.id)
     editedText.value = page.value.proofread_text || page.value.ocr_text || ''
-    // Mark as "reviewing" if status is "proofread"
+    // Mark as "reviewing" if status is "proofread".
+    // The server hook enforces that only one reviewer can transition a page from
+    // "proofread" to "reviewing", so if this update fails the page was already
+    // claimed by another reviewer.
     if (page.value.status === 'proofread') {
-      await pb.collection('pages').update(page.value.id, {
-        status: 'reviewing',
-        reviewer: auth.user.id
-      })
-      page.value.status = 'reviewing'
-      page.value.reviewer = auth.user.id
+      try {
+        await pb.collection('pages').update(page.value.id, {
+          status: 'reviewing',
+          reviewer: auth.user.id
+        })
+        page.value.status = 'reviewing'
+        page.value.reviewer = auth.user.id
+      } catch (lockErr) {
+        // Re-fetch to get the latest status/reviewer
+        page.value = await pb.collection('pages').getOne(route.params.id)
+        editedText.value = page.value.proofread_text || page.value.ocr_text || ''
+        saveError.value = lockErr?.response?.message || '该任务已被其他审核员占用，您可以查看但无法操作。'
+      }
     }
   } catch (e) {
     console.error(e)

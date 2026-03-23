@@ -1,12 +1,13 @@
 FROM alpine:3.19
 
 ARG PB_VERSION=0.21.3
+ARG TARGETARCH=amd64
 
 RUN apk add --no-cache curl unzip ca-certificates
 
-# Download PocketBase binary
+# Download PocketBase binary for the target architecture
 RUN curl -Lo /tmp/pocketbase.zip \
-    "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip" \
+    "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_${TARGETARCH}.zip" \
     && unzip /tmp/pocketbase.zip -d /pb/ \
     && rm /tmp/pocketbase.zip \
     && chmod +x /pb/pocketbase

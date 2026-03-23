@@ -75,4 +75,14 @@ migrate((db) => {
   try { dao.deleteCollection(dao.findCollectionByNameOrId("pages")) } catch {}
   try { dao.deleteCollection(dao.findCollectionByNameOrId("project_files")) } catch {}
   try { dao.deleteCollection(dao.findCollectionByNameOrId("projects")) } catch {}
+
+  // Revert: remove the 'role' field added to the built-in users collection
+  try {
+    const usersCollection = dao.findCollectionByNameOrId("users")
+    const roleField = usersCollection.schema.getFieldByName("role")
+    if (roleField) {
+      usersCollection.schema.removeField(roleField.id)
+      dao.saveCollection(usersCollection)
+    }
+  } catch {}
 })

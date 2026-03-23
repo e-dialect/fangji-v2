@@ -23,15 +23,6 @@
           <label class="form-label">确认密码</label>
           <input v-model="passwordConfirm" type="password" class="form-control" placeholder="再次输入密码" required />
         </div>
-        <div class="form-group">
-          <label class="form-label">角色</label>
-          <select v-model="role" class="form-control" required>
-            <option value="">请选择角色</option>
-            <option value="proofreader">校对员</option>
-            <option value="reviewer">审核员</option>
-            <option value="admin">管理员</option>
-          </select>
-        </div>
 
         <div v-if="error" class="alert alert-error">{{ error }}</div>
         <div v-if="success" class="alert alert-success">注册成功！正在跳转到登录页...</div>
@@ -60,7 +51,6 @@ const name = ref('')
 const email = ref('')
 const password = ref('')
 const passwordConfirm = ref('')
-const role = ref('')
 const loading = ref(false)
 const error = ref('')
 const success = ref(false)
@@ -73,7 +63,7 @@ async function handleRegister() {
   }
   loading.value = true
   try {
-    await auth.register(email.value, password.value, passwordConfirm.value, name.value, role.value)
+    await auth.register(email.value, password.value, passwordConfirm.value, name.value)
     success.value = true
     setTimeout(() => router.push('/login'), 1500)
   } catch (e) {

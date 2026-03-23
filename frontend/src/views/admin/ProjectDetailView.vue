@@ -117,11 +117,9 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import pb from '@/lib/pocketbase'
-import { useAuthStore } from '@/stores/auth'
 import { parseCsv } from '@/lib/csvParser'
 
 const route = useRoute()
-const auth = useAuthStore()
 
 const project = ref(null)
 const pages = ref([])
@@ -159,15 +157,23 @@ onMounted(async () => {
 async function loadPages() {
   loadingPages.value = true
   try {
-    const list = await pb.collection('pages').getFullList({
-      filter: `project="${route.params.id}"`,
-      sort: 'page_number',
-      expand: 'proofreader,reviewer'
-    })
-    pages.value = list
-    pageStats.value.total = list.length
-    pageStats.value.proofread = list.filter(p => ['proofread', 'reviewing', 'approved'].includes(p.status)).length
-    pageStats.value.approved = list.filter(p => p.status === 'approved').length
+    const perPage = 50
+    const allPages = []
+    let page = 1
+    let result
+    do {
+      result = await pb.collection('pages').getList(page, perPage, {
+        filter: `project="${route.params.id}"`,
+        sort: 'page_number',
+        expand: 'proofreader,reviewer'
+      })
+      allPages.push(...result.items)
+      page += 1
+    } while (page <= result.totalPages)
+    pages.value = allPages
+    pageStats.value.total = allPages.length
+    pageStats.value.proofread = allPages.filter(p => ['proofread', 'reviewing', 'approved'].includes(p.status)).length
+    pageStats.value.approved = allPages.filter(p => p.status === 'approved').length
   } catch (e) {
     console.error(e)
   } finally {

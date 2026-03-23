@@ -44,6 +44,11 @@
             </tbody>
           </table>
         </div>
+        <div v-if="pendingTotalPages > 1" class="flex gap-2 mt-3 items-center">
+          <button class="btn btn-secondary btn-sm" :disabled="pendingPage <= 1" @click="changePendingPage(pendingPage - 1)">上一页</button>
+          <span class="text-sm text-muted">第 {{ pendingPage }} / {{ pendingTotalPages }} 页</span>
+          <button class="btn btn-secondary btn-sm" :disabled="pendingPage >= pendingTotalPages" @click="changePendingPage(pendingPage + 1)">下一页</button>
+        </div>
       </div>
     </div>
 
@@ -82,6 +87,11 @@
             </tbody>
           </table>
         </div>
+        <div v-if="myTotalPages > 1" class="flex gap-2 mt-3 items-center">
+          <button class="btn btn-secondary btn-sm" :disabled="myPage <= 1" @click="changeMyPage(myPage - 1)">上一页</button>
+          <span class="text-sm text-muted">第 {{ myPage }} / {{ myTotalPages }} 页</span>
+          <button class="btn btn-secondary btn-sm" :disabled="myPage >= myTotalPages" @click="changeMyPage(myPage + 1)">下一页</button>
+        </div>
       </div>
     </div>
   </div>
@@ -104,6 +114,11 @@ const tabs = [
 
 const pendingPages = ref([])
 const myPages = ref([])
+const pendingPage = ref(1)
+const pendingTotalPages = ref(1)
+const myPage = ref(1)
+const myTotalPages = ref(1)
+const PAGE_SIZE = 50
 
 onMounted(async () => {
   await loadTasks()
@@ -112,25 +127,37 @@ onMounted(async () => {
 async function loadTasks() {
   loading.value = true
   try {
-    const [pending, mine] = await Promise.all([
-      pb.collection('pages').getFullList({
+    const [pendingResult, mineResult] = await Promise.all([
+      pb.collection('pages').getList(pendingPage.value, PAGE_SIZE, {
         filter: 'status="pending"',
         sort: 'page_number',
         expand: 'project'
       }),
-      pb.collection('pages').getFullList({
+      pb.collection('pages').getList(myPage.value, PAGE_SIZE, {
         filter: `proofreader="${auth.user.id}"`,
         sort: '-updated',
         expand: 'project'
       })
     ])
-    pendingPages.value = pending
-    myPages.value = mine
+    pendingPages.value = pendingResult.items
+    pendingTotalPages.value = pendingResult.totalPages
+    myPages.value = mineResult.items
+    myTotalPages.value = mineResult.totalPages
   } catch (e) {
     console.error(e)
   } finally {
     loading.value = false
   }
+}
+
+async function changePendingPage(p) {
+  pendingPage.value = p
+  await loadTasks()
+}
+
+async function changeMyPage(p) {
+  myPage.value = p
+  await loadTasks()
 }
 
 async function claimTask(page) {
@@ -143,6 +170,7 @@ async function claimTask(page) {
     await loadTasks()
   } catch (e) {
     alert('认领失败：' + (e?.response?.message || e.message))
+    await loadTasks()
   } finally {
     claiming.value = null
   }
