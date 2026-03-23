@@ -1,0 +1,30 @@
+# Node
+node_modules/
+.npm
+
+# Build outputs
+dist/
+*.local
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# PocketBase data (not tracked in git)
+backend/pb_data/
+backend/pocketbase
+
+# OS
+.DS_Store
+Thumbs.db
