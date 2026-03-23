@@ -32,6 +32,26 @@ fangji-v2/
 
 ## 快速开始
 
+### 方式一：Docker Compose（推荐，一键启动）
+
+确保已安装 [Docker](https://docs.docker.com/get-docker/) 和 [Docker Compose](https://docs.docker.com/compose/install/)，然后在项目根目录运行：
+
+```bash
+docker compose up --build
+```
+
+启动后：
+- 前端访问地址：`http://localhost:5173`
+- 后端（PocketBase Admin UI）：`http://localhost:8090/_/`
+
+首次启动时，访问 `http://localhost:8090/_/` 创建管理员账号（参见下方"首次设置"步骤）。
+
+> **注意**：PocketBase 数据（数据库、上传文件）通过 Docker Volume `pb_data` 持久化，重建容器不会丢失数据。
+
+---
+
+### 方式二：手动启动
+
 ### 1. 启动后端 (PocketBase)
 
 ```bash

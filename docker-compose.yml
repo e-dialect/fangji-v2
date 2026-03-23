@@ -1,0 +1,24 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8090:8090"
+    volumes:
+      # Persist PocketBase data (uploads, database) across container restarts
+      - pb_data:/pb/pb_data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      # The browser connects to PocketBase directly, so this must be a
+      # host-accessible address (not the internal Docker service name).
+      - VITE_PB_URL=http://localhost:8090
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pb_data:
