@@ -4,15 +4,9 @@
 migrate((db) => {
   const dao = new Dao(db)
 
-  // 1. Extend the built-in 'users' collection with a 'role' and 'name' field
+  // 1. Extend the built-in 'users' collection with a 'role' field
+  // Note: PocketBase already provides a built-in 'name' field on the users auth collection
   const usersCollection = dao.findCollectionByNameOrId("users")
-
-  usersCollection.schema.addField(new SchemaField({
-    name: "name",
-    type: "text",
-    required: false,
-    options: { min: null, max: 100, pattern: "" }
-  }))
 
   usersCollection.schema.addField(new SchemaField({
     name: "role",
