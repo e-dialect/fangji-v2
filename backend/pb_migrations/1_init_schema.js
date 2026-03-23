@@ -2,8 +2,10 @@
 
 // Migration: Initial schema for Fangji v2 dialect proofreading platform
 migrate((db) => {
+  const dao = new Dao(db)
+
   // 1. Extend the built-in 'users' collection with a 'role' and 'name' field
-  const usersCollection = $app.dao().findCollectionByNameOrId("users")
+  const usersCollection = dao.findCollectionByNameOrId("users")
 
   usersCollection.schema.addField(new SchemaField({
     name: "name",
@@ -22,7 +24,7 @@ migrate((db) => {
     }
   }))
 
-  $app.dao().saveCollection(usersCollection)
+  dao.saveCollection(usersCollection)
 
   // 2. projects collection
   const projects = new Collection({
@@ -35,7 +37,7 @@ migrate((db) => {
     ]
   })
 
-  $app.dao().saveCollection(projects)
+  dao.saveCollection(projects)
 
   // 3. project_files collection
   const projectFiles = new Collection({
@@ -49,7 +51,7 @@ migrate((db) => {
     ]
   })
 
-  $app.dao().saveCollection(projectFiles)
+  dao.saveCollection(projectFiles)
 
   // 4. pages collection
   const pages = new Collection({
@@ -70,11 +72,13 @@ migrate((db) => {
     ]
   })
 
-  $app.dao().saveCollection(pages)
+  dao.saveCollection(pages)
 
 }, (db) => {
+  const dao = new Dao(db)
+
   // Revert: drop collections in reverse order
-  try { $app.dao().deleteCollection($app.dao().findCollectionByNameOrId("pages")) } catch {}
-  try { $app.dao().deleteCollection($app.dao().findCollectionByNameOrId("project_files")) } catch {}
-  try { $app.dao().deleteCollection($app.dao().findCollectionByNameOrId("projects")) } catch {}
+  try { dao.deleteCollection(dao.findCollectionByNameOrId("pages")) } catch {}
+  try { dao.deleteCollection(dao.findCollectionByNameOrId("project_files")) } catch {}
+  try { dao.deleteCollection(dao.findCollectionByNameOrId("projects")) } catch {}
 })
