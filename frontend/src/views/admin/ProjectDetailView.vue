@@ -57,12 +57,13 @@
 
           <!-- CSV upload -->
           <div>
-            <h4 class="font-semibold mb-2">上传 CSV 文件（手动OCR结果）</h4>
+            <h4 class="font-semibold mb-2">上传 CSV/TSV 文件（手动OCR结果）</h4>
             <p class="text-sm text-muted mb-3">
-              上传已处理好的OCR结果CSV文件。<br>
-              必须包含列：<code>page_number</code>（页码）和 <code>ocr_text</code>（识别文本）。
+              上传已处理好的OCR结果CSV或TSV文件，自动识别分隔符。<br>
+              必须包含页码列（<code>page_number</code> 或 <code>page</code>），其余列将合并为识别文本。<br>
+              支持多列格式（如 <code>word</code> + <code>pinyin</code>）及每页多行数据。
             </p>
-            <input type="file" accept=".csv" @change="onCsvSelected" ref="csvInput" style="display:none" />
+            <input type="file" accept=".csv,.tsv" @change="onCsvSelected" ref="csvInput" style="display:none" />
             <button class="btn btn-secondary" @click="$refs.csvInput.click()">选择 CSV 文件</button>
             <span v-if="csvFile" class="text-sm ml-2">{{ csvFile.name }}</span>
             <div v-if="csvFile" class="mt-3">
@@ -223,8 +224,29 @@ async function uploadCsv() {
     const text = await csvFile.value.text()
     const rows = parseCsv(text)
     if (!rows.length) throw new Error('CSV 文件为空或格式不正确')
-    if (!('page_number' in rows[0]) || !('ocr_text' in rows[0])) {
-      throw new Error('CSV 必须包含 page_number 和 ocr_text 列')
+
+    // Detect page number column: prefer 'page_number', fall back to 'page'
+    const firstRow = rows[0]
+    const pageCol = 'page_number' in firstRow ? 'page_number' : 'page' in firstRow ? 'page' : null
+    if (!pageCol) {
+      throw new Error('CSV 必须包含页码列（page_number 或 page）')
+    }
+
+    // Text columns are all columns except the page number column
+    const textCols = Object.keys(firstRow).filter(c => c !== pageCol)
+
+    // Group rows by page number, aggregating text from all text columns
+    const pageMap = new Map()
+    let invalidRows = 0
+    for (const row of rows) {
+      const pageNum = parseInt(row[pageCol], 10)
+      if (isNaN(pageNum)) { invalidRows++; continue }
+      const rowText = textCols.map(c => row[c] || '').filter(Boolean).join('\t')
+      if (pageMap.has(pageNum)) {
+        if (rowText) pageMap.set(pageNum, pageMap.get(pageNum) + '\n' + rowText)
+      } else {
+        pageMap.set(pageNum, rowText)
+      }
     }
 
     // Fetch existing page numbers for this project to detect duplicates
@@ -236,9 +258,7 @@ async function uploadCsv() {
 
     let created = 0
     const skipped = []
-    for (const row of rows) {
-      const pageNum = parseInt(row.page_number, 10)
-      if (isNaN(pageNum)) continue
+    for (const [pageNum, ocrText] of pageMap) {
       if (existingPageNums.has(pageNum)) {
         skipped.push(pageNum)
         continue
@@ -246,7 +266,7 @@ async function uploadCsv() {
       await pb.collection('pages').create({
         project: route.params.id,
         page_number: pageNum,
-        ocr_text: row.ocr_text || '',
+        ocr_text: ocrText,
         status: 'pending'
       })
       created++
@@ -256,6 +276,9 @@ async function uploadCsv() {
     let msg = `成功导入 ${created} 条记录！`
     if (skipped.length) {
       msg += ` 已跳过 ${skipped.length} 条重复页码（第 ${skipped.slice(0, 5).join('、')} 页${skipped.length > 5 ? ' 等' : ''}）。`
+    }
+    if (invalidRows) {
+      msg += ` 已忽略 ${invalidRows} 行无效页码数据。`
     }
     csvSuccess.value = msg
     csvFile.value = null
