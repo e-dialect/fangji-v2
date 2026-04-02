@@ -1,17 +1,35 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
+import pb from '@/lib/pocketbase'
+
+// 获取当前登录状态（直接读 PocketBase，避免时序问题）
+function getAuthState() {
+  const isLoggedIn = pb.authStore.isValid
+  const role = pb.authStore.model?.role || null
+
+  return {
+    isLoggedIn,
+    role,
+    isAdmin: role === 'admin',
+    isProofreader: role === 'proofreader',
+    isReviewer: role === 'reviewer'
+  }
+}
+
+// 登录后该去哪里
+function getHomePath() {
+  const auth = getAuthState()
+
+  if (!auth.isLoggedIn) return '/login'
+  if (auth.isAdmin) return '/admin'
+  if (auth.isProofreader) return '/tasks'
+  if (auth.isReviewer) return '/review'
+  return '/login'
+}
 
 const routes = [
   {
     path: '/',
-    redirect: () => {
-      const auth = useAuthStore()
-      if (!auth.isLoggedIn) return '/login'
-      if (auth.isAdmin) return '/admin'
-      if (auth.isProofreader) return '/tasks'
-      if (auth.isReviewer) return '/review'
-      return '/login'
-    }
+    redirect: () => getHomePath()
   },
   {
     path: '/login',
@@ -25,7 +43,6 @@ const routes = [
     component: () => import('@/views/RegisterView.vue'),
     meta: { guest: true }
   },
-  // Admin routes
   {
     path: '/admin',
     component: () => import('@/views/admin/AdminLayout.vue'),
@@ -48,7 +65,6 @@ const routes = [
       }
     ]
   },
-  // Proofreader routes
   {
     path: '/tasks',
     component: () => import('@/views/proofreader/ProofreaderLayout.vue'),
@@ -66,7 +82,6 @@ const routes = [
       }
     ]
   },
-  // Reviewer routes
   {
     path: '/review',
     component: () => import('@/views/reviewer/ReviewerLayout.vue'),
@@ -95,29 +110,21 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, _from, next) => {
-  const auth = useAuthStore()
+// ✅ 修复核心：直接用 pb.authStore 判断（不是 store）
+router.beforeEach((to) => {
+  const auth = getAuthState()
 
   if (to.meta.guest && auth.isLoggedIn) {
-    if (auth.isAdmin) return next('/admin')
-    if (auth.isProofreader) return next('/tasks')
-    if (auth.isReviewer) return next('/review')
-    return next('/')
+    return getHomePath()
   }
 
   if (to.meta.requiresAuth && !auth.isLoggedIn) {
-    return next('/login')
+    return `/login?redirect=${encodeURIComponent(to.fullPath)}`
   }
 
   if (to.meta.role && auth.role !== to.meta.role) {
-    if (!auth.isLoggedIn) return next('/login')
-    if (auth.isAdmin) return next('/admin')
-    if (auth.isProofreader) return next('/tasks')
-    if (auth.isReviewer) return next('/review')
-    return next('/login')
+    return getHomePath()
   }
-
-  next()
 })
 
 export default router

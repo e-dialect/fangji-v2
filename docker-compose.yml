@@ -9,13 +9,21 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+    working_dir: /app
+    command: npm run dev -- --host 0.0.0.0
     ports:
       - "5173:5173"
     environment:
-      # The browser connects to PocketBase directly, so this must be a
-      # host-accessible address (not the internal Docker service name).
       - VITE_PB_URL=http://localhost:8090
+      # Windows / Docker Desktop 热更新关键
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      # 本地代码挂载 → 实现热更新
+      - ./frontend:/app
+      # 防止 node_modules 被覆盖
+      - /app/node_modules
     depends_on:
       - backend
     restart: unless-stopped
