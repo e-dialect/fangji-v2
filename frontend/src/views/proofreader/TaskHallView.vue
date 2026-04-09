@@ -14,6 +14,7 @@
 
     <!-- All pending tasks -->
     <div v-if="activeTab === 'all'">
+      <div v-if="error" class="alert alert-error mb-3">{{ error }}</div>
       <div v-if="loading" class="text-muted">加载中...</div>
       <div v-else-if="pendingPages.length === 0" class="empty-state">
         <div class="empty-state-icon">✅</div>
@@ -54,6 +55,7 @@
 
     <!-- My claimed tasks -->
     <div v-if="activeTab === 'mine'">
+      <div v-if="error" class="alert alert-error mb-3">{{ error }}</div>
       <div v-if="loading" class="text-muted">加载中...</div>
       <div v-else-if="myPages.length === 0" class="empty-state">
         <div class="empty-state-icon">📝</div>
@@ -106,6 +108,7 @@ import { useAuthStore } from '@/stores/auth'
 const auth = useAuthStore()
 const loading = ref(true)
 const claiming = ref(null)
+const error = ref('')
 const activeTab = ref('all')
 const tabs = [
   { key: 'all', label: '全部待校对任务' },
@@ -126,28 +129,86 @@ onMounted(async () => {
 
 async function loadTasks() {
   loading.value = true
+  error.value = ''
   try {
-    const [pendingResult, mineResult] = await Promise.all([
-      pb.collection('pages').getList(pendingPage.value, PAGE_SIZE, {
-        filter: 'status="pending"',
-        sort: 'page_number',
-        expand: 'project'
-      }),
-      pb.collection('pages').getList(myPage.value, PAGE_SIZE, {
-        filter: `proofreader="${auth.user.id}"`,
-        sort: '-updated',
-        expand: 'project'
-      })
-    ])
-    pendingPages.value = pendingResult.items
-    pendingTotalPages.value = pendingResult.totalPages
-    myPages.value = mineResult.items
-    myTotalPages.value = mineResult.totalPages
+    const userId = pb.authStore.model?.id || auth.user?.id || null
+
+    const pendingPromise = fetchPageListWithFallback({
+      page: pendingPage.value,
+      perPage: PAGE_SIZE,
+      filter: 'status="pending"',
+      sort: 'page_number',
+      expand: 'project'
+    })
+
+    const minePromise = userId
+      ? fetchPageListWithFallback({
+          page: myPage.value,
+          perPage: PAGE_SIZE,
+          filter: `proofreader="${userId}"`,
+          sort: '-updated',
+          expand: 'project'
+        })
+      : Promise.resolve({ items: [], totalPages: 1 })
+
+    const [pendingResult, mineResult] = await Promise.allSettled([pendingPromise, minePromise])
+
+    if (pendingResult.status === 'fulfilled') {
+      pendingPages.value = pendingResult.value.items
+      pendingTotalPages.value = pendingResult.value.totalPages
+    } else {
+      pendingPages.value = []
+      pendingTotalPages.value = 1
+      error.value = formatLoadError('加载待校对任务失败', pendingResult.reason)
+    }
+
+    if (mineResult.status === 'fulfilled') {
+      myPages.value = mineResult.value.items
+      myTotalPages.value = mineResult.value.totalPages
+    } else {
+      myPages.value = []
+      myTotalPages.value = 1
+      if (!error.value) {
+        error.value = formatLoadError('加载我的任务失败', mineResult.reason)
+      }
+    }
   } catch (e) {
-    console.error(e)
+    error.value = formatLoadError('加载任务失败', e)
   } finally {
     loading.value = false
   }
+}
+
+async function fetchPageListWithFallback(params) {
+  try {
+    return await pb.collection('pages').getList(params.page, params.perPage, {
+      filter: params.filter,
+      sort: params.sort,
+      expand: params.expand,
+      // Avoid PocketBase JS SDK auto-cancel when multiple list requests fire in parallel.
+      requestKey: null
+    })
+  } catch (firstErr) {
+    try {
+      // Fallback: retry without relation expansion to avoid expand-related failures.
+      return await pb.collection('pages').getList(params.page, params.perPage, {
+        filter: params.filter,
+        sort: params.sort,
+        requestKey: null
+      })
+    } catch (secondErr) {
+      throw secondErr || firstErr
+    }
+  }
+}
+
+function formatLoadError(prefix, err) {
+  const status = err?.status || err?.response?.status
+  const msg = err?.response?.message || err?.message || ''
+  if (status) {
+    return `${prefix}（${status}）：${msg || '请求失败'}`
+  }
+  return msg ? `${prefix}：${msg}` : `${prefix}，请稍后重试`
 }
 
 async function changePendingPage(p) {
@@ -162,14 +223,22 @@ async function changeMyPage(p) {
 
 async function claimTask(page) {
   claiming.value = page.id
+  error.value = ''
   try {
+    const userId = pb.authStore.model?.id || auth.user?.id
+    if (!userId) {
+      throw new Error('登录状态已失效，请重新登录')
+    }
+
     await pb.collection('pages').update(page.id, {
       status: 'claimed',
-      proofreader: auth.user.id
+      proofreader: userId
+    }, {
+      requestKey: null
     })
     await loadTasks()
   } catch (e) {
-    alert('认领失败：' + (e?.response?.message || e.message))
+    error.value = '认领失败：' + (e?.response?.message || e.message)
     await loadTasks()
   } finally {
     claiming.value = null

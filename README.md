@@ -72,7 +72,8 @@ PocketBase 默认运行在 `http://127.0.0.1:8090`。
    - `projects`：项目基本信息（name, description, admin→users）
    - `project_files`：项目文件（project→projects, file, original_filename, status）
    - `pages`：页面内容与状态（project, project_file, page_number, image, ocr_text, proofread_text, status, proofreader→users, reviewer→users, proofread_at, reviewed_at）
-3. 按照 `backend/pb_hooks/main.pb.js` 中的注释，为每个 Collection 在 Admin UI 手动配置/校验访问规则
+3. Collections API Rules 已由迁移脚本 `backend/pb_migrations/2_apply_access_rules.js` 自动写入，**无需在 Admin UI 手动配置权限规则**
+4. 如果需要调整权限规则，请新增一个新的迁移文件（例如 `3_xxx.js`），不要修改已执行过的迁移文件；PocketBase 不会重复执行同名已应用迁移
 
 ### 2. 启动前端
 
@@ -99,9 +100,9 @@ npm run dev
 
 1. **用户系统**：注册、登录、登出，三种角色
 2. **项目管理**：创建项目、上传 PDF 或 CSV 文件
-3. **任务大厅**：校对员认领待校对页面
-4. **在线校对编辑器**：
-   - 左栏：PDF 原始扫描图
+3. **任务大厅**：校对员认领待校对条目，审核员认领待审核条目
+4. **在线校对/审核编辑器**：
+   - 左栏：项目对应 PDF 预览（支持上下滚动查看）
    - 右栏：可编辑文本 + IPA 虚拟键盘
 5. **IPA 键盘**：支持莆仙方言默认皮肤，包含：
    - 国际音标辅音、元音、鼻化符号
@@ -109,22 +110,28 @@ npm run dev
    - 大词典拼音方案（ü ñ ệ ẹ ê ô）
    - 平话字 BUC（大小写完整集）
 6. **审核流程**：高亮显示修改差异、通过/打回
+7. **管理员条目管理**：支持范围选中（如 `1-33`）、批量下移、批量删除；删除后自动重排条号
 
 ### CSV 文件格式
 
-上传 CSV 时，文件必须包含以下列：
+上传 CSV 时**不再要求固定列名**。系统按“非空行”逐条导入，每一行作为一条待校对文本，并自动生成连续条号（`page_number`）。
 
-| 列名 | 说明 |
-|------|------|
-| `page_number` | 页码（整数） |
-| `ocr_text` | OCR 识别文本 |
-
-示例：
+示例（任意结构均可）：
 ```csv
-page_number,ocr_text
-1,第一页的文字内容...
-2,第二页的文字内容...
+第一条待校对文本
+第二条待校对文本
+第三条待校对文本
 ```
+
+编码兼容：`UTF-8`、`GB18030`、`GBK`（自动识别）。
+
+## 今日更新（2026-04-09）
+
+1. 固化并补齐权限迁移，避免依赖手工配置 Collection API Rules。
+2. CSV 导入改为“任意 CSV 每行一条任务”，并支持中文常见编码自动识别。
+3. 管理员项目详情页新增待校对条目管理：范围选中、批量下移、批量删除、删除后自动重排条号。
+4. 校对端与审核端大厅修复并发请求被自动取消问题（auto-cancellation），并补充可见错误提示。
+5. 校对编辑页与审核编辑页左侧统一改为项目 PDF 预览（可滚动查看）。
 
 ## 技术栈
 

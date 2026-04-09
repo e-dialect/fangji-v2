@@ -1,24 +1,25 @@
 <template>
   <div class="editor-layout">
-    <!-- Left panel: original image -->
+    <!-- Left panel: project PDF -->
     <div class="editor-panel">
       <div class="editor-panel-header">
-        <span>📄 原始扫描图 — 第 {{ page?.page_number }} 页</span>
+        <span>📄 项目原始 PDF — 第 {{ page?.page_number }} 条</span>
         <RouterLink to="/review" class="btn btn-secondary btn-sm">← 返回</RouterLink>
       </div>
-      <div class="editor-panel-body" style="display:flex;align-items:flex-start;justify-content:center">
+      <div class="editor-panel-body" style="padding:0">
         <div v-if="loadingPage" class="text-muted">加载中...</div>
         <div v-else-if="!page" class="alert alert-error">页面不存在</div>
+        <div v-else-if="pdfError" class="alert alert-error" style="margin:1rem">{{ pdfError }}</div>
         <template v-else>
-          <img
-            v-if="imageUrl"
-            :src="imageUrl"
-            alt="原始扫描图"
-            style="max-width:100%;height:auto;border:1px solid var(--gray-200);border-radius:4px"
+          <iframe
+            v-if="pdfUrl"
+            :src="pdfUrl"
+            title="项目原始 PDF 预览"
+            style="width:100%;height:100%;min-height:720px;border:0"
           />
           <div v-else class="empty-state">
-            <div class="empty-state-icon">🖼️</div>
-            <div class="empty-state-text">暂无原始图片</div>
+            <div class="empty-state-icon">📕</div>
+            <div class="empty-state-text">暂无可预览的 PDF 文件</div>
           </div>
         </template>
       </div>
@@ -117,10 +118,17 @@ const saveError = ref('')
 const showRejectForm = ref(false)
 const editedText = ref('')
 const rejectTextareaRef = ref(null)
+const pdfFileRecord = ref(null)
+const pdfError = ref('')
 
-const imageUrl = computed(() => {
-  if (!page.value?.image) return null
-  return pb.files.getUrl(page.value, page.value.image)
+const reviewerId = computed(() => pb.authStore.model?.id || auth.user?.id || null)
+
+const pdfUrl = computed(() => {
+  if (!pdfFileRecord.value?.file) return null
+  const base = pb.files.getUrl(pdfFileRecord.value, pdfFileRecord.value.file)
+  const itemNo = Number(page.value?.page_number)
+  const pageAnchor = Number.isFinite(itemNo) && itemNo > 0 ? `#page=${Math.floor(itemNo)}` : ''
+  return `${base}${pageAnchor}`
 })
 
 const diffParts = computed(() => {
@@ -131,14 +139,15 @@ const diffParts = computed(() => {
 const isFinished = computed(() => {
   return page.value && (
     ['approved', 'rejected'].includes(page.value.status) ||
-    (page.value.status === 'reviewing' && page.value.reviewer !== auth.user.id)
+    (page.value.status === 'reviewing' && page.value.reviewer !== reviewerId.value)
   )
 })
 
 onMounted(async () => {
   try {
-    page.value = await pb.collection('pages').getOne(route.params.id)
+    page.value = await pb.collection('pages').getOne(route.params.id, { expand: 'project_file' })
     editedText.value = page.value.proofread_text || page.value.ocr_text || ''
+    await resolveProjectPdf()
     // Mark as "reviewing" if status is "proofread".
     // The server hook enforces that only one reviewer can transition a page from
     // "proofread" to "reviewing", so if this update fails the page was already
@@ -147,14 +156,15 @@ onMounted(async () => {
       try {
         await pb.collection('pages').update(page.value.id, {
           status: 'reviewing',
-          reviewer: auth.user.id
+          reviewer: reviewerId.value
         })
         page.value.status = 'reviewing'
-        page.value.reviewer = auth.user.id
+        page.value.reviewer = reviewerId.value
       } catch (lockErr) {
         // Re-fetch to get the latest status/reviewer
-        page.value = await pb.collection('pages').getOne(route.params.id)
+        page.value = await pb.collection('pages').getOne(route.params.id, { expand: 'project_file' })
         editedText.value = page.value.proofread_text || page.value.ocr_text || ''
+        await resolveProjectPdf()
         saveError.value = lockErr?.response?.message || '该任务已被其他审核员占用，您可以查看但无法操作。'
       }
     }
@@ -164,6 +174,32 @@ onMounted(async () => {
     loadingPage.value = false
   }
 })
+
+async function resolveProjectPdf() {
+  pdfError.value = ''
+  pdfFileRecord.value = null
+
+  const linked = page.value?.expand?.project_file
+  if (linked?.file) {
+    pdfFileRecord.value = linked
+    return
+  }
+
+  try {
+    const list = await pb.collection('project_files').getFullList({
+      filter: `project="${page.value.project}"`,
+      sort: '-created'
+    })
+    const matched = list.find((r) => typeof r.file === 'string' && r.file.length > 0)
+    if (matched) {
+      pdfFileRecord.value = matched
+      return
+    }
+  } catch (e) {
+    pdfError.value = e?.response?.message || '加载项目 PDF 失败'
+    return
+  }
+}
 
 function insertText(char) {
   const el = rejectTextareaRef.value
@@ -187,7 +223,7 @@ async function approve() {
   try {
     await pb.collection('pages').update(page.value.id, {
       status: 'approved',
-      reviewer: auth.user.id,
+      reviewer: reviewerId.value,
       reviewed_at: new Date().toISOString()
     })
     page.value.status = 'approved'
@@ -206,7 +242,7 @@ async function reject() {
   try {
     await pb.collection('pages').update(page.value.id, {
       status: 'rejected',
-      reviewer: auth.user.id,
+      reviewer: reviewerId.value,
       reviewed_at: new Date().toISOString(),
       proofread_text: editedText.value
     })

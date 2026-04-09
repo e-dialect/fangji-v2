@@ -6,7 +6,7 @@
     </div>
 
     <div v-if="loadingProject" class="text-muted">加载中...</div>
-    <div v-else-if="!project" class="alert alert-error">项目不存在</div>
+    <div v-else-if="projectError" class="alert alert-error">{{ projectError }}</div>
     <template v-else>
       <!-- Project summary -->
       <div class="card mb-6">
@@ -57,10 +57,10 @@
 
           <!-- CSV upload -->
           <div>
-            <h4 class="font-semibold mb-2">上传 CSV 文件（手动OCR结果）</h4>
+            <h4 class="font-semibold mb-2">上传 CSV 文件（每行一条待校对文本）</h4>
             <p class="text-sm text-muted mb-3">
-              上传已处理好的OCR结果CSV文件。<br>
-              必须包含列：<code>page_number</code>（页码）和 <code>ocr_text</code>（识别文本）。
+              接受任意结构的 CSV 文件。<br>
+              系统会按文件中的非空行逐条导入，并自动生成条号。
             </p>
             <input type="file" accept=".csv" @change="onCsvSelected" ref="csvInput" style="display:none" />
             <button class="btn btn-secondary" @click="$refs.csvInput.click()">选择 CSV 文件</button>
@@ -78,31 +78,86 @@
 
       <!-- Pages list -->
       <div class="card">
-        <div class="card-title">页面列表 ({{ pages.length }} 页)</div>
+        <div class="card-title">文本条目列表 ({{ pages.length }} 条)</div>
         <div v-if="loadingPages" class="text-muted text-sm">加载中...</div>
         <div v-else-if="pages.length === 0" class="empty-state">
           <div class="empty-state-icon">📄</div>
-          <div class="empty-state-text">暂无页面，请上传 PDF 或 CSV 文件</div>
+          <div class="empty-state-text">暂无条目，请上传 PDF 或 CSV 文件</div>
         </div>
         <div v-else class="table-wrapper">
+          <div class="flex items-center justify-between mb-3">
+            <div class="text-sm text-muted">
+              已选择 {{ selectedPendingIds.length }} 条待校对条目
+            </div>
+            <div class="flex gap-2">
+              <input
+                v-model.trim="rangeSelectInput"
+                type="text"
+                class="form-control"
+                style="width: 220px;"
+                placeholder="输入范围，如 1-33 或 1,3,5-8"
+                :disabled="mutatingRows"
+              />
+              <button class="btn btn-secondary btn-sm" @click="selectByRange" :disabled="mutatingRows || !rangeSelectInput">
+                范围选中
+              </button>
+              <button class="btn btn-secondary btn-sm" @click="toggleSelectAllPending" :disabled="mutatingRows || pendingPages.length === 0">
+                {{ allPendingSelected ? '取消全选待校对' : '全选待校对' }}
+              </button>
+              <button class="btn btn-secondary btn-sm" @click="moveSelectedRowsDown" :disabled="mutatingRows || selectedPendingIds.length === 0">
+                {{ mutatingRows ? '处理中...' : '批量下移所选' }}
+              </button>
+              <button class="btn btn-danger btn-sm" @click="deleteSelectedRows" :disabled="mutatingRows || selectedPendingIds.length === 0">
+                {{ mutatingRows ? '处理中...' : '批量删除所选' }}
+              </button>
+            </div>
+          </div>
           <table>
             <thead>
               <tr>
-                <th>页码</th>
+                <th style="width:64px">选择</th>
+                <th>条号</th>
                 <th>状态</th>
                 <th>校对员</th>
                 <th>审核员</th>
                 <th>OCR文本预览</th>
+                <th style="width:160px">顺序</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="pg in pages" :key="pg.id">
-                <td>第 {{ pg.page_number }} 页</td>
+              <tr v-for="(pg, idx) in pages" :key="pg.id">
+                <td>
+                  <input
+                    type="checkbox"
+                    :checked="selectedPendingIds.includes(pg.id)"
+                    :disabled="!isPending(pg) || mutatingRows"
+                    @change="toggleRowSelection(pg.id, $event.target.checked)"
+                  />
+                </td>
+                <td>第 {{ formatItemNo(pg.page_number, idx) }} 条</td>
                 <td><span :class="statusBadgeClass(pg.status)" class="badge">{{ statusLabel(pg.status) }}</span></td>
                 <td class="text-sm text-muted">{{ pg.expand?.proofreader?.name || '—' }}</td>
                 <td class="text-sm text-muted">{{ pg.expand?.reviewer?.name || '—' }}</td>
                 <td class="text-sm text-muted" style="max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                   {{ pg.ocr_text?.slice(0, 80) || '—' }}
+                </td>
+                <td>
+                  <div class="flex gap-2">
+                    <button
+                      class="btn btn-secondary btn-sm"
+                      :disabled="!canMoveUp(pg.id) || mutatingRows"
+                      @click="movePendingRow(pg.id, -1)"
+                    >
+                      上移
+                    </button>
+                    <button
+                      class="btn btn-secondary btn-sm"
+                      :disabled="!canMoveDown(pg.id) || mutatingRows"
+                      @click="movePendingRow(pg.id, 1)"
+                    >
+                      下移
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -117,11 +172,12 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import pb from '@/lib/pocketbase'
-import { parseCsv } from '@/lib/csvParser'
 
 const route = useRoute()
+const projectId = Array.isArray(route.params.id) ? route.params.id[0] : route.params.id
 
 const project = ref(null)
+const projectError = ref('')
 const pages = ref([])
 const loadingProject = ref(true)
 const loadingPages = ref(true)
@@ -133,20 +189,46 @@ const pdfFile = ref(null)
 const csvFile = ref(null)
 const uploadingPdf = ref(false)
 const uploadingCsv = ref(false)
+const mutatingRows = ref(false)
 const pdfSuccess = ref(false)
 const pdfError = ref('')
 const csvSuccess = ref('')
 const csvError = ref('')
+const selectedPendingIds = ref([])
+const rangeSelectInput = ref('')
 
 const approvedPct = computed(() => {
   if (!pageStats.value.total) return 0
   return Math.round((pageStats.value.approved / pageStats.value.total) * 100)
 })
 
+const pendingPages = computed(() => pages.value.filter((p) => p.status === 'pending'))
+const allPendingSelected = computed(() => {
+  if (!pendingPages.value.length) return false
+  return pendingPages.value.every((p) => selectedPendingIds.value.includes(p.id))
+})
+const pendingIndexById = computed(() => {
+  const map = {}
+  pendingPages.value.forEach((p, i) => {
+    map[p.id] = i
+  })
+  return map
+})
+
 onMounted(async () => {
   try {
-    project.value = await pb.collection('projects').getOne(route.params.id)
-  } catch {
+    project.value = await pb.collection('projects').getOne(projectId)
+  } catch (e) {
+    const status = e?.status || e?.response?.status
+    if (status === 401) {
+      projectError.value = '登录状态已失效，请重新登录。'
+    } else if (status === 403) {
+      projectError.value = '无权限查看该项目。'
+    } else if (status === 404) {
+      projectError.value = '项目不存在。'
+    } else {
+      projectError.value = e?.response?.message || '加载项目失败，请稍后重试。'
+    }
     loadingProject.value = false
     return
   }
@@ -163,7 +245,7 @@ async function loadPages() {
     let result
     do {
       result = await pb.collection('pages').getList(page, perPage, {
-        filter: `project="${route.params.id}"`,
+        filter: `project="${projectId}"`,
         sort: 'page_number',
         expand: 'proofreader,reviewer'
       })
@@ -171,6 +253,7 @@ async function loadPages() {
       page += 1
     } while (page <= result.totalPages)
     pages.value = allPages
+    selectedPendingIds.value = selectedPendingIds.value.filter((id) => allPages.some((p) => p.id === id && p.status === 'pending'))
     pageStats.value.total = allPages.length
     pageStats.value.proofread = allPages.filter(p => ['proofread', 'reviewing', 'approved'].includes(p.status)).length
     pageStats.value.approved = allPages.filter(p => p.status === 'approved').length
@@ -199,7 +282,7 @@ async function uploadPdf() {
   pdfError.value = ''
   try {
     const formData = new FormData()
-    formData.append('project', route.params.id)
+    formData.append('project', projectId)
     formData.append('file', pdfFile.value)
     formData.append('original_filename', pdfFile.value.name)
     formData.append('status', 'processing')
@@ -220,44 +303,40 @@ async function uploadCsv() {
   csvError.value = ''
   csvSuccess.value = ''
   try {
-    const text = await csvFile.value.text()
-    const rows = parseCsv(text)
-    if (!rows.length) throw new Error('CSV 文件为空或格式不正确')
-    if (!('page_number' in rows[0]) || !('ocr_text' in rows[0])) {
-      throw new Error('CSV 必须包含 page_number 和 ocr_text 列')
-    }
+    const text = await readCsvText(csvFile.value)
+    const lines = text
+      .replace(/^\uFEFF/, '') // Strip UTF-8 BOM if present
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
 
-    // Fetch existing page numbers for this project to detect duplicates
+    if (!lines.length) throw new Error('CSV 文件为空或无法读取有效行')
+
+    // Determine next page number from existing pages.
     const existingPages = await pb.collection('pages').getFullList({
-      filter: `project="${route.params.id}"`,
+      filter: `project="${projectId}"`,
       fields: 'page_number'
     })
-    const existingPageNums = new Set(existingPages.map(p => p.page_number))
+    let nextPageNum = existingPages.reduce((max, p) => {
+      const n = Number(p.page_number)
+      return Number.isFinite(n) ? Math.max(max, n) : max
+    }, 0) + 1
 
     let created = 0
-    const skipped = []
-    for (const row of rows) {
-      const pageNum = parseInt(row.page_number, 10)
-      if (isNaN(pageNum)) continue
-      if (existingPageNums.has(pageNum)) {
-        skipped.push(pageNum)
-        continue
-      }
+    for (const line of lines) {
       await pb.collection('pages').create({
-        project: route.params.id,
-        page_number: pageNum,
-        ocr_text: row.ocr_text || '',
+        project: projectId,
+        page_number: nextPageNum++,
+        ocr_text: line,
         status: 'pending'
       })
       created++
-      existingPageNums.add(pageNum)
     }
 
-    let msg = `成功导入 ${created} 条记录！`
-    if (skipped.length) {
-      msg += ` 已跳过 ${skipped.length} 条重复页码（第 ${skipped.slice(0, 5).join('、')} 页${skipped.length > 5 ? ' 等' : ''}）。`
-    }
-    csvSuccess.value = msg
+    csvSuccess.value = `成功导入 ${created} 条待校对任务！`
+    selectedPendingIds.value = []
     csvFile.value = null
     if (csvInput.value) csvInput.value.value = ''
     await loadPages()
@@ -268,10 +347,247 @@ async function uploadCsv() {
   }
 }
 
+async function readCsvText(file) {
+  const buffer = await file.arrayBuffer()
+  const bytes = new Uint8Array(buffer)
+
+  // Try UTF-8 first, then common Chinese CSV encodings.
+  const candidates = ['utf-8', 'gb18030', 'gbk']
+  let best = ''
+  let bestScore = Number.POSITIVE_INFINITY
+
+  for (const encoding of candidates) {
+    try {
+      const decoded = new TextDecoder(encoding, { fatal: false }).decode(bytes)
+      const score = textGarbleScore(decoded)
+      if (score < bestScore) {
+        best = decoded
+        bestScore = score
+      }
+      // Clean UTF-8 result: return early for speed and stability.
+      if (encoding === 'utf-8' && score === 0) return decoded
+    } catch {
+      // Ignore unsupported encodings and continue fallback.
+    }
+  }
+
+  if (!best) {
+    throw new Error('CSV 文件编码无法识别，请保存为 UTF-8 或 GB18030 后重试')
+  }
+  return best
+}
+
+function textGarbleScore(text) {
+  if (!text) return 0
+  // Replacement char usually indicates decode mismatch.
+  const replacementCount = (text.match(/\uFFFD/g) || []).length
+  // Null chars are also a strong signal of broken decoding.
+  const nullCount = (text.match(/\u0000/g) || []).length
+  return replacementCount * 10 + nullCount
+}
+
+function isPending(row) {
+  return row?.status === 'pending'
+}
+
+function toggleRowSelection(id, checked) {
+  if (mutatingRows.value) return
+  if (checked) {
+    if (!selectedPendingIds.value.includes(id)) selectedPendingIds.value.push(id)
+    return
+  }
+  selectedPendingIds.value = selectedPendingIds.value.filter((x) => x !== id)
+}
+
+function toggleSelectAllPending() {
+  if (mutatingRows.value) return
+  if (allPendingSelected.value) {
+    selectedPendingIds.value = []
+    return
+  }
+  selectedPendingIds.value = pendingPages.value.map((p) => p.id)
+}
+
+function canMoveUp(id) {
+  const idx = pendingIndexById.value[id]
+  return Number.isInteger(idx) && idx > 0
+}
+
+function canMoveDown(id) {
+  const idx = pendingIndexById.value[id]
+  return Number.isInteger(idx) && idx < pendingPages.value.length - 1
+}
+
+async function movePendingRow(id, direction) {
+  if (mutatingRows.value) return
+  const idx = pendingIndexById.value[id]
+  if (!Number.isInteger(idx)) return
+  const targetIdx = idx + direction
+  if (targetIdx < 0 || targetIdx >= pendingPages.value.length) return
+
+  const current = pendingPages.value[idx]
+  const target = pendingPages.value[targetIdx]
+  if (!current || !target) return
+
+  mutatingRows.value = true
+  try {
+    const maxPageNum = pages.value.reduce((max, p) => {
+      const n = Number(p.page_number)
+      return Number.isFinite(n) ? Math.max(max, n) : max
+    }, 0)
+    const tempPageNum = maxPageNum + 1
+    const currentPageNum = Number(current.page_number)
+    const targetPageNum = Number(target.page_number)
+
+    await pb.collection('pages').update(current.id, { page_number: tempPageNum })
+    await pb.collection('pages').update(target.id, { page_number: currentPageNum })
+    await pb.collection('pages').update(current.id, { page_number: targetPageNum })
+    await loadPages()
+  } catch (e) {
+    alert(e?.response?.message || '顺序调整失败，请重试')
+  } finally {
+    mutatingRows.value = false
+  }
+}
+
+function parseRangeInput(text, max) {
+  const raw = String(text || '').trim()
+  if (!raw) return []
+  const indices = new Set()
+  const parts = raw.split(',').map((s) => s.trim()).filter(Boolean)
+
+  for (const part of parts) {
+    if (part.includes('-')) {
+      const [startStr, endStr] = part.split('-').map((s) => s.trim())
+      const start = Number(startStr)
+      const end = Number(endStr)
+      if (!Number.isInteger(start) || !Number.isInteger(end)) continue
+      const from = Math.max(1, Math.min(start, end))
+      const to = Math.min(max, Math.max(start, end))
+      for (let i = from; i <= to; i++) indices.add(i - 1)
+    } else {
+      const n = Number(part)
+      if (!Number.isInteger(n)) continue
+      if (n >= 1 && n <= max) indices.add(n - 1)
+    }
+  }
+
+  return Array.from(indices).sort((a, b) => a - b)
+}
+
+function selectByRange() {
+  if (mutatingRows.value) return
+  const indexes = parseRangeInput(rangeSelectInput.value, pages.value.length)
+  if (!indexes.length) {
+    alert('范围格式无效，请输入如 1-33 或 1,3,5-8')
+    return
+  }
+
+  const ids = []
+  for (const idx of indexes) {
+    const row = pages.value[idx]
+    if (row && isPending(row)) ids.push(row.id)
+  }
+
+  selectedPendingIds.value = ids
+  if (!ids.length) {
+    alert('该范围内没有可操作的待校对条目（仅 pending 可选）')
+  }
+}
+
+async function applyPendingOrderByIds(orderedPendingIds) {
+  const pending = pendingPages.value
+  if (!pending.length) return
+  const pageNumbers = pending.map((p) => Number(p.page_number)).sort((a, b) => a - b)
+  const pendingById = Object.fromEntries(pending.map((p) => [p.id, p]))
+
+  for (let i = 0; i < orderedPendingIds.length; i++) {
+    const id = orderedPendingIds[i]
+    const row = pendingById[id]
+    if (!row) continue
+    const nextNo = pageNumbers[i]
+    if (Number(row.page_number) !== nextNo) {
+      await pb.collection('pages').update(id, { page_number: nextNo })
+    }
+  }
+}
+
+async function moveSelectedRowsDown() {
+  if (mutatingRows.value || selectedPendingIds.value.length === 0) return
+  const pending = pendingPages.value
+  if (!pending.length) return
+
+  const ids = pending.map((p) => p.id)
+  const selectedSet = new Set(selectedPendingIds.value)
+  const reordered = [...ids]
+
+  let moved = false
+  for (let i = reordered.length - 2; i >= 0; i--) {
+    const curr = reordered[i]
+    const next = reordered[i + 1]
+    if (selectedSet.has(curr) && !selectedSet.has(next)) {
+      reordered[i] = next
+      reordered[i + 1] = curr
+      moved = true
+    }
+  }
+
+  if (!moved) return
+
+  mutatingRows.value = true
+  try {
+    await applyPendingOrderByIds(reordered)
+    await loadPages()
+  } catch (e) {
+    alert(e?.response?.message || '批量下移失败，请重试')
+  } finally {
+    mutatingRows.value = false
+  }
+}
+
+async function resequenceAllRows() {
+  const all = await pb.collection('pages').getFullList({
+    filter: `project="${projectId}"`,
+    sort: 'page_number',
+    fields: 'id,page_number'
+  })
+  for (let i = 0; i < all.length; i++) {
+    const desired = i + 1
+    if (Number(all[i].page_number) !== desired) {
+      await pb.collection('pages').update(all[i].id, { page_number: desired })
+    }
+  }
+}
+
+async function deleteSelectedRows() {
+  if (mutatingRows.value || selectedPendingIds.value.length === 0) return
+  const ok = window.confirm(`确认删除已选择的 ${selectedPendingIds.value.length} 条待校对条目吗？此操作不可恢复。`)
+  if (!ok) return
+
+  mutatingRows.value = true
+  try {
+    await Promise.all(selectedPendingIds.value.map((id) => pb.collection('pages').delete(id)))
+    selectedPendingIds.value = []
+    await resequenceAllRows()
+    await loadPages()
+  } catch (e) {
+    alert(e?.response?.message || '批量删除失败，请重试')
+  } finally {
+    mutatingRows.value = false
+  }
+}
+
 function statusLabel(s) {
   const map = { pending: '待校对', claimed: '已认领', proofreading: '校对中', proofread: '待审核', reviewing: '审核中', approved: '已通过', rejected: '已打回' }
   return map[s] || s
 }
+
+function formatItemNo(pageNumber, fallbackIndex) {
+  const n = Number(pageNumber)
+  if (Number.isFinite(n) && n > 0) return Math.floor(n)
+  return fallbackIndex + 1
+}
+
 function statusBadgeClass(s) {
   return `badge-${s}`
 }

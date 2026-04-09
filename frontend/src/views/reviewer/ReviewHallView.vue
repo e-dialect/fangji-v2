@@ -14,6 +14,7 @@
 
     <!-- All proofread tasks waiting for review -->
     <div v-if="activeTab === 'all'">
+      <div v-if="error" class="alert alert-error mb-3">{{ error }}</div>
       <div v-if="loading" class="text-muted">加载中...</div>
       <div v-else-if="pendingReview.length === 0" class="empty-state">
         <div class="empty-state-icon">✅</div>
@@ -54,6 +55,7 @@
 
     <!-- My reviewed tasks -->
     <div v-if="activeTab === 'mine'">
+      <div v-if="error" class="alert alert-error mb-3">{{ error }}</div>
       <div v-if="loading" class="text-muted">加载中...</div>
       <div v-else-if="myReviewed.length === 0" class="empty-state">
         <div class="empty-state-icon">📋</div>
@@ -100,6 +102,7 @@ import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
 const loading = ref(true)
+const error = ref('')
 const activeTab = ref('all')
 const tabs = [
   { key: 'all', label: '全部待审核任务' },
@@ -120,28 +123,82 @@ onMounted(async () => {
 
 async function loadTasks() {
   loading.value = true
+  error.value = ''
   try {
-    const [pendingResult, mineResult] = await Promise.all([
-      pb.collection('pages').getList(pendingPage.value, PAGE_SIZE, {
-        filter: 'status="proofread"',
-        sort: 'page_number',
-        expand: 'project,proofreader'
-      }),
-      pb.collection('pages').getList(myPage.value, PAGE_SIZE, {
-        filter: `reviewer="${auth.user.id}"`,
-        sort: '-updated',
-        expand: 'project'
-      })
-    ])
-    pendingReview.value = pendingResult.items
-    pendingTotalPages.value = pendingResult.totalPages
-    myReviewed.value = mineResult.items
-    myTotalPages.value = mineResult.totalPages
+    const userId = pb.authStore.model?.id || auth.user?.id || null
+
+    const pendingPromise = fetchPageListWithFallback({
+      page: pendingPage.value,
+      perPage: PAGE_SIZE,
+      filter: 'status="proofread"',
+      sort: 'page_number',
+      expand: 'project,proofreader'
+    })
+
+    const minePromise = userId
+      ? fetchPageListWithFallback({
+          page: myPage.value,
+          perPage: PAGE_SIZE,
+          filter: `reviewer="${userId}"`,
+          sort: '-updated',
+          expand: 'project'
+        })
+      : Promise.resolve({ items: [], totalPages: 1 })
+
+    const [pendingResult, mineResult] = await Promise.allSettled([pendingPromise, minePromise])
+
+    if (pendingResult.status === 'fulfilled') {
+      pendingReview.value = pendingResult.value.items
+      pendingTotalPages.value = pendingResult.value.totalPages
+    } else {
+      pendingReview.value = []
+      pendingTotalPages.value = 1
+      error.value = formatLoadError('加载待审核任务失败', pendingResult.reason)
+    }
+
+    if (mineResult.status === 'fulfilled') {
+      myReviewed.value = mineResult.value.items
+      myTotalPages.value = mineResult.value.totalPages
+    } else {
+      myReviewed.value = []
+      myTotalPages.value = 1
+      if (!error.value) {
+        error.value = formatLoadError('加载我的审核任务失败', mineResult.reason)
+      }
+    }
   } catch (e) {
-    console.error(e)
+    error.value = formatLoadError('加载审核任务失败', e)
   } finally {
     loading.value = false
   }
+}
+
+async function fetchPageListWithFallback(params) {
+  try {
+    return await pb.collection('pages').getList(params.page, params.perPage, {
+      filter: params.filter,
+      sort: params.sort,
+      expand: params.expand,
+      requestKey: null
+    })
+  } catch (firstErr) {
+    try {
+      return await pb.collection('pages').getList(params.page, params.perPage, {
+        filter: params.filter,
+        sort: params.sort,
+        requestKey: null
+      })
+    } catch (secondErr) {
+      throw secondErr || firstErr
+    }
+  }
+}
+
+function formatLoadError(prefix, err) {
+  const status = err?.status || err?.response?.status
+  const msg = err?.response?.message || err?.message || ''
+  if (status) return `${prefix}（${status}）：${msg || '请求失败'}`
+  return msg ? `${prefix}：${msg}` : `${prefix}，请稍后重试`
 }
 
 async function changePendingPage(p) {
