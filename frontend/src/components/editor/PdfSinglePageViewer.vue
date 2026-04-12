@@ -1,9 +1,9 @@
 <template>
   <div class="pdf-viewer">
-    <div v-if="loading" class="text-muted" style="padding:1rem">PDF 加载中...</div>
-    <div v-else-if="error" class="alert alert-error" style="margin:1rem">{{ error }}</div>
+    <div v-if="error" class="alert alert-error" style="margin:1rem">{{ error }}</div>
     <div v-else class="pdf-canvas-wrap" ref="wrapRef">
       <canvas ref="canvasRef" class="pdf-canvas"></canvas>
+      <div v-if="loading" class="pdf-loading-mask">PDF 加载中...</div>
       <div class="pdf-watermark-layer" v-if="watermarkText">
         <span
           v-for="n in 18"
@@ -197,6 +197,18 @@ onBeforeUnmount(async () => {
 .pdf-canvas {
   display: block;
   background: #fff;
+}
+
+.pdf-loading-mask {
+  position: absolute;
+  inset: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(248, 250, 252, 0.68);
+  color: #475569;
+  font-size: 14px;
+  pointer-events: none;
 }
 
 .pdf-watermark-layer {

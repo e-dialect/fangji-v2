@@ -3,7 +3,7 @@
     <!-- Left panel: project PDF -->
     <div class="editor-panel">
       <div class="editor-panel-header">
-        <span>📄 项目原始 PDF（仅可查看第 {{ allowedPdfPages[0] }}、{{ allowedPdfPages[1] }} 页）</span>
+        <span>📄 项目原始 PDF</span>
         <div class="flex gap-2">
           <button
             class="btn btn-secondary btn-sm"
