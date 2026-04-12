@@ -127,19 +127,43 @@ async function renderCurrentPage() {
     const wrapWidth = Math.max(1, wrapRef.value.clientWidth - 16)
     const cssScale = wrapWidth / baseViewport.width
     const viewport = page.getViewport({ scale: cssScale })
+    // Hide PDF header by cropping a fixed top band (in PDF points) after scaling.
+    const headerCropAtScale1 = 48
+    const cropCssPx = Math.max(0, Math.min(viewport.height * 0.25, headerCropAtScale1 * cssScale))
 
     const canvas = canvasRef.value
     const context = canvas.getContext('2d')
     const dpr = window.devicePixelRatio || 1
-    canvas.width = Math.floor(viewport.width * dpr)
-    canvas.height = Math.floor(viewport.height * dpr)
+    const targetCssWidth = Math.floor(viewport.width)
+    const targetCssHeight = Math.max(1, Math.floor(viewport.height - cropCssPx))
+    canvas.width = Math.floor(targetCssWidth * dpr)
+    canvas.height = Math.floor(targetCssHeight * dpr)
     canvas.style.width = `${Math.floor(viewport.width)}px`
-    canvas.style.height = `${Math.floor(viewport.height)}px`
+    canvas.style.height = `${targetCssHeight}px`
     context.setTransform(dpr, 0, 0, dpr, 0, 0)
+    context.clearRect(0, 0, targetCssWidth, targetCssHeight)
 
-    renderTask = page.render({ canvasContext: context, viewport })
+    const tempCanvas = document.createElement('canvas')
+    const tempContext = tempCanvas.getContext('2d')
+    tempCanvas.width = Math.floor(viewport.width * dpr)
+    tempCanvas.height = Math.floor(viewport.height * dpr)
+    tempContext.setTransform(dpr, 0, 0, dpr, 0, 0)
+
+    renderTask = page.render({ canvasContext: tempContext, viewport })
     await renderTask.promise
     renderTask = null
+
+    context.drawImage(
+      tempCanvas,
+      0,
+      Math.floor(cropCssPx * dpr),
+      canvas.width,
+      canvas.height,
+      0,
+      0,
+      targetCssWidth,
+      targetCssHeight
+    )
   } catch (e) {
     if (e?.name !== 'RenderingCancelledException') {
       error.value = e?.message || '渲染失败'
