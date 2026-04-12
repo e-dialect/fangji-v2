@@ -76,11 +76,46 @@ onRecordBeforeUpdateRequest((e) => {
   }
 
   const oldStatus = current.getString("status")
+  const authId = e.httpContext?.get && e.httpContext.get("authRecord")?.id
+  const newProofreader = e.record.getString("proofreader") || authId
+  const newReviewer = e.record.getString("reviewer") || authId
 
   if (newStatus === "claimed" && oldStatus !== "pending") {
     throw new BadRequestError("该任务已被其他校对员认领")
   }
   if (newStatus === "reviewing" && oldStatus !== "proofread") {
     throw new BadRequestError("该任务已被其他审核员占用")
+  }
+
+  if (newStatus === "claimed") {
+    if (!newProofreader) {
+      throw new BadRequestError("认领任务失败：缺少校对员身份")
+    }
+    const activeProofreaderTasks = $app.dao().findRecordsByFilter(
+      "pages",
+      `proofreader = "${newProofreader}" && (status = "claimed" || status = "proofreading" || status = "rejected")`,
+      "-updated",
+      11,
+      0
+    )
+    if (activeProofreaderTasks.length >= 10) {
+      throw new BadRequestError("最多只能同时接取10个校对任务，请先完成或提交已有任务")
+    }
+  }
+
+  if (newStatus === "reviewing") {
+    if (!newReviewer) {
+      throw new BadRequestError("接取审核任务失败：缺少审核员身份")
+    }
+    const activeReviewerTasks = $app.dao().findRecordsByFilter(
+      "pages",
+      `reviewer = "${newReviewer}" && status = "reviewing"`,
+      "-updated",
+      11,
+      0
+    )
+    if (activeReviewerTasks.length >= 10) {
+      throw new BadRequestError("最多只能同时接取10个审核任务，请先完成已有审核")
+    }
   }
 }, "pages")

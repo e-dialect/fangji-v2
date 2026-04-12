@@ -3,8 +3,18 @@
     <!-- Left panel: project PDF -->
     <div class="editor-panel">
       <div class="editor-panel-header">
-        <span>📄 项目原始 PDF — 第 {{ page?.page_number }} 条</span>
+        <span>📄 项目原始 PDF（仅可查看第 {{ allowedPdfPages[0] }}、{{ allowedPdfPages[1] }} 页）</span>
         <div class="flex gap-2">
+          <button
+            class="btn btn-secondary btn-sm"
+            :disabled="currentPdfPage <= allowedPdfPages[0]"
+            @click="switchPdfPage(-1)"
+          >上一页</button>
+          <button
+            class="btn btn-secondary btn-sm"
+            :disabled="currentPdfPage >= allowedPdfPages[1]"
+            @click="switchPdfPage(1)"
+          >下一页</button>
           <RouterLink to="/tasks" class="btn btn-secondary btn-sm">← 返回</RouterLink>
         </div>
       </div>
@@ -13,11 +23,11 @@
         <div v-else-if="!page" class="alert alert-error">页面不存在</div>
         <div v-else-if="pdfError" class="alert alert-error" style="margin:1rem">{{ pdfError }}</div>
         <template v-else>
-          <iframe
+          <PdfSinglePageViewer
             v-if="pdfUrl"
             :src="pdfUrl"
-            title="项目原始 PDF 预览"
-            style="width:100%;height:100%;min-height:720px;border:0"
+            :page-number="currentPdfPage"
+            :watermark-user-id="currentUserId"
           />
           <div v-else class="empty-state">
             <div class="empty-state-icon">📕</div>
@@ -69,6 +79,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import pb from '@/lib/pocketbase'
 import IpaKeyboard from '@/components/editor/IpaKeyboard.vue'
+import PdfSinglePageViewer from '@/components/editor/PdfSinglePageViewer.vue'
 
 const route = useRoute()
 
@@ -81,18 +92,27 @@ const saveError = ref('')
 const textareaRef = ref(null)
 const pdfFileRecord = ref(null)
 const pdfError = ref('')
+const currentPdfPage = ref(1)
+const currentUserId = computed(() => pb.authStore.model?.id || '')
+
+const basePdfPage = computed(() => {
+  const pageNo = Number(page.value?.pdf_page)
+  if (Number.isInteger(pageNo) && pageNo > 0) return pageNo
+  const fallback = Number(page.value?.page_number)
+  return Number.isInteger(fallback) && fallback > 0 ? fallback : 1
+})
+
+const allowedPdfPages = computed(() => [basePdfPage.value, basePdfPage.value + 1])
 
 const pdfUrl = computed(() => {
   if (!pdfFileRecord.value?.file) return null
-  const base = pb.files.getUrl(pdfFileRecord.value, pdfFileRecord.value.file)
-  const itemNo = Number(page.value?.page_number)
-  const pageAnchor = Number.isFinite(itemNo) && itemNo > 0 ? `#page=${Math.floor(itemNo)}` : ''
-  return `${base}${pageAnchor}`
+  return pb.files.getUrl(pdfFileRecord.value, pdfFileRecord.value.file)
 })
 
 onMounted(async () => {
   try {
     page.value = await pb.collection('pages').getOne(route.params.id, { expand: 'project_file' })
+    currentPdfPage.value = basePdfPage.value
     // Prefill with proofread_text if already started, else ocr_text
     editedText.value = page.value.proofread_text || page.value.ocr_text || ''
     await resolveProjectPdf()
@@ -134,6 +154,16 @@ async function resolveProjectPdf() {
     pdfError.value = e?.response?.message || '加载项目 PDF 失败'
     return
   }
+}
+
+function clampPdfPage(pageNo) {
+  const min = allowedPdfPages.value[0]
+  const max = allowedPdfPages.value[1]
+  return Math.max(min, Math.min(max, Number(pageNo) || min))
+}
+
+function switchPdfPage(delta) {
+  currentPdfPage.value = clampPdfPage(currentPdfPage.value + delta)
 }
 
 function onTextChange() {

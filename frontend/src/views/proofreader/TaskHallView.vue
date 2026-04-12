@@ -14,6 +14,9 @@
 
     <!-- All pending tasks -->
     <div v-if="activeTab === 'all'">
+      <div v-if="claimLimitReached" class="alert alert-error mb-3">
+        当前已接取 {{ myActiveClaimedCount }} / {{ MAX_ACTIVE_TASKS }} 个任务，请先完成部分任务后再继续认领。
+      </div>
       <div v-if="error" class="alert alert-error mb-3">{{ error }}</div>
       <div v-if="loading" class="text-muted">加载中...</div>
       <div v-else-if="pendingPages.length === 0" class="empty-state">
@@ -37,7 +40,7 @@
                 <td class="text-sm">{{ pg.expand?.project?.name || pg.project }}</td>
                 <td><span class="badge badge-pending">待校对</span></td>
                 <td>
-                  <button class="btn btn-primary btn-sm" @click="claimTask(pg)" :disabled="claiming === pg.id">
+                  <button class="btn btn-primary btn-sm" @click="claimTask(pg)" :disabled="claiming === pg.id || claimLimitReached">
                     {{ claiming === pg.id ? '认领中...' : '认领任务' }}
                   </button>
                 </td>
@@ -122,6 +125,9 @@ const pendingTotalPages = ref(1)
 const myPage = ref(1)
 const myTotalPages = ref(1)
 const PAGE_SIZE = 50
+const MAX_ACTIVE_TASKS = 10
+const myActiveClaimedCount = ref(0)
+const claimLimitReached = ref(false)
 
 onMounted(async () => {
   await loadTasks()
@@ -151,7 +157,15 @@ async function loadTasks() {
         })
       : Promise.resolve({ items: [], totalPages: 1 })
 
-    const [pendingResult, mineResult] = await Promise.allSettled([pendingPromise, minePromise])
+    const activeCountPromise = userId
+      ? pb.collection('pages').getList(1, 1, {
+          filter: `proofreader="${userId}" && (status="claimed" || status="proofreading" || status="rejected")`,
+          fields: 'id',
+          requestKey: null
+        })
+      : Promise.resolve({ totalItems: 0 })
+
+    const [pendingResult, mineResult, activeCountResult] = await Promise.allSettled([pendingPromise, minePromise, activeCountPromise])
 
     if (pendingResult.status === 'fulfilled') {
       pendingPages.value = pendingResult.value.items
@@ -171,6 +185,14 @@ async function loadTasks() {
       if (!error.value) {
         error.value = formatLoadError('加载我的任务失败', mineResult.reason)
       }
+    }
+
+    if (activeCountResult.status === 'fulfilled') {
+      myActiveClaimedCount.value = Number(activeCountResult.value.totalItems || 0)
+      claimLimitReached.value = myActiveClaimedCount.value >= MAX_ACTIVE_TASKS
+    } else {
+      myActiveClaimedCount.value = 0
+      claimLimitReached.value = false
     }
   } catch (e) {
     error.value = formatLoadError('加载任务失败', e)
@@ -222,6 +244,10 @@ async function changeMyPage(p) {
 }
 
 async function claimTask(page) {
+  if (claimLimitReached.value) {
+    error.value = `最多只能同时接取 ${MAX_ACTIVE_TASKS} 个任务，请先完成已有任务`
+    return
+  }
   claiming.value = page.id
   error.value = ''
   try {

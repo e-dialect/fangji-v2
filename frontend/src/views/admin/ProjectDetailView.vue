@@ -59,8 +59,8 @@
           <div>
             <h4 class="font-semibold mb-2">上传 CSV 文件（每行一条待校对文本）</h4>
             <p class="text-sm text-muted mb-3">
-              接受任意结构的 CSV 文件。<br>
-              系统会按文件中的非空行逐条导入，并自动生成条号。
+              CSV 需包含字段 <code>PDF页码</code>。<br>
+              系统会将每行去掉 <code>PDF页码</code> 字段后的内容导入为新条目。
             </p>
             <input type="file" accept=".csv" @change="onCsvSelected" ref="csvInput" style="display:none" />
             <button class="btn btn-secondary" @click="$refs.csvInput.click()">选择 CSV 文件</button>
@@ -172,6 +172,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import pb from '@/lib/pocketbase'
+import { parseCsv } from '@/lib/csvParser'
 
 const route = useRoute()
 const projectId = Array.isArray(route.params.id) ? route.params.id[0] : route.params.id
@@ -304,15 +305,14 @@ async function uploadCsv() {
   csvSuccess.value = ''
   try {
     const text = await readCsvText(csvFile.value)
-    const lines = text
-      .replace(/^\uFEFF/, '') // Strip UTF-8 BOM if present
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
+    const rows = parseCsv(text.replace(/^\uFEFF/, ''))
+    if (!rows.length) throw new Error('CSV 文件为空或无法读取有效行')
 
-    if (!lines.length) throw new Error('CSV 文件为空或无法读取有效行')
+    const headerKeys = Object.keys(rows[0] || {})
+    const pdfPageKey = headerKeys.find((k) => k.trim() === 'PDF页码')
+    if (!pdfPageKey) {
+      throw new Error('CSV 缺少必填字段：PDF页码')
+    }
 
     // Determine next page number from existing pages.
     const existingPages = await pb.collection('pages').getFullList({
@@ -325,11 +325,30 @@ async function uploadCsv() {
     }, 0) + 1
 
     let created = 0
-    for (const line of lines) {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      const pdfPageRaw = String(row[pdfPageKey] ?? '').trim()
+      const pdfPage = Number(pdfPageRaw)
+      if (!Number.isInteger(pdfPage) || pdfPage <= 0) {
+        throw new Error(`第 ${i + 2} 行的 PDF页码 无效，请填写正整数`)
+      }
+
+      const parts = []
+      for (const [key, value] of Object.entries(row)) {
+        if (key.trim() === 'PDF页码') continue
+        const textPart = String(value ?? '').trim()
+        if (textPart) parts.push(textPart)
+      }
+      const entryText = parts.join(' ').trim()
+      if (!entryText) {
+        throw new Error(`第 ${i + 2} 行去掉 PDF页码 后内容为空`)
+      }
+
       await pb.collection('pages').create({
         project: projectId,
         page_number: nextPageNum++,
-        ocr_text: line,
+        pdf_page: pdfPage,
+        ocr_text: entryText,
         status: 'pending'
       })
       created++
