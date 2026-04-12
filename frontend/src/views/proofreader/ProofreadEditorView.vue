@@ -42,6 +42,16 @@
       <div class="editor-panel-header">
         <span>✏️ 校对编辑区</span>
         <div class="flex gap-2">
+          <button
+            class="btn btn-secondary btn-sm"
+            @click="gotoPrevTask"
+            :disabled="!hasNeighborTasks || saving || loadingPage"
+          >上一条任务</button>
+          <button
+            class="btn btn-secondary btn-sm"
+            @click="gotoNextTask"
+            :disabled="!hasNeighborTasks || saving || loadingPage"
+          >下一条任务</button>
           <button class="btn btn-success btn-sm" @click="submitProofread" :disabled="saving">
             {{ saving ? '提交中...' : '✓ 提交校对' }}
           </button>
@@ -75,13 +85,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
-import { useRoute, RouterLink } from 'vue-router'
+import { ref, watch, computed } from 'vue'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import pb from '@/lib/pocketbase'
 import IpaKeyboard from '@/components/editor/IpaKeyboard.vue'
 import PdfSinglePageViewer from '@/components/editor/PdfSinglePageViewer.vue'
 
 const route = useRoute()
+const router = useRouter()
 
 const page = ref(null)
 const loadingPage = ref(true)
@@ -94,6 +105,9 @@ const pdfFileRecord = ref(null)
 const pdfError = ref('')
 const currentPdfPage = ref(1)
 const currentUserId = computed(() => pb.authStore.model?.id || '')
+const prevTaskId = ref('')
+const nextTaskId = ref('')
+const hasNeighborTasks = computed(() => Boolean(prevTaskId.value || nextTaskId.value))
 
 const basePdfPage = computed(() => {
   const pageNo = Number(page.value?.pdf_page)
@@ -109,24 +123,39 @@ const pdfUrl = computed(() => {
   return pb.files.getUrl(pdfFileRecord.value, pdfFileRecord.value.file)
 })
 
-onMounted(async () => {
+watch(() => route.params.id, async () => {
+  await loadPage()
+}, { immediate: true })
+
+async function loadPage() {
+  loadingPage.value = true
+  page.value = null
+  prevTaskId.value = ''
+  nextTaskId.value = ''
+  pdfFileRecord.value = null
+  pdfError.value = ''
+  saveError.value = ''
+  saved.value = false
+
   try {
     page.value = await pb.collection('pages').getOne(route.params.id, { expand: 'project_file' })
     currentPdfPage.value = basePdfPage.value
     // Prefill with proofread_text if already started, else ocr_text
     editedText.value = page.value.proofread_text || page.value.ocr_text || ''
     await resolveProjectPdf()
+    await loadNeighbors()
     // Mark as "proofreading" if still "claimed"
     if (page.value.status === 'claimed') {
       await pb.collection('pages').update(page.value.id, { status: 'proofreading' })
       page.value.status = 'proofreading'
+      await loadNeighbors()
     }
   } catch (e) {
     console.error(e)
   } finally {
     loadingPage.value = false
   }
-})
+}
 
 async function resolveProjectPdf() {
   pdfError.value = ''
@@ -166,6 +195,40 @@ function switchPdfPage(delta) {
   currentPdfPage.value = clampPdfPage(currentPdfPage.value + delta)
 }
 
+async function loadNeighbors() {
+  const userId = currentUserId.value
+  if (!page.value?.project || !userId) {
+    prevTaskId.value = ''
+    nextTaskId.value = ''
+    return
+  }
+  const list = await pb.collection('pages').getFullList({
+    filter: `project="${page.value.project}" && proofreader="${userId}" && (status="claimed" || status="proofreading" || status="rejected")`,
+    sort: 'page_number',
+    fields: 'id,page_number'
+  })
+  const idx = list.findIndex((item) => item.id === page.value.id)
+  if (idx < 0 || list.length <= 1) {
+    prevTaskId.value = ''
+    nextTaskId.value = ''
+    return
+  }
+  const prevIdx = (idx - 1 + list.length) % list.length
+  const nextIdx = (idx + 1) % list.length
+  prevTaskId.value = list[prevIdx].id
+  nextTaskId.value = list[nextIdx].id
+}
+
+function gotoPrevTask() {
+  if (!prevTaskId.value) return
+  router.push(`/tasks/${prevTaskId.value}/edit`)
+}
+
+function gotoNextTask() {
+  if (!nextTaskId.value) return
+  router.push(`/tasks/${nextTaskId.value}/edit`)
+}
+
 function onTextChange() {
   saved.value = false
   saveError.value = ''
@@ -193,14 +256,20 @@ async function submitProofread() {
   saving.value = true
   saved.value = false
   saveError.value = ''
+  const targetNextId = nextTaskId.value
   try {
     await pb.collection('pages').update(page.value.id, {
       proofread_text: editedText.value,
       status: 'proofread',
       proofread_at: new Date().toISOString()
     })
+    if (targetNextId) {
+      await router.push(`/tasks/${targetNextId}/edit`)
+      return
+    }
     saved.value = true
     page.value.status = 'proofread'
+    await loadNeighbors()
   } catch (e) {
     saveError.value = e?.response?.message || '提交失败，请重试'
   } finally {

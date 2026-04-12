@@ -41,11 +41,23 @@
     <div class="editor-panel">
       <div class="editor-panel-header">
         <span>🔍 校对内容审核</span>
-        <div v-if="!isFinished" class="flex gap-2">
-          <button class="btn btn-success btn-sm" @click="approve" :disabled="saving">✓ 通过</button>
-          <button class="btn btn-danger btn-sm" @click="showRejectForm = !showRejectForm" :disabled="saving">✗ 打回修改</button>
+        <div class="flex gap-2">
+          <button
+            class="btn btn-secondary btn-sm"
+            @click="gotoPrevTask"
+            :disabled="!hasNeighborTasks || saving || loadingPage"
+          >上一条任务</button>
+          <button
+            class="btn btn-secondary btn-sm"
+            @click="gotoNextTask"
+            :disabled="!hasNeighborTasks || saving || loadingPage"
+          >下一条任务</button>
+          <template v-if="!isFinished">
+            <button class="btn btn-success btn-sm" @click="approve" :disabled="saving">✓ 通过</button>
+            <button class="btn btn-danger btn-sm" @click="showRejectForm = !showRejectForm" :disabled="saving">✗ 打回修改</button>
+          </template>
+          <span v-else :class="`badge badge-${page.status}`" style="font-size:.9rem">{{ statusLabel(page?.status) }}</span>
         </div>
-        <span v-else :class="`badge badge-${page.status}`" style="font-size:.9rem">{{ statusLabel(page?.status) }}</span>
       </div>
       <div class="editor-panel-body">
         <div v-if="loadingPage" class="text-muted">加载中...</div>
@@ -112,8 +124,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
-import { useRoute, RouterLink } from 'vue-router'
+import { ref, watch, computed } from 'vue'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import pb from '@/lib/pocketbase'
 import { useAuthStore } from '@/stores/auth'
 import { diffTexts } from '@/lib/diff'
@@ -121,6 +133,7 @@ import IpaKeyboard from '@/components/editor/IpaKeyboard.vue'
 import PdfSinglePageViewer from '@/components/editor/PdfSinglePageViewer.vue'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 
 const page = ref(null)
@@ -134,6 +147,9 @@ const rejectTextareaRef = ref(null)
 const pdfFileRecord = ref(null)
 const pdfError = ref('')
 const currentPdfPage = ref(1)
+const prevTaskId = ref('')
+const nextTaskId = ref('')
+const hasNeighborTasks = computed(() => Boolean(prevTaskId.value || nextTaskId.value))
 
 const reviewerId = computed(() => pb.authStore.model?.id || auth.user?.id || null)
 const basePdfPage = computed(() => {
@@ -161,12 +177,27 @@ const isFinished = computed(() => {
   )
 })
 
-onMounted(async () => {
+watch(() => route.params.id, async () => {
+  await loadPage()
+}, { immediate: true })
+
+async function loadPage() {
+  loadingPage.value = true
+  page.value = null
+  prevTaskId.value = ''
+  nextTaskId.value = ''
+  pdfFileRecord.value = null
+  pdfError.value = ''
+  saveError.value = ''
+  saved.value = false
+  showRejectForm.value = false
+
   try {
     page.value = await pb.collection('pages').getOne(route.params.id, { expand: 'project_file' })
     currentPdfPage.value = basePdfPage.value
     editedText.value = page.value.proofread_text || page.value.ocr_text || ''
     await resolveProjectPdf()
+    await loadNeighbors()
     // Mark as "reviewing" if status is "proofread".
     // The server hook enforces that only one reviewer can transition a page from
     // "proofread" to "reviewing", so if this update fails the page was already
@@ -179,11 +210,13 @@ onMounted(async () => {
         })
         page.value.status = 'reviewing'
         page.value.reviewer = reviewerId.value
+        await loadNeighbors()
       } catch (lockErr) {
         // Re-fetch to get the latest status/reviewer
         page.value = await pb.collection('pages').getOne(route.params.id, { expand: 'project_file' })
         editedText.value = page.value.proofread_text || page.value.ocr_text || ''
         await resolveProjectPdf()
+        await loadNeighbors()
         saveError.value = lockErr?.response?.message || '该任务已被其他审核员占用，您可以查看但无法操作。'
       }
     }
@@ -192,7 +225,7 @@ onMounted(async () => {
   } finally {
     loadingPage.value = false
   }
-})
+}
 
 async function resolveProjectPdf() {
   pdfError.value = ''
@@ -230,6 +263,43 @@ function switchPdfPage(delta) {
   currentPdfPage.value = clampPdfPage(currentPdfPage.value + delta)
 }
 
+async function loadNeighbors() {
+  if (!page.value?.project) {
+    prevTaskId.value = ''
+    nextTaskId.value = ''
+    return
+  }
+  const userId = reviewerId.value
+  const baseFilter = userId
+    ? `project="${page.value.project}" && (status="proofread" || (status="reviewing" && reviewer="${userId}"))`
+    : `project="${page.value.project}" && status="proofread"`
+  const list = await pb.collection('pages').getFullList({
+    filter: baseFilter,
+    sort: 'page_number',
+    fields: 'id,page_number'
+  })
+  const idx = list.findIndex((item) => item.id === page.value.id)
+  if (idx < 0 || list.length <= 1) {
+    prevTaskId.value = ''
+    nextTaskId.value = ''
+    return
+  }
+  const prevIdx = (idx - 1 + list.length) % list.length
+  const nextIdx = (idx + 1) % list.length
+  prevTaskId.value = list[prevIdx].id
+  nextTaskId.value = list[nextIdx].id
+}
+
+function gotoPrevTask() {
+  if (!prevTaskId.value) return
+  router.push(`/review/${prevTaskId.value}`)
+}
+
+function gotoNextTask() {
+  if (!nextTaskId.value) return
+  router.push(`/review/${nextTaskId.value}`)
+}
+
 function insertText(char) {
   const el = rejectTextareaRef.value
   if (!el) {
@@ -249,14 +319,20 @@ async function approve() {
   saving.value = true
   saved.value = false
   saveError.value = ''
+  const targetNextId = nextTaskId.value
   try {
     await pb.collection('pages').update(page.value.id, {
       status: 'approved',
       reviewer: reviewerId.value,
       reviewed_at: new Date().toISOString()
     })
+    if (targetNextId) {
+      await router.push(`/review/${targetNextId}`)
+      return
+    }
     page.value.status = 'approved'
     saved.value = true
+    await loadNeighbors()
   } catch (e) {
     saveError.value = e?.response?.message || '操作失败，请重试'
   } finally {
@@ -268,6 +344,7 @@ async function reject() {
   saving.value = true
   saved.value = false
   saveError.value = ''
+  const targetNextId = nextTaskId.value
   try {
     await pb.collection('pages').update(page.value.id, {
       status: 'rejected',
@@ -275,10 +352,15 @@ async function reject() {
       reviewed_at: new Date().toISOString(),
       proofread_text: editedText.value
     })
+    if (targetNextId) {
+      await router.push(`/review/${targetNextId}`)
+      return
+    }
     page.value.status = 'rejected'
     page.value.proofread_text = editedText.value
     saved.value = true
     showRejectForm.value = false
+    await loadNeighbors()
   } catch (e) {
     saveError.value = e?.response?.message || '操作失败，请重试'
   } finally {
@@ -291,3 +373,4 @@ function statusLabel(s) {
   return map[s] || s
 }
 </script>
+
