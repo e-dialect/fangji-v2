@@ -76,6 +76,21 @@
         </div>
       </div>
 
+      <!-- Export section -->
+      <div class="card mb-6">
+        <div class="card-title">导出结果</div>
+        <p class="text-sm text-muted mb-3">
+          导出当前项目的校对结果 CSV。优先使用结构化校对内容（proofread_row_json），没有则回退到原始内容。
+        </p>
+        <div class="flex gap-2 items-center">
+          <button class="btn btn-primary" @click="exportCsv" :disabled="exportingCsv">
+            {{ exportingCsv ? '导出中...' : '导出校对结果 CSV' }}
+          </button>
+          <span v-if="exportError" class="alert alert-error" style="margin:0">{{ exportError }}</span>
+          <span v-if="exportSuccess" class="alert alert-success" style="margin:0">{{ exportSuccess }}</span>
+        </div>
+      </div>
+
       <!-- Pages list -->
       <div class="card">
         <div class="card-title">文本条目列表 ({{ pages.length }} 条)</div>
@@ -195,6 +210,9 @@ const pdfSuccess = ref(false)
 const pdfError = ref('')
 const csvSuccess = ref('')
 const csvError = ref('')
+const exportingCsv = ref(false)
+const exportError = ref('')
+const exportSuccess = ref('')
 const selectedPendingIds = ref([])
 const rangeSelectInput = ref('')
 
@@ -369,6 +387,61 @@ async function uploadCsv() {
   }
 }
 
+async function exportCsv() {
+  exportingCsv.value = true
+  exportError.value = ''
+  exportSuccess.value = ''
+  try {
+    const all = await pb.collection('pages').getFullList({
+      filter: `project="${projectId}"`,
+      sort: 'page_number',
+      fields: 'id,page_number,pdf_page,ocr_text,proofread_text,ocr_row_json,proofread_row_json'
+    })
+    if (!all.length) {
+      throw new Error('当前项目暂无可导出的条目')
+    }
+
+    const headers = []
+    const rows = all.map((item) => {
+      const proofObj = safeParseRowJson(item.proofread_row_json)
+      const ocrObj = safeParseRowJson(item.ocr_row_json)
+      const rowObj = proofObj || ocrObj || { 内容: item.proofread_text || item.ocr_text || '' }
+      for (const key of Object.keys(rowObj)) {
+        if (!headers.includes(key)) headers.push(key)
+      }
+      return {
+        pageNumber: Number(item.pdf_page) || Number(item.page_number) || '',
+        rowObj
+      }
+    })
+
+    const finalHeaders = ['PDF页码', ...headers]
+    const lines = [finalHeaders.map(toCsvCell).join(',')]
+    for (const row of rows) {
+      const values = [row.pageNumber, ...headers.map((h) => row.rowObj[h] ?? '')]
+      lines.push(values.map(toCsvCell).join(','))
+    }
+
+    const csvText = '\uFEFF' + lines.join('\r\n')
+    const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const safeName = (project.value?.name || 'project').replace(/[\\/:*?"<>|]/g, '_')
+    link.href = url
+    link.download = `${safeName}_校对结果.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+
+    exportSuccess.value = `已导出 ${rows.length} 条记录`
+  } catch (e) {
+    exportError.value = e?.message || '导出失败，请重试'
+  } finally {
+    exportingCsv.value = false
+  }
+}
+
 async function readCsvText(file) {
   const buffer = await file.arrayBuffer()
   const bytes = new Uint8Array(buffer)
@@ -406,6 +479,25 @@ function textGarbleScore(text) {
   // Null chars are also a strong signal of broken decoding.
   const nullCount = (text.match(/\u0000/g) || []).length
   return replacementCount * 10 + nullCount
+}
+
+function safeParseRowJson(raw) {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function toCsvCell(value) {
+  const str = String(value ?? '')
+  if (/[",\r\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`
+  }
+  return str
 }
 
 function isPending(row) {
