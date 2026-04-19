@@ -67,15 +67,37 @@
           <div v-if="saved" class="alert alert-success mb-3">已成功提交，等待审核！</div>
           <div v-if="saveError" class="alert alert-error mb-3">{{ saveError }}</div>
 
-          <label class="form-label">校对文本</label>
-          <textarea
-            ref="textareaRef"
-            v-model="editedText"
-            class="form-control"
-            style="min-height:300px;font-family:'Noto Sans', serif;font-size:1rem;line-height:1.7"
-            placeholder="在此处输入/修改OCR识别的文字..."
-            @input="onTextChange"
-          ></textarea>
+          <label class="form-label">校对表格（按CSV栏目）</label>
+          <div class="table-wrapper mb-3">
+            <table>
+              <tbody>
+                <tr>
+                  <th
+                    v-for="header in rowHeaders"
+                    :key="`h-${header}`"
+                    class="text-sm font-semibold"
+                    style="min-width:180px"
+                  >{{ header }}</th>
+                </tr>
+                <tr>
+                  <td
+                    v-for="header in rowHeaders"
+                    :key="`v-${header}`"
+                    style="vertical-align:top;min-width:180px"
+                  >
+                    <textarea
+                      v-model="editedRow[header]"
+                      class="form-control"
+                      style="min-height:84px;font-family:'Noto Sans', serif;font-size:.95rem;line-height:1.6"
+                      @focus="activeField = header"
+                      @input="onTextChange"
+                      :placeholder="originalRow[header] || ''"
+                    ></textarea>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
           <IpaKeyboard @insert="insertText" />
         </template>
@@ -100,7 +122,6 @@ const editedText = ref('')
 const saving = ref(false)
 const saved = ref(false)
 const saveError = ref('')
-const textareaRef = ref(null)
 const pdfFileRecord = ref(null)
 const pdfError = ref('')
 const currentPdfPage = ref(1)
@@ -108,6 +129,10 @@ const currentUserId = computed(() => pb.authStore.model?.id || '')
 const prevTaskId = ref('')
 const nextTaskId = ref('')
 const hasNeighborTasks = computed(() => Boolean(prevTaskId.value || nextTaskId.value))
+const rowHeaders = ref([])
+const originalRow = ref({})
+const editedRow = ref({})
+const activeField = ref('')
 
 const basePdfPage = computed(() => {
   const pageNo = Number(page.value?.pdf_page)
@@ -142,6 +167,7 @@ async function loadPage() {
     currentPdfPage.value = basePdfPage.value
     // Prefill with proofread_text if already started, else ocr_text
     editedText.value = page.value.proofread_text || page.value.ocr_text || ''
+    hydrateRowData()
     await resolveProjectPdf()
     await loadNeighbors()
     // Mark as "proofreading" if still "claimed"
@@ -232,24 +258,51 @@ function gotoNextTask() {
 function onTextChange() {
   saved.value = false
   saveError.value = ''
+  editedText.value = composeRowText()
 }
 
 function insertText(char) {
-  const el = textareaRef.value
-  if (!el) {
-    editedText.value += char
-    return
+  const key = activeField.value || rowHeaders.value[0]
+  if (!key) return
+  const current = String(editedRow.value[key] || '')
+  editedRow.value[key] = current + char
+  onTextChange()
+}
+
+function safeParseRowJson(raw) {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return null
+    return parsed
+  } catch {
+    return null
   }
-  const start = el.selectionStart
-  const end = el.selectionEnd
-  const before = editedText.value.slice(0, start)
-  const after = editedText.value.slice(end)
-  editedText.value = before + char + after
-  // Restore cursor position after Vue re-renders
-  setTimeout(() => {
-    el.selectionStart = el.selectionEnd = start + char.length
-    el.focus()
-  }, 0)
+}
+
+function hydrateRowData() {
+  const ocrObj = safeParseRowJson(page.value?.ocr_row_json) || { '内容': page.value?.ocr_text || '' }
+  const proofObj = safeParseRowJson(page.value?.proofread_row_json)
+  const headers = Object.keys(ocrObj)
+
+  rowHeaders.value = headers.length ? headers : ['内容']
+  originalRow.value = {}
+  editedRow.value = {}
+
+  rowHeaders.value.forEach((h) => {
+    originalRow.value[h] = String(ocrObj[h] ?? '')
+    editedRow.value[h] = String((proofObj && h in proofObj ? proofObj[h] : ocrObj[h]) ?? '')
+  })
+  activeField.value = rowHeaders.value[0] || ''
+  editedText.value = composeRowText()
+}
+
+function composeRowText() {
+  return rowHeaders.value
+    .map((h) => String(editedRow.value[h] || '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim()
 }
 
 async function submitProofread() {
@@ -259,6 +312,7 @@ async function submitProofread() {
   const targetNextId = nextTaskId.value
   try {
     await pb.collection('pages').update(page.value.id, {
+      proofread_row_json: JSON.stringify(editedRow.value),
       proofread_text: editedText.value,
       status: 'proofread',
       proofread_at: new Date().toISOString()

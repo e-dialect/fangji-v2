@@ -333,10 +333,12 @@ async function uploadCsv() {
         throw new Error(`第 ${i + 2} 行的 PDF页码 无效，请填写正整数`)
       }
 
+      const structuredRow = {}
       const parts = []
       for (const [key, value] of Object.entries(row)) {
         if (key.trim() === 'PDF页码') continue
         const textPart = String(value ?? '').trim()
+        structuredRow[key] = textPart
         if (textPart) parts.push(textPart)
       }
       const entryText = parts.join(' ').trim()
@@ -348,6 +350,7 @@ async function uploadCsv() {
         project: projectId,
         page_number: nextPageNum++,
         pdf_page: pdfPage,
+        ocr_row_json: JSON.stringify(structuredRow),
         ocr_text: entryText,
         status: 'pending'
       })

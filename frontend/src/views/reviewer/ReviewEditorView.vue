@@ -66,40 +66,42 @@
           <div v-if="saved" class="alert alert-success mb-3">操作成功！</div>
           <div v-if="saveError" class="alert alert-error mb-3">{{ saveError }}</div>
 
-          <!-- Reject form -->
+          <div class="table-wrapper mb-3">
+            <table>
+              <tbody>
+                <tr>
+                  <th
+                    v-for="header in rowHeaders"
+                    :key="`h-${header}`"
+                    class="text-sm font-semibold"
+                    style="min-width:180px"
+                  >{{ header }}</th>
+                </tr>
+                <tr>
+                  <td
+                    v-for="header in rowHeaders"
+                    :key="`v-${header}`"
+                    style="vertical-align:top;min-width:180px"
+                  >
+                    <textarea
+                      v-model="editedRow[header]"
+                      class="form-control"
+                      style="min-height:84px;font-family:'Noto Sans',serif"
+                      @focus="activeField = header"
+                    ></textarea>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
           <div v-if="showRejectForm" class="card mb-3" style="border:1px solid var(--danger)">
             <div class="card-title" style="color:var(--danger)">打回修改</div>
-            <p class="text-sm text-muted mb-2">可在下方直接修改文本后打回，校对员将看到修改建议。</p>
-            <textarea
-              ref="rejectTextareaRef"
-              v-model="editedText"
-              class="form-control mb-3"
-              style="min-height:120px;font-family:'Noto Sans',serif"
-            ></textarea>
+            <p class="text-sm text-muted mb-2">可在表格中直接改动后打回。</p>
             <IpaKeyboard @insert="insertText" />
             <div class="flex gap-2 mt-3">
               <button class="btn btn-danger btn-sm" @click="reject" :disabled="saving">确认打回</button>
               <button class="btn btn-secondary btn-sm" @click="showRejectForm = false">取消</button>
-            </div>
-          </div>
-
-          <!-- Diff display -->
-          <div class="mb-3">
-            <div class="flex gap-3 mb-2" style="font-size:.82rem">
-              <span style="background:#ffe4e6;padding:.1rem .4rem;border-radius:3px;color:#be123c">删除</span>
-              <span style="background:#dcfce7;padding:.1rem .4rem;border-radius:3px;color:#15803d">新增</span>
-            </div>
-            <div
-              style="white-space:pre-wrap;font-family:'Noto Sans',serif;font-size:1rem;line-height:1.7;border:1px solid var(--gray-200);border-radius:var(--radius);padding:1rem;background:#fff;min-height:200px"
-            >
-              <template v-for="(part, i) in diffParts" :key="i">
-                <span
-                  :class="{
-                    'diff-del': part.type === 'delete',
-                    'diff-add': part.type === 'insert'
-                  }"
-                >{{ part.text }}</span>
-              </template>
             </div>
           </div>
 
@@ -128,7 +130,6 @@ import { ref, watch, computed } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import pb from '@/lib/pocketbase'
 import { useAuthStore } from '@/stores/auth'
-import { diffTexts } from '@/lib/diff'
 import IpaKeyboard from '@/components/editor/IpaKeyboard.vue'
 import PdfSinglePageViewer from '@/components/editor/PdfSinglePageViewer.vue'
 
@@ -143,13 +144,16 @@ const saved = ref(false)
 const saveError = ref('')
 const showRejectForm = ref(false)
 const editedText = ref('')
-const rejectTextareaRef = ref(null)
 const pdfFileRecord = ref(null)
 const pdfError = ref('')
 const currentPdfPage = ref(1)
 const prevTaskId = ref('')
 const nextTaskId = ref('')
 const hasNeighborTasks = computed(() => Boolean(prevTaskId.value || nextTaskId.value))
+const rowHeaders = ref([])
+const proofreadRow = ref({})
+const editedRow = ref({})
+const activeField = ref('')
 
 const reviewerId = computed(() => pb.authStore.model?.id || auth.user?.id || null)
 const basePdfPage = computed(() => {
@@ -163,11 +167,6 @@ const allowedPdfPages = computed(() => [basePdfPage.value, basePdfPage.value + 1
 const pdfUrl = computed(() => {
   if (!pdfFileRecord.value?.file) return null
   return pb.files.getUrl(pdfFileRecord.value, pdfFileRecord.value.file)
-})
-
-const diffParts = computed(() => {
-  if (!page.value) return []
-  return diffTexts(page.value.ocr_text || '', page.value.proofread_text || '')
 })
 
 const isFinished = computed(() => {
@@ -196,6 +195,7 @@ async function loadPage() {
     page.value = await pb.collection('pages').getOne(route.params.id, { expand: 'project_file' })
     currentPdfPage.value = basePdfPage.value
     editedText.value = page.value.proofread_text || page.value.ocr_text || ''
+    hydrateRowData()
     await resolveProjectPdf()
     await loadNeighbors()
     // Mark as "reviewing" if status is "proofread".
@@ -215,6 +215,7 @@ async function loadPage() {
         // Re-fetch to get the latest status/reviewer
         page.value = await pb.collection('pages').getOne(route.params.id, { expand: 'project_file' })
         editedText.value = page.value.proofread_text || page.value.ocr_text || ''
+        hydrateRowData()
         await resolveProjectPdf()
         await loadNeighbors()
         saveError.value = lockErr?.response?.message || '该任务已被其他审核员占用，您可以查看但无法操作。'
@@ -301,18 +302,44 @@ function gotoNextTask() {
 }
 
 function insertText(char) {
-  const el = rejectTextareaRef.value
-  if (!el) {
-    editedText.value += char
-    return
+  const key = activeField.value || rowHeaders.value[0]
+  if (!key) return
+  const current = String(editedRow.value[key] || '')
+  editedRow.value[key] = current + char
+}
+
+function safeParseRowJson(raw) {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return null
+    return parsed
+  } catch {
+    return null
   }
-  const start = el.selectionStart
-  const end = el.selectionEnd
-  editedText.value = editedText.value.slice(0, start) + char + editedText.value.slice(end)
-  setTimeout(() => {
-    el.selectionStart = el.selectionEnd = start + char.length
-    el.focus()
-  }, 0)
+}
+
+function hydrateRowData() {
+  const ocrObj = safeParseRowJson(page.value?.ocr_row_json) || { '内容': page.value?.ocr_text || '' }
+  const proofObj = safeParseRowJson(page.value?.proofread_row_json) || { ...ocrObj, '内容': page.value?.proofread_text || ocrObj['内容'] || '' }
+  const headers = Object.keys(ocrObj)
+
+  rowHeaders.value = headers.length ? headers : ['内容']
+  proofreadRow.value = {}
+  editedRow.value = {}
+  rowHeaders.value.forEach((h) => {
+    proofreadRow.value[h] = String(proofObj[h] ?? '')
+    editedRow.value[h] = String(proofObj[h] ?? '')
+  })
+  activeField.value = rowHeaders.value[0] || ''
+}
+
+function composeRowText(rowObj) {
+  return rowHeaders.value
+    .map((h) => String(rowObj[h] || '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim()
 }
 
 async function approve() {
@@ -320,8 +347,11 @@ async function approve() {
   saved.value = false
   saveError.value = ''
   const targetNextId = nextTaskId.value
+  const nextProofreadText = composeRowText(editedRow.value)
   try {
     await pb.collection('pages').update(page.value.id, {
+      proofread_row_json: JSON.stringify(editedRow.value),
+      proofread_text: nextProofreadText,
       status: 'approved',
       reviewer: reviewerId.value,
       reviewed_at: new Date().toISOString()
@@ -331,6 +361,9 @@ async function approve() {
       return
     }
     page.value.status = 'approved'
+    page.value.proofread_text = nextProofreadText
+    page.value.proofread_row_json = JSON.stringify(editedRow.value)
+    hydrateRowData()
     saved.value = true
     await loadNeighbors()
   } catch (e) {
@@ -345,19 +378,23 @@ async function reject() {
   saved.value = false
   saveError.value = ''
   const targetNextId = nextTaskId.value
+  const nextProofreadText = composeRowText(editedRow.value)
   try {
     await pb.collection('pages').update(page.value.id, {
       status: 'rejected',
       reviewer: reviewerId.value,
       reviewed_at: new Date().toISOString(),
-      proofread_text: editedText.value
+      proofread_row_json: JSON.stringify(editedRow.value),
+      proofread_text: nextProofreadText
     })
     if (targetNextId) {
       await router.push(`/review/${targetNextId}`)
       return
     }
     page.value.status = 'rejected'
-    page.value.proofread_text = editedText.value
+    page.value.proofread_text = nextProofreadText
+    page.value.proofread_row_json = JSON.stringify(editedRow.value)
+    hydrateRowData()
     saved.value = true
     showRejectForm.value = false
     await loadNeighbors()
