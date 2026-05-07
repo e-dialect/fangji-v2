@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import pb from '@/lib/pocketbase'
+import { clearAuth, loginWithPassword, registerProofreader } from '@/services/authService'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref(pb.authStore.model)
@@ -18,25 +19,24 @@ export const useAuthStore = defineStore('auth', () => {
   const isReviewer = computed(() => role.value === 'reviewer')
 
   async function login(email, password) {
-    const authData = await pb.collection('users').authWithPassword(email, password)
+    const authData = await loginWithPassword(email, password)
     user.value = authData.record
     token.value = authData.token
     return authData
   }
 
   async function register(email, password, passwordConfirm, name) {
-    const record = await pb.collection('users').create({
+    const record = await registerProofreader({
       email,
       password,
       passwordConfirm,
-      name,
-      role: 'proofreader'
+      name
     })
     return record
   }
 
   function logout() {
-    pb.authStore.clear()
+    clearAuth()
     user.value = null
     token.value = null
   }

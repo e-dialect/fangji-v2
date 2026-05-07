@@ -105,8 +105,15 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import pb from '@/lib/pocketbase'
 import { useAuthStore } from '@/stores/auth'
+import { currentUserId } from '@/services/authService'
+import {
+  countActiveReviewerTasks,
+  listPendingReviewTasks,
+  listReviewerTasks
+} from '@/services/pagesService'
+import { MAX_ACTIVE_TASKS, statusLabel } from '@/constants/pageStatus'
+import { formatPbError } from '@/utils/pbErrors'
 
 const auth = useAuthStore()
 const loading = ref(true)
@@ -124,7 +131,6 @@ const pendingTotalPages = ref(1)
 const myPage = ref(1)
 const myTotalPages = ref(1)
 const PAGE_SIZE = 50
-const MAX_ACTIVE_TASKS = 10
 const myActiveReviewingCount = ref(0)
 const reviewLimitReached = ref(false)
 
@@ -136,33 +142,17 @@ async function loadTasks() {
   loading.value = true
   error.value = ''
   try {
-    const userId = pb.authStore.model?.id || auth.user?.id || null
+    const userId = currentUserId(auth.user)
 
-    const pendingPromise = fetchPageListWithFallback({
-      page: pendingPage.value,
-      perPage: PAGE_SIZE,
-      filter: 'status="proofread"',
-      sort: 'page_number',
-      expand: 'project,proofreader'
-    })
+    const pendingPromise = listPendingReviewTasks(pendingPage.value, PAGE_SIZE)
 
     const minePromise = userId
-      ? fetchPageListWithFallback({
-          page: myPage.value,
-          perPage: PAGE_SIZE,
-          filter: `reviewer="${userId}"`,
-          sort: '-updated',
-          expand: 'project'
-        })
+      ? listReviewerTasks(userId, myPage.value, PAGE_SIZE)
       : Promise.resolve({ items: [], totalPages: 1 })
 
     const activeReviewingPromise = userId
-      ? pb.collection('pages').getList(1, 1, {
-          filter: `reviewer="${userId}" && status="reviewing"`,
-          fields: 'id',
-          requestKey: null
-        })
-      : Promise.resolve({ totalItems: 0 })
+      ? countActiveReviewerTasks(userId)
+      : Promise.resolve(0)
 
     const [pendingResult, mineResult, activeReviewingResult] = await Promise.allSettled([pendingPromise, minePromise, activeReviewingPromise])
 
@@ -172,7 +162,7 @@ async function loadTasks() {
     } else {
       pendingReview.value = []
       pendingTotalPages.value = 1
-      error.value = formatLoadError('加载待审核任务失败', pendingResult.reason)
+      error.value = formatPbError('加载待审核任务失败', pendingResult.reason)
     }
 
     if (mineResult.status === 'fulfilled') {
@@ -182,50 +172,22 @@ async function loadTasks() {
       myReviewed.value = []
       myTotalPages.value = 1
       if (!error.value) {
-        error.value = formatLoadError('加载我的审核任务失败', mineResult.reason)
+        error.value = formatPbError('加载我的审核任务失败', mineResult.reason)
       }
     }
 
     if (activeReviewingResult.status === 'fulfilled') {
-      myActiveReviewingCount.value = Number(activeReviewingResult.value.totalItems || 0)
+      myActiveReviewingCount.value = Number(activeReviewingResult.value || 0)
       reviewLimitReached.value = myActiveReviewingCount.value >= MAX_ACTIVE_TASKS
     } else {
       myActiveReviewingCount.value = 0
       reviewLimitReached.value = false
     }
   } catch (e) {
-    error.value = formatLoadError('加载审核任务失败', e)
+    error.value = formatPbError('加载审核任务失败', e)
   } finally {
     loading.value = false
   }
-}
-
-async function fetchPageListWithFallback(params) {
-  try {
-    return await pb.collection('pages').getList(params.page, params.perPage, {
-      filter: params.filter,
-      sort: params.sort,
-      expand: params.expand,
-      requestKey: null
-    })
-  } catch (firstErr) {
-    try {
-      return await pb.collection('pages').getList(params.page, params.perPage, {
-        filter: params.filter,
-        sort: params.sort,
-        requestKey: null
-      })
-    } catch (secondErr) {
-      throw secondErr || firstErr
-    }
-  }
-}
-
-function formatLoadError(prefix, err) {
-  const status = err?.status || err?.response?.status
-  const msg = err?.response?.message || err?.message || ''
-  if (status) return `${prefix}（${status}）：${msg || '请求失败'}`
-  return msg ? `${prefix}：${msg}` : `${prefix}，请稍后重试`
 }
 
 async function changePendingPage(p) {
@@ -238,8 +200,4 @@ async function changeMyPage(p) {
   await loadTasks()
 }
 
-function statusLabel(s) {
-  const map = { approved: '已通过', rejected: '已打回', reviewing: '审核中' }
-  return map[s] || s
-}
 </script>

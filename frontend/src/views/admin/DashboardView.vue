@@ -71,7 +71,10 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import pb from '@/lib/pocketbase'
+import { PAGE_STATUS } from '@/constants/pageStatus'
+import { listAllPages } from '@/services/pagesService'
+import { listProjects } from '@/services/projectsService'
+import { getPbMessage, getPbStatus } from '@/utils/pbErrors'
 
 const projects = ref([])
 const loading = ref(true)
@@ -91,17 +94,17 @@ onMounted(async () => {
 
   let list = []
   try {
-    list = await pb.collection('projects').getFullList({ sort: '-created' })
+    list = await listProjects()
     projects.value = list
     stats.value.total = list.length
   } catch (e) {
-    const status = e?.status || e?.response?.status
+    const status = getPbStatus(e)
     if (status === 401) {
       error.value = '登录状态已失效，请重新登录。'
     } else if (status === 403) {
       error.value = '无权限读取项目列表，请检查 projects 的 list/view 规则。'
     } else {
-      error.value = e?.response?.message || '加载项目列表失败，请稍后重试。'
+      error.value = getPbMessage(e, '加载项目列表失败，请稍后重试。')
     }
     loading.value = false
     return
@@ -109,7 +112,7 @@ onMounted(async () => {
 
   // Fetch pages once and aggregate stats locally.
   try {
-    const allPages = await pb.collection('pages').getFullList({
+    const allPages = await listAllPages({
       fields: 'project,status'
     })
 
@@ -117,15 +120,15 @@ onMounted(async () => {
       const projectId = p.project
       if (!projectId) continue
       pageCountByProject.value[projectId] = (pageCountByProject.value[projectId] || 0) + 1
-      if (p.status === 'approved') {
+      if (p.status === PAGE_STATUS.APPROVED) {
         approvedByProject.value[projectId] = (approvedByProject.value[projectId] || 0) + 1
       }
     }
   } catch (e) {
-    const status = e?.status || e?.response?.status
+    const status = getPbStatus(e)
     warning.value = status === 403
       ? '项目列表已加载，但暂无权限读取页面统计。请检查 pages 的 list/view 规则。'
-      : (e?.response?.message || '项目列表已加载，但统计信息加载失败。')
+      : getPbMessage(e, '项目列表已加载，但统计信息加载失败。')
   }
 
   stats.value.pages = Object.values(pageCountByProject.value).reduce((a, b) => a + b, 0)

@@ -186,8 +186,13 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
-import pb from '@/lib/pocketbase'
 import { parseCsv } from '@/lib/csvParser'
+import { safeParseRowJson } from '@/composables/useStructuredRow'
+import { PAGE_STATUS, PROOFREAD_PROGRESS_STATUSES, statusBadgeClass, statusLabel } from '@/constants/pageStatus'
+import { createPage, deletePage, getPagedProjectPages, listAllProjectPages, updatePage } from '@/services/pagesService'
+import { createProjectPdf } from '@/services/projectFilesService'
+import { getProject } from '@/services/projectsService'
+import { getPbMessage, getPbStatus } from '@/utils/pbErrors'
 
 const route = useRoute()
 const projectId = Array.isArray(route.params.id) ? route.params.id[0] : route.params.id
@@ -221,7 +226,7 @@ const approvedPct = computed(() => {
   return Math.round((pageStats.value.approved / pageStats.value.total) * 100)
 })
 
-const pendingPages = computed(() => pages.value.filter((p) => p.status === 'pending'))
+const pendingPages = computed(() => pages.value.filter((p) => p.status === PAGE_STATUS.PENDING))
 const allPendingSelected = computed(() => {
   if (!pendingPages.value.length) return false
   return pendingPages.value.every((p) => selectedPendingIds.value.includes(p.id))
@@ -236,9 +241,9 @@ const pendingIndexById = computed(() => {
 
 onMounted(async () => {
   try {
-    project.value = await pb.collection('projects').getOne(projectId)
+    project.value = await getProject(projectId)
   } catch (e) {
-    const status = e?.status || e?.response?.status
+    const status = getPbStatus(e)
     if (status === 401) {
       projectError.value = '登录状态已失效，请重新登录。'
     } else if (status === 403) {
@@ -246,7 +251,7 @@ onMounted(async () => {
     } else if (status === 404) {
       projectError.value = '项目不存在。'
     } else {
-      projectError.value = e?.response?.message || '加载项目失败，请稍后重试。'
+      projectError.value = getPbMessage(e, '加载项目失败，请稍后重试。')
     }
     loadingProject.value = false
     return
@@ -263,19 +268,17 @@ async function loadPages() {
     let page = 1
     let result
     do {
-      result = await pb.collection('pages').getList(page, perPage, {
-        filter: `project="${projectId}"`,
-        sort: 'page_number',
+      result = await getPagedProjectPages(projectId, page, perPage, {
         expand: 'proofreader,reviewer'
       })
       allPages.push(...result.items)
       page += 1
     } while (page <= result.totalPages)
     pages.value = allPages
-    selectedPendingIds.value = selectedPendingIds.value.filter((id) => allPages.some((p) => p.id === id && p.status === 'pending'))
+    selectedPendingIds.value = selectedPendingIds.value.filter((id) => allPages.some((p) => p.id === id && p.status === PAGE_STATUS.PENDING))
     pageStats.value.total = allPages.length
-    pageStats.value.proofread = allPages.filter(p => ['proofread', 'reviewing', 'approved'].includes(p.status)).length
-    pageStats.value.approved = allPages.filter(p => p.status === 'approved').length
+    pageStats.value.proofread = allPages.filter(p => PROOFREAD_PROGRESS_STATUSES.includes(p.status)).length
+    pageStats.value.approved = allPages.filter(p => p.status === PAGE_STATUS.APPROVED).length
   } catch (e) {
     console.error(e)
   } finally {
@@ -300,17 +303,12 @@ async function uploadPdf() {
   uploadingPdf.value = true
   pdfError.value = ''
   try {
-    const formData = new FormData()
-    formData.append('project', projectId)
-    formData.append('file', pdfFile.value)
-    formData.append('original_filename', pdfFile.value.name)
-    formData.append('status', 'processing')
-    await pb.collection('project_files').create(formData)
+    await createProjectPdf({ projectId, file: pdfFile.value })
     pdfSuccess.value = true
     pdfFile.value = null
     if (pdfInput.value) pdfInput.value.value = ''
   } catch (e) {
-    pdfError.value = e?.response?.message || '上传失败，请重试'
+    pdfError.value = getPbMessage(e, '上传失败，请重试')
   } finally {
     uploadingPdf.value = false
   }
@@ -333,8 +331,7 @@ async function uploadCsv() {
     }
 
     // Determine next page number from existing pages.
-    const existingPages = await pb.collection('pages').getFullList({
-      filter: `project="${projectId}"`,
+    const existingPages = await listAllProjectPages(projectId, {
       fields: 'page_number'
     })
     let nextPageNum = existingPages.reduce((max, p) => {
@@ -364,13 +361,13 @@ async function uploadCsv() {
         throw new Error(`第 ${i + 2} 行去掉 PDF页码 后内容为空`)
       }
 
-      await pb.collection('pages').create({
+      await createPage({
         project: projectId,
         page_number: nextPageNum++,
         pdf_page: pdfPage,
         ocr_row_json: JSON.stringify(structuredRow),
         ocr_text: entryText,
-        status: 'pending'
+        status: PAGE_STATUS.PENDING
       })
       created++
     }
@@ -392,9 +389,7 @@ async function exportCsv() {
   exportError.value = ''
   exportSuccess.value = ''
   try {
-    const all = await pb.collection('pages').getFullList({
-      filter: `project="${projectId}"`,
-      sort: 'page_number',
+    const all = await listAllProjectPages(projectId, {
       fields: 'id,page_number,pdf_page,ocr_text,proofread_text,ocr_row_json,proofread_row_json'
     })
     if (!all.length) {
@@ -481,17 +476,6 @@ function textGarbleScore(text) {
   return replacementCount * 10 + nullCount
 }
 
-function safeParseRowJson(raw) {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw)
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return null
-    return parsed
-  } catch {
-    return null
-  }
-}
-
 function toCsvCell(value) {
   const str = String(value ?? '')
   if (/[",\r\n]/.test(str)) {
@@ -501,7 +485,7 @@ function toCsvCell(value) {
 }
 
 function isPending(row) {
-  return row?.status === 'pending'
+  return row?.status === PAGE_STATUS.PENDING
 }
 
 function toggleRowSelection(id, checked) {
@@ -553,12 +537,12 @@ async function movePendingRow(id, direction) {
     const currentPageNum = Number(current.page_number)
     const targetPageNum = Number(target.page_number)
 
-    await pb.collection('pages').update(current.id, { page_number: tempPageNum })
-    await pb.collection('pages').update(target.id, { page_number: currentPageNum })
-    await pb.collection('pages').update(current.id, { page_number: targetPageNum })
+    await updatePage(current.id, { page_number: tempPageNum })
+    await updatePage(target.id, { page_number: currentPageNum })
+    await updatePage(current.id, { page_number: targetPageNum })
     await loadPages()
   } catch (e) {
-    alert(e?.response?.message || '顺序调整失败，请重试')
+    alert(getPbMessage(e, '顺序调整失败，请重试'))
   } finally {
     mutatingRows.value = false
   }
@@ -621,7 +605,7 @@ async function applyPendingOrderByIds(orderedPendingIds) {
     if (!row) continue
     const nextNo = pageNumbers[i]
     if (Number(row.page_number) !== nextNo) {
-      await pb.collection('pages').update(id, { page_number: nextNo })
+      await updatePage(id, { page_number: nextNo })
     }
   }
 }
@@ -653,22 +637,20 @@ async function moveSelectedRowsDown() {
     await applyPendingOrderByIds(reordered)
     await loadPages()
   } catch (e) {
-    alert(e?.response?.message || '批量下移失败，请重试')
+    alert(getPbMessage(e, '批量下移失败，请重试'))
   } finally {
     mutatingRows.value = false
   }
 }
 
 async function resequenceAllRows() {
-  const all = await pb.collection('pages').getFullList({
-    filter: `project="${projectId}"`,
-    sort: 'page_number',
+  const all = await listAllProjectPages(projectId, {
     fields: 'id,page_number'
   })
   for (let i = 0; i < all.length; i++) {
     const desired = i + 1
     if (Number(all[i].page_number) !== desired) {
-      await pb.collection('pages').update(all[i].id, { page_number: desired })
+      await updatePage(all[i].id, { page_number: desired })
     }
   }
 }
@@ -680,20 +662,15 @@ async function deleteSelectedRows() {
 
   mutatingRows.value = true
   try {
-    await Promise.all(selectedPendingIds.value.map((id) => pb.collection('pages').delete(id)))
+    await Promise.all(selectedPendingIds.value.map((id) => deletePage(id)))
     selectedPendingIds.value = []
     await resequenceAllRows()
     await loadPages()
   } catch (e) {
-    alert(e?.response?.message || '批量删除失败，请重试')
+    alert(getPbMessage(e, '批量删除失败，请重试'))
   } finally {
     mutatingRows.value = false
   }
-}
-
-function statusLabel(s) {
-  const map = { pending: '待校对', claimed: '已认领', proofreading: '校对中', proofread: '待审核', reviewing: '审核中', approved: '已通过', rejected: '已打回' }
-  return map[s] || s
 }
 
 function formatItemNo(pageNumber, fallbackIndex) {
@@ -702,7 +679,4 @@ function formatItemNo(pageNumber, fallbackIndex) {
   return fallbackIndex + 1
 }
 
-function statusBadgeClass(s) {
-  return `badge-${s}`
-}
 </script>

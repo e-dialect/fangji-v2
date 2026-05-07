@@ -16,6 +16,10 @@ fangji-v2/
 │   │   │   ├── pocketbase.js        # PocketBase 客户端
 │   │   │   ├── csvParser.js         # CSV 解析工具
 │   │   │   └── diff.js              # 文本对比工具
+│   │   ├── services/                 # PocketBase 数据访问封装
+│   │   ├── composables/              # 编辑器/PDF/任务导航复用逻辑
+│   │   ├── constants/                # 页面状态、任务上限等常量
+│   │   ├── utils/                    # 通用错误格式化等工具
 │   │   ├── router/                  # Vue Router 路由配置
 │   │   ├── stores/
 │   │   │   └── auth.js              # Pinia 认证状态
@@ -29,6 +33,17 @@ fangji-v2/
     ├── pb_migrations/               # PocketBase 数据库迁移
     └── pb_hooks/                    # PocketBase 服务端钩子
 ```
+
+## 部署 / 启动方式总览
+
+| 方式 | 适用场景 | 前端地址 | 后端地址 |
+|------|----------|----------|----------|
+| Docker Compose 开发模式 | 推荐本地开发；一条命令启动前后端，支持热更新 | `http://localhost:5173` | `http://localhost:8090` |
+| 手动本地开发 | 不使用 Docker；需要本机分别启动 PocketBase 和 Vite | `http://localhost:5173` | `http://127.0.0.1:8090` |
+| 前端生产构建 | 检查前端是否可正式打包，或交给 Nginx/静态服务器部署 | 由部署环境决定 | 由 `VITE_PB_URL` 指定 |
+| 仅启动后端 | 只调试 PocketBase 迁移、权限、hooks 或接入已有前端 | - | `http://127.0.0.1:8090` |
+
+> 首次启动后端时，都需要访问 PocketBase Admin UI 创建管理员账号。Docker 方式访问 `http://localhost:8090/_/`，手动方式通常访问 `http://127.0.0.1:8090/_/`。
 
 ## 快速开始
 
@@ -44,15 +59,29 @@ docker compose up --build
 - 前端访问地址：`http://localhost:5173`
 - 后端（PocketBase Admin UI）：`http://localhost:8090/_/`
 
+停止服务：
+
+```bash
+docker compose down
+```
+
+后台启动：
+
+```bash
+docker compose up -d --build
+```
+
 首次启动时，访问 `http://localhost:8090/_/` 创建管理员账号（参见下方"首次设置"步骤）。
 
 > **注意**：PocketBase 数据（数据库、上传文件）通过 Docker Volume `pb_data` 持久化，重建容器不会丢失数据。
 
 ---
 
-### 方式二：手动启动
+### 方式二：手动本地开发
 
-### 1. 启动后端 (PocketBase)
+适合不使用 Docker、或需要单独调试前端/后端的情况。需要开两个终端：一个启动 PocketBase，一个启动 Vite。
+
+#### 1. 启动后端 (PocketBase)
 
 ```bash
 # 下载 PocketBase: https://pocketbase.io/docs/
@@ -75,7 +104,7 @@ PocketBase 默认运行在 `http://127.0.0.1:8090`。
 3. Collections API Rules 已由迁移脚本 `backend/pb_migrations/2_apply_access_rules.js` 自动写入，**无需在 Admin UI 手动配置权限规则**
 4. 如果需要调整权限规则，请新增一个新的迁移文件（例如 `3_xxx.js`），不要修改已执行过的迁移文件；PocketBase 不会重复执行同名已应用迁移
 
-### 2. 启动前端
+#### 2. 启动前端
 
 ```bash
 cd frontend
@@ -85,6 +114,45 @@ npm run dev
 ```
 
 前端运行在 `http://localhost:5173`。
+
+`.env` 中的 `VITE_PB_URL` 应指向后端地址，例如：
+
+```env
+VITE_PB_URL=http://127.0.0.1:8090
+```
+
+### 方式三：前端生产构建 / 本地预览
+
+适合验证生产包是否能正常生成，或将 `dist/` 交给 Nginx、静态服务器、对象存储等环境托管。
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+构建产物位于 `frontend/dist/`。
+
+本地预览生产包：
+
+```bash
+npm run preview
+```
+
+> 生产部署时，前端仍需要通过 `VITE_PB_URL` 指向可访问的 PocketBase 后端。Vite 环境变量会在构建时写入，因此不同环境请在构建前设置对应 `.env`。
+
+### 方式四：仅启动后端
+
+适合只检查 PocketBase 数据结构、权限规则、hooks，或前端已经部署在其他地方时使用。
+
+```bash
+cd backend
+./pocketbase serve
+```
+
+后端启动后：
+- Admin UI：`http://127.0.0.1:8090/_/`
+- API：`http://127.0.0.1:8090/api/`
 
 ## 功能概览
 

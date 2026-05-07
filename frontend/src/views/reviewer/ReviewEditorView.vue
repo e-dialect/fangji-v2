@@ -126,12 +126,18 @@
 </template>
 
 <script setup>
-import { ref, watch, computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import pb from '@/lib/pocketbase'
 import { useAuthStore } from '@/stores/auth'
 import IpaKeyboard from '@/components/editor/IpaKeyboard.vue'
 import PdfSinglePageViewer from '@/components/editor/PdfSinglePageViewer.vue'
+import { useProjectPdf } from '@/composables/useProjectPdf'
+import { useStructuredRow } from '@/composables/useStructuredRow'
+import { useTaskNeighbors } from '@/composables/useTaskNeighbors'
+import { PAGE_STATUS, REVIEW_FINISHED_STATUSES, statusLabel } from '@/constants/pageStatus'
+import { currentUserId } from '@/services/authService'
+import { getPage, listReviewerNeighborTasks, updatePage } from '@/services/pagesService'
+import { formatClaimConflict, getPbMessage } from '@/utils/pbErrors'
 
 const route = useRoute()
 const router = useRouter()
@@ -143,36 +149,45 @@ const saving = ref(false)
 const saved = ref(false)
 const saveError = ref('')
 const showRejectForm = ref(false)
-const editedText = ref('')
-const pdfFileRecord = ref(null)
-const pdfError = ref('')
-const currentPdfPage = ref(1)
-const prevTaskId = ref('')
-const nextTaskId = ref('')
-const hasNeighborTasks = computed(() => Boolean(prevTaskId.value || nextTaskId.value))
-const rowHeaders = ref([])
-const proofreadRow = ref({})
-const editedRow = ref({})
-const activeField = ref('')
 
-const reviewerId = computed(() => pb.authStore.model?.id || auth.user?.id || null)
-const basePdfPage = computed(() => {
-  const pageNo = Number(page.value?.pdf_page)
-  if (Number.isInteger(pageNo) && pageNo > 0) return pageNo
-  const fallback = Number(page.value?.page_number)
-  return Number.isInteger(fallback) && fallback > 0 ? fallback : 1
-})
-const allowedPdfPages = computed(() => [basePdfPage.value, basePdfPage.value + 1])
+const reviewerId = computed(() => currentUserId(auth.user))
+const {
+  rowHeaders,
+  proofreadRow,
+  editedRow,
+  activeField,
+  hydrateForReview,
+  composeCurrentText,
+  insertText: insertIntoActiveField,
+  stringifyEditedRow
+} = useStructuredRow()
 
-const pdfUrl = computed(() => {
-  if (!pdfFileRecord.value?.file) return null
-  return pb.files.getUrl(pdfFileRecord.value, pdfFileRecord.value.file)
+const {
+  pdfError,
+  currentPdfPage,
+  allowedPdfPages,
+  pdfUrl,
+  resetPdf,
+  resolveProjectPdf,
+  switchPdfPage,
+  syncToBasePage
+} = useProjectPdf(page)
+
+const {
+  prevTaskId,
+  nextTaskId,
+  hasNeighborTasks,
+  resetNeighbors,
+  loadNeighbors
+} = useTaskNeighbors(page, async (currentPage) => {
+  if (!currentPage?.project) return []
+  return listReviewerNeighborTasks(currentPage.project, reviewerId.value)
 })
 
 const isFinished = computed(() => {
   return page.value && (
-    ['approved', 'rejected'].includes(page.value.status) ||
-    (page.value.status === 'reviewing' && page.value.reviewer !== reviewerId.value)
+    REVIEW_FINISHED_STATUSES.includes(page.value.status) ||
+    (page.value.status === PAGE_STATUS.REVIEWING && page.value.reviewer !== reviewerId.value)
   )
 })
 
@@ -183,112 +198,40 @@ watch(() => route.params.id, async () => {
 async function loadPage() {
   loadingPage.value = true
   page.value = null
-  prevTaskId.value = ''
-  nextTaskId.value = ''
-  pdfFileRecord.value = null
-  pdfError.value = ''
+  resetNeighbors()
+  resetPdf()
   saveError.value = ''
   saved.value = false
   showRejectForm.value = false
 
   try {
-    page.value = await pb.collection('pages').getOne(route.params.id, { expand: 'project_file' })
-    currentPdfPage.value = basePdfPage.value
-    editedText.value = page.value.proofread_text || page.value.ocr_text || ''
-    hydrateRowData()
+    page.value = await getPage(route.params.id, { expand: 'project_file' })
+    syncToBasePage()
+    hydrateForReview(page.value)
     await resolveProjectPdf()
     await loadNeighbors()
-    // Mark as "reviewing" if status is "proofread".
-    // The server hook enforces that only one reviewer can transition a page from
-    // "proofread" to "reviewing", so if this update fails the page was already
-    // claimed by another reviewer.
-    if (page.value.status === 'proofread') {
+    if (page.value.status === PAGE_STATUS.PROOFREAD) {
       try {
-        await pb.collection('pages').update(page.value.id, {
-          status: 'reviewing',
+        await updatePage(page.value.id, {
+          status: PAGE_STATUS.REVIEWING,
           reviewer: reviewerId.value
         })
-        page.value.status = 'reviewing'
+        page.value.status = PAGE_STATUS.REVIEWING
         page.value.reviewer = reviewerId.value
         await loadNeighbors()
       } catch (lockErr) {
-        // Re-fetch to get the latest status/reviewer
-        page.value = await pb.collection('pages').getOne(route.params.id, { expand: 'project_file' })
-        editedText.value = page.value.proofread_text || page.value.ocr_text || ''
-        hydrateRowData()
+        page.value = await getPage(route.params.id, { expand: 'project_file' })
+        hydrateForReview(page.value)
         await resolveProjectPdf()
         await loadNeighbors()
-        saveError.value = lockErr?.response?.message || '该任务已被其他审核员占用，您可以查看但无法操作。'
+        saveError.value = formatClaimConflict(lockErr, '该任务已被其他审核员占用，您可以查看但无法操作。')
       }
     }
   } catch (e) {
-    console.error(e)
+    saveError.value = formatClaimConflict(e, '加载审核任务失败，请返回审核大厅刷新后重试')
   } finally {
     loadingPage.value = false
   }
-}
-
-async function resolveProjectPdf() {
-  pdfError.value = ''
-  pdfFileRecord.value = null
-
-  const linked = page.value?.expand?.project_file
-  if (linked?.file) {
-    pdfFileRecord.value = linked
-    return
-  }
-
-  try {
-    const list = await pb.collection('project_files').getFullList({
-      filter: `project="${page.value.project}"`,
-      sort: '-created'
-    })
-    const matched = list.find((r) => typeof r.file === 'string' && r.file.length > 0)
-    if (matched) {
-      pdfFileRecord.value = matched
-      return
-    }
-  } catch (e) {
-    pdfError.value = e?.response?.message || '加载项目 PDF 失败'
-    return
-  }
-}
-
-function clampPdfPage(pageNo) {
-  const min = allowedPdfPages.value[0]
-  const max = allowedPdfPages.value[1]
-  return Math.max(min, Math.min(max, Number(pageNo) || min))
-}
-
-function switchPdfPage(delta) {
-  currentPdfPage.value = clampPdfPage(currentPdfPage.value + delta)
-}
-
-async function loadNeighbors() {
-  if (!page.value?.project) {
-    prevTaskId.value = ''
-    nextTaskId.value = ''
-    return
-  }
-  const userId = reviewerId.value
-  const baseFilter = userId
-    ? `project="${page.value.project}" && (status="proofread" || (status="reviewing" && reviewer="${userId}"))`
-    : `project="${page.value.project}" && status="proofread"`
-  const list = await pb.collection('pages').getFullList({
-    filter: baseFilter,
-    sort: 'page_number',
-    fields: 'id,page_number'
-  })
-  const idx = list.findIndex((item) => item.id === page.value.id)
-  if (idx < 0 || list.length <= 1) {
-    prevTaskId.value = ''
-    nextTaskId.value = ''
-    return
-  }
-  const prevIdx = (idx - 1 + list.length) % list.length
-  const nextIdx = (idx + 1) % list.length
-  prevTaskId.value = list[prevIdx].id
-  nextTaskId.value = list[nextIdx].id
 }
 
 function gotoPrevTask() {
@@ -302,44 +245,7 @@ function gotoNextTask() {
 }
 
 function insertText(char) {
-  const key = activeField.value || rowHeaders.value[0]
-  if (!key) return
-  const current = String(editedRow.value[key] || '')
-  editedRow.value[key] = current + char
-}
-
-function safeParseRowJson(raw) {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw)
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return null
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-function hydrateRowData() {
-  const ocrObj = safeParseRowJson(page.value?.ocr_row_json) || { '内容': page.value?.ocr_text || '' }
-  const proofObj = safeParseRowJson(page.value?.proofread_row_json) || { ...ocrObj, '内容': page.value?.proofread_text || ocrObj['内容'] || '' }
-  const headers = Object.keys(ocrObj)
-
-  rowHeaders.value = headers.length ? headers : ['内容']
-  proofreadRow.value = {}
-  editedRow.value = {}
-  rowHeaders.value.forEach((h) => {
-    proofreadRow.value[h] = String(proofObj[h] ?? '')
-    editedRow.value[h] = String(proofObj[h] ?? '')
-  })
-  activeField.value = rowHeaders.value[0] || ''
-}
-
-function composeRowText(rowObj) {
-  return rowHeaders.value
-    .map((h) => String(rowObj[h] || '').trim())
-    .filter(Boolean)
-    .join(' ')
-    .trim()
+  insertIntoActiveField(char)
 }
 
 async function approve() {
@@ -347,12 +253,12 @@ async function approve() {
   saved.value = false
   saveError.value = ''
   const targetNextId = nextTaskId.value
-  const nextProofreadText = composeRowText(editedRow.value)
+  const nextProofreadText = composeCurrentText(editedRow.value)
   try {
-    await pb.collection('pages').update(page.value.id, {
-      proofread_row_json: JSON.stringify(editedRow.value),
+    await updatePage(page.value.id, {
+      proofread_row_json: stringifyEditedRow(),
       proofread_text: nextProofreadText,
-      status: 'approved',
+      status: PAGE_STATUS.APPROVED,
       reviewer: reviewerId.value,
       reviewed_at: new Date().toISOString()
     })
@@ -360,14 +266,14 @@ async function approve() {
       await router.push(`/review/${targetNextId}`)
       return
     }
-    page.value.status = 'approved'
+    page.value.status = PAGE_STATUS.APPROVED
     page.value.proofread_text = nextProofreadText
-    page.value.proofread_row_json = JSON.stringify(editedRow.value)
-    hydrateRowData()
+    page.value.proofread_row_json = stringifyEditedRow()
+    hydrateForReview(page.value)
     saved.value = true
     await loadNeighbors()
   } catch (e) {
-    saveError.value = e?.response?.message || '操作失败，请重试'
+    saveError.value = getPbMessage(e, '操作失败，请重试')
   } finally {
     saving.value = false
   }
@@ -378,36 +284,31 @@ async function reject() {
   saved.value = false
   saveError.value = ''
   const targetNextId = nextTaskId.value
-  const nextProofreadText = composeRowText(editedRow.value)
+  const nextProofreadText = composeCurrentText(editedRow.value)
   try {
-    await pb.collection('pages').update(page.value.id, {
-      status: 'rejected',
+    await updatePage(page.value.id, {
+      status: PAGE_STATUS.REJECTED,
       reviewer: reviewerId.value,
       reviewed_at: new Date().toISOString(),
-      proofread_row_json: JSON.stringify(editedRow.value),
+      proofread_row_json: stringifyEditedRow(),
       proofread_text: nextProofreadText
     })
     if (targetNextId) {
       await router.push(`/review/${targetNextId}`)
       return
     }
-    page.value.status = 'rejected'
+    page.value.status = PAGE_STATUS.REJECTED
     page.value.proofread_text = nextProofreadText
-    page.value.proofread_row_json = JSON.stringify(editedRow.value)
-    hydrateRowData()
+    page.value.proofread_row_json = stringifyEditedRow()
+    hydrateForReview(page.value)
     saved.value = true
     showRejectForm.value = false
     await loadNeighbors()
   } catch (e) {
-    saveError.value = e?.response?.message || '操作失败，请重试'
+    saveError.value = getPbMessage(e, '操作失败，请重试')
   } finally {
     saving.value = false
   }
-}
-
-function statusLabel(s) {
-  const map = { approved: '已通过', rejected: '已打回', reviewing: '审核中' }
-  return map[s] || s
 }
 </script>
 
