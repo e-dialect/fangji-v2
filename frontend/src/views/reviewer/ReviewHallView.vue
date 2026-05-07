@@ -28,7 +28,8 @@
           <table>
             <thead>
               <tr>
-                <th>页码</th>
+                <th>PDF页码</th>
+                <th>任务序号</th>
                 <th>所属项目</th>
                 <th>校对员</th>
                 <th>状态</th>
@@ -37,7 +38,8 @@
             </thead>
             <tbody>
               <tr v-for="pg in pendingReview" :key="pg.id">
-                <td>第 {{ pg.page_number }} 页</td>
+                <td>{{ formatPdfPage(pg) }}</td>
+                <td>第 {{ pg.page_number }} 条</td>
                 <td class="text-sm">{{ pg.expand?.project?.name || pg.project }}</td>
                 <td class="text-sm text-muted">{{ pg.expand?.proofreader?.name || '—' }}</td>
                 <td><span class="badge badge-proofread">待审核</span></td>
@@ -74,7 +76,8 @@
           <table>
             <thead>
               <tr>
-                <th>页码</th>
+                <th>PDF页码</th>
+                <th>任务序号</th>
                 <th>所属项目</th>
                 <th>状态</th>
                 <th>操作</th>
@@ -82,7 +85,8 @@
             </thead>
             <tbody>
               <tr v-for="pg in myReviewed" :key="pg.id">
-                <td>第 {{ pg.page_number }} 页</td>
+                <td>{{ formatPdfPage(pg) }}</td>
+                <td>第 {{ pg.page_number }} 条</td>
                 <td class="text-sm">{{ pg.expand?.project?.name || pg.project }}</td>
                 <td><span :class="`badge badge-${pg.status}`">{{ statusLabel(pg.status) }}</span></td>
                 <td>
@@ -200,4 +204,9 @@ async function changeMyPage(p) {
   await loadTasks()
 }
 
+function formatPdfPage(page) {
+  const pageNo = Number(page?.pdf_page)
+  if (Number.isInteger(pageNo) && pageNo > 0) return `第 ${pageNo} 页`
+  return '未设置'
+}
 </script>

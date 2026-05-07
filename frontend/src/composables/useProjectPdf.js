@@ -13,6 +13,12 @@ export function useProjectPdf(page) {
     return Number.isInteger(fallback) && fallback > 0 ? fallback : 1
   })
 
+  const pdfPageWarning = computed(() => {
+    const pageNo = Number(page.value?.pdf_page)
+    if (Number.isInteger(pageNo) && pageNo > 0) return ''
+    return '此条目缺少 PDF页码，当前暂用任务序号定位 PDF。请在远程数据中补齐 pdf_page。'
+  })
+
   const allowedPdfPages = computed(() => [basePdfPage.value, basePdfPage.value + 1])
 
   const pdfUrl = computed(() => {
@@ -63,6 +69,7 @@ export function useProjectPdf(page) {
     pdfError,
     currentPdfPage,
     basePdfPage,
+    pdfPageWarning,
     allowedPdfPages,
     pdfUrl,
     resetPdf,

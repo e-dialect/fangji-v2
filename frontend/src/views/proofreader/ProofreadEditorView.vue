@@ -23,6 +23,7 @@
         <div v-else-if="!page" class="alert alert-error">页面不存在</div>
         <div v-else-if="pdfError" class="alert alert-error" style="margin:1rem">{{ pdfError }}</div>
         <template v-else>
+          <div v-if="pdfPageWarning" class="alert alert-error" style="margin:1rem">{{ pdfPageWarning }}</div>
           <PdfSinglePageViewer
             v-if="pdfUrl"
             :src="pdfUrl"
@@ -144,6 +145,7 @@ const {
 const {
   pdfError,
   currentPdfPage,
+  pdfPageWarning,
   allowedPdfPages,
   pdfUrl,
   resetPdf,

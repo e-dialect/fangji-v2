@@ -54,7 +54,7 @@ export async function listPendingProofreadTasks(page, perPage) {
     filter: `status="${PAGE_STATUS.PENDING}"`,
     sort: 'page_number',
     expand: 'project',
-    fields: 'id,page_number,project,status,expand.project.id,expand.project.name'
+    fields: 'id,page_number,pdf_page,project,status,expand.project.id,expand.project.name'
   })
 }
 
@@ -65,7 +65,7 @@ export async function listProofreaderTasks(userId, page, perPage) {
     filter: relationFilter('proofreader', userId),
     sort: '-updated',
     expand: 'project',
-    fields: 'id,page_number,project,status,expand.project.id,expand.project.name'
+    fields: 'id,page_number,pdf_page,project,status,expand.project.id,expand.project.name'
   })
 }
 
@@ -87,7 +87,7 @@ export async function listPendingReviewTasks(page, perPage) {
     filter: `status="${PAGE_STATUS.PROOFREAD}"`,
     sort: 'page_number',
     expand: 'project,proofreader',
-    fields: 'id,page_number,project,proofreader,status,expand.project.id,expand.project.name,expand.proofreader.id,expand.proofreader.name'
+    fields: 'id,page_number,pdf_page,project,proofreader,status,expand.project.id,expand.project.name,expand.proofreader.id,expand.proofreader.name'
   })
 }
 
@@ -98,7 +98,7 @@ export async function listReviewerTasks(userId, page, perPage) {
     filter: relationFilter('reviewer', userId),
     sort: '-updated',
     expand: 'project',
-    fields: 'id,page_number,project,status,expand.project.id,expand.project.name'
+    fields: 'id,page_number,pdf_page,project,status,expand.project.id,expand.project.name'
   })
 }
 
