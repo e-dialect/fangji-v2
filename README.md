@@ -38,7 +38,7 @@ fangji-v2/
 
 | 方式 | 适用场景 | 前端地址 | 后端地址 |
 |------|----------|----------|----------|
-| Docker Compose 开发模式 | 推荐本地开发；一条命令启动前后端，支持热更新 | `http://localhost:5173` | `http://localhost:8090` |
+| Docker Compose 开发模式 | 推荐本地开发；一条命令启动前后端，支持热更新 | `http://localhost:5250` | `http://localhost:8090` |
 | 手动本地开发 | 不使用 Docker；需要本机分别启动 PocketBase 和 Vite | `http://localhost:5173` | `http://127.0.0.1:8090` |
 | 前端生产构建 | 检查前端是否可正式打包，或交给 Nginx/静态服务器部署 | 由部署环境决定 | 由 `VITE_PB_URL` 指定 |
 | 仅启动后端 | 只调试 PocketBase 迁移、权限、hooks 或接入已有前端 | - | `http://127.0.0.1:8090` |
@@ -56,8 +56,10 @@ docker compose up --build
 ```
 
 启动后：
-- 前端访问地址：`http://localhost:5173`
+- 前端访问地址：`http://localhost:5250`
 - 后端（PocketBase Admin UI）：`http://localhost:8090/_/`
+
+> Windows 上 `5173` 可能落在系统保留端口范围内，导致 Docker 无法绑定端口。Compose 开发模式默认使用 `5250`，对应配置见 `docker-compose.yml` 中的 `VITE_DEV_SERVER_PORT=5250`。
 
 停止服务：
 

@@ -10,13 +10,19 @@ function relationFilter(field, id) {
   return `${field}="${id}"`
 }
 
+function compactOptions(options) {
+  return Object.fromEntries(
+    Object.entries(options).filter(([, value]) => value !== undefined && value !== '')
+  )
+}
+
 export async function listPagesWithFallback({ page = 1, perPage = 50, filter, sort, expand, fields }) {
-  const baseOptions = {
+  const baseOptions = compactOptions({
     filter,
     sort,
     fields,
     requestKey: null
-  }
+  })
   try {
     return await pb.collection('pages').getList(page, perPage, {
       ...baseOptions,
@@ -47,7 +53,8 @@ export async function listPendingProofreadTasks(page, perPage) {
     perPage,
     filter: `status="${PAGE_STATUS.PENDING}"`,
     sort: 'page_number',
-    expand: 'project'
+    expand: 'project',
+    fields: 'id,page_number,project,status,expand.project.id,expand.project.name'
   })
 }
 
@@ -57,7 +64,8 @@ export async function listProofreaderTasks(userId, page, perPage) {
     perPage,
     filter: relationFilter('proofreader', userId),
     sort: '-updated',
-    expand: 'project'
+    expand: 'project',
+    fields: 'id,page_number,project,status,expand.project.id,expand.project.name'
   })
 }
 
@@ -78,7 +86,8 @@ export async function listPendingReviewTasks(page, perPage) {
     perPage,
     filter: `status="${PAGE_STATUS.PROOFREAD}"`,
     sort: 'page_number',
-    expand: 'project,proofreader'
+    expand: 'project,proofreader',
+    fields: 'id,page_number,project,proofreader,status,expand.project.id,expand.project.name,expand.proofreader.id,expand.proofreader.name'
   })
 }
 
@@ -88,7 +97,8 @@ export async function listReviewerTasks(userId, page, perPage) {
     perPage,
     filter: relationFilter('reviewer', userId),
     sort: '-updated',
-    expand: 'project'
+    expand: 'project',
+    fields: 'id,page_number,project,status,expand.project.id,expand.project.name'
   })
 }
 
