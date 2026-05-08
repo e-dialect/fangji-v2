@@ -62,12 +62,6 @@
         <div v-if="loadingPage" class="text-muted">加载中...</div>
         <div v-else-if="!page" class="text-muted">页面不存在</div>
         <template v-else>
-          <div v-if="isSecondPass" class="alert alert-success mb-3">
-            当前为第二次校对。若本次结果与第一次完全一致，该条目将自动完成。
-          </div>
-          <div v-else class="alert alert-success mb-3">
-            当前为第一次校对。提交后将等待另一位校对员进行第二次校对。
-          </div>
           <div v-if="saved" class="alert alert-success mb-3">{{ saved }}</div>
           <div v-if="saveError" class="alert alert-error mb-3">{{ saveError }}</div>
 
@@ -175,8 +169,6 @@ const {
   return listProofreaderNeighborTasks(currentPage.project, userId)
 })
 
-const isSecondPass = computed(() => Boolean(page.value?.first_proofreader))
-
 watch(() => route.params.id, async () => {
   await loadPage()
 }, { immediate: true })
@@ -248,10 +240,10 @@ async function submitProofread() {
     }
     page.value.status = result.status
     saved.value = result.status === PAGE_STATUS.APPROVED
-      ? '两次校对结果一致，该条目已完成。当前项目暂无下一条可由你处理的任务。'
+      ? '该条目已完成。当前项目暂无下一条可由你处理的任务。'
       : result.status === PAGE_STATUS.PENDING
-        ? '两次校对结果不一致，该条目已退回任务池重新进行两次校对。当前项目暂无下一条可由你处理的任务。'
-        : '第一次校对已提交。当前项目暂无下一条可由你处理的任务。'
+        ? '该条目已退回任务池。当前项目暂无下一条可由你处理的任务。'
+        : '校对已提交。当前项目暂无下一条可由你处理的任务。'
     await loadNeighbors()
   } catch (e) {
     saveError.value = getPbMessage(e, '提交失败，请重试')

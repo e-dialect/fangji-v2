@@ -20,8 +20,7 @@
             <tr>
               <th>项目</th>
               <th>总条目</th>
-              <th>一校待处理</th>
-              <th>二校待处理</th>
+              <th>待处理</th>
               <th>我的进行中</th>
               <th>已完成</th>
               <th>不一致退回</th>
@@ -38,8 +37,7 @@
                 </div>
               </td>
               <td>{{ queue.total }}</td>
-              <td>{{ queue.firstPassPending }}</td>
-              <td>{{ queue.secondPassPending }}</td>
+              <td>{{ pendingCount(queue) }}</td>
               <td>{{ queue.activeMine }}</td>
               <td>{{ queue.completed }}</td>
               <td>{{ queue.mismatchCount }}</td>
@@ -110,7 +108,7 @@ async function enterProject(queue) {
     if (!userId) throw new Error('登录状态已失效，请重新登录')
     const page = await claimNextProjectPage(projectId, userId)
     if (!page?.id) {
-      error.value = '该项目暂无你可处理的条目。二校任务不能由一校同一人完成。'
+      error.value = '该项目暂无你可处理的条目。'
       await loadProjects()
       return
     }
@@ -137,5 +135,9 @@ function buttonLabel(queue) {
 function progressPct(queue) {
   if (!queue?.total) return 0
   return Math.round((queue.completed / queue.total) * 100)
+}
+
+function pendingCount(queue) {
+  return Number(queue?.firstPassPending || 0) + Number(queue?.secondPassPending || 0)
 }
 </script>

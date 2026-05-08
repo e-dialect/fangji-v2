@@ -86,6 +86,6 @@ onRecordBeforeUpdateRequest((e) => {
     throw new BadRequestError("认领任务失败：缺少校对员身份")
   }
   if (oldStatus === "proofread" && current.getString("first_proofreader") === newProofreader) {
-    throw new BadRequestError("第二次校对必须由另一位校对员完成")
+    throw new BadRequestError("该条目需要由其他校对员处理")
   }
 }, "pages")

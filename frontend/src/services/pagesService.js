@@ -263,7 +263,7 @@ export async function submitTwoPassProofread(pageId, userId, { rowJson, text }) 
   }
 
   if (firstProofreader === userId) {
-    throw new Error('第二次校对必须由另一位校对员完成')
+    throw new Error('该条目需要由其他校对员处理')
   }
 
   const normalizedFirst = normalizeProofreadPayload(latest.first_proofread_row_json, latest.first_proofread_text)
