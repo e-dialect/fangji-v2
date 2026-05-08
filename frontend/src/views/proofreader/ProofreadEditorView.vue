@@ -15,7 +15,7 @@
             :disabled="currentPdfPage >= allowedPdfPages[1]"
             @click="switchPdfPage(1)"
           >下一页</button>
-          <RouterLink to="/tasks" class="btn btn-secondary btn-sm">← 返回</RouterLink>
+          <RouterLink to="/tasks" class="btn btn-secondary btn-sm">← 返回项目大厅</RouterLink>
         </div>
       </div>
       <div class="editor-panel-body" style="padding:0">
@@ -62,10 +62,13 @@
         <div v-if="loadingPage" class="text-muted">加载中...</div>
         <div v-else-if="!page" class="text-muted">页面不存在</div>
         <template v-else>
-          <div v-if="page.status === PAGE_STATUS.REJECTED" class="alert alert-error mb-3">
-            ⚠️ 此任务已被打回，请重新校对后再次提交。
+          <div v-if="isSecondPass" class="alert alert-success mb-3">
+            当前为第二次校对。若本次结果与第一次完全一致，该条目将自动完成。
           </div>
-          <div v-if="saved" class="alert alert-success mb-3">已成功提交，等待审核！</div>
+          <div v-else class="alert alert-success mb-3">
+            当前为第一次校对。提交后将等待另一位校对员进行第二次校对。
+          </div>
+          <div v-if="saved" class="alert alert-success mb-3">{{ saved }}</div>
           <div v-if="saveError" class="alert alert-error mb-3">{{ saveError }}</div>
 
           <label class="form-label">校对表格（按CSV栏目）</label>
@@ -117,7 +120,13 @@ import { useStructuredRow } from '@/composables/useStructuredRow'
 import { useTaskNeighbors } from '@/composables/useTaskNeighbors'
 import { PAGE_STATUS } from '@/constants/pageStatus'
 import { currentUserId as getCurrentUserId } from '@/services/authService'
-import { getPage, listProofreaderNeighborTasks, updatePage } from '@/services/pagesService'
+import {
+  claimNextProjectPage,
+  getPage,
+  listProofreaderNeighborTasks,
+  submitTwoPassProofread,
+  updatePage
+} from '@/services/pagesService'
 import { formatClaimConflict, getPbMessage } from '@/utils/pbErrors'
 
 const route = useRoute()
@@ -126,7 +135,7 @@ const router = useRouter()
 const page = ref(null)
 const loadingPage = ref(true)
 const saving = ref(false)
-const saved = ref(false)
+const saved = ref('')
 const saveError = ref('')
 
 const currentUserId = computed(() => getCurrentUserId() || '')
@@ -166,6 +175,8 @@ const {
   return listProofreaderNeighborTasks(currentPage.project, userId)
 })
 
+const isSecondPass = computed(() => Boolean(page.value?.first_proofreader))
+
 watch(() => route.params.id, async () => {
   await loadPage()
 }, { immediate: true })
@@ -176,7 +187,7 @@ async function loadPage() {
   resetNeighbors()
   resetPdf()
   saveError.value = ''
-  saved.value = false
+  saved.value = ''
 
   try {
     page.value = await getPage(route.params.id, { expand: 'project_file' })
@@ -190,7 +201,7 @@ async function loadPage() {
       await loadNeighbors()
     }
   } catch (e) {
-    saveError.value = formatClaimConflict(e, '加载任务失败，请返回任务大厅刷新后重试')
+    saveError.value = formatClaimConflict(e, '加载任务失败，请返回项目大厅刷新后重试')
   } finally {
     loadingPage.value = false
   }
@@ -207,7 +218,7 @@ function gotoNextTask() {
 }
 
 function onTextChange() {
-  saved.value = false
+  saved.value = ''
   saveError.value = ''
   markChanged()
 }
@@ -219,22 +230,28 @@ function insertText(char) {
 
 async function submitProofread() {
   saving.value = true
-  saved.value = false
+  saved.value = ''
   saveError.value = ''
-  const targetNextId = nextTaskId.value
+  const projectId = page.value?.project
+  const userId = currentUserId.value
+  const rowJson = stringifyEditedRow()
+  const text = editedText.value
   try {
-    await updatePage(page.value.id, {
-      proofread_row_json: stringifyEditedRow(),
-      proofread_text: editedText.value,
-      status: PAGE_STATUS.PROOFREAD,
-      proofread_at: new Date().toISOString()
+    const result = await submitTwoPassProofread(page.value.id, userId, {
+      rowJson,
+      text
     })
-    if (targetNextId) {
-      await router.push(`/tasks/${targetNextId}/edit`)
+    const nextPage = await claimNextProjectPage(projectId, userId)
+    if (nextPage?.id) {
+      await router.push(`/tasks/${nextPage.id}/edit`)
       return
     }
-    saved.value = true
-    page.value.status = PAGE_STATUS.PROOFREAD
+    page.value.status = result.status
+    saved.value = result.status === PAGE_STATUS.APPROVED
+      ? '两次校对结果一致，该条目已完成。当前项目暂无下一条可由你处理的任务。'
+      : result.status === PAGE_STATUS.PENDING
+        ? '两次校对结果不一致，该条目已退回任务池重新进行两次校对。当前项目暂无下一条可由你处理的任务。'
+        : '第一次校对已提交。当前项目暂无下一条可由你处理的任务。'
     await loadNeighbors()
   } catch (e) {
     saveError.value = getPbMessage(e, '提交失败，请重试')

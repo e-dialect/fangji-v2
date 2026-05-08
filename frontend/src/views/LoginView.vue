@@ -73,7 +73,6 @@ const canSubmit = computed(() => email.value.trim() && password.value)
 function getRoleHome() {
   if (auth.isAdmin) return '/admin'
   if (auth.isProofreader) return '/tasks'
-  if (auth.isReviewer) return '/review'
   return '/'
 }
 

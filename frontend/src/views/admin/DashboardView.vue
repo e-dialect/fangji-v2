@@ -17,7 +17,7 @@
       </div>
       <div class="stat-card">
         <div class="stat-value">{{ stats.approved }}</div>
-        <div class="stat-label">已审核通过</div>
+        <div class="stat-label">校对完成</div>
       </div>
     </div>
 
@@ -54,7 +54,7 @@
                 <div class="progress" style="margin-bottom:.25rem">
                   <div class="progress-bar" :style="{ width: progressPct(p.id) + '%' }"></div>
                 </div>
-                <span class="text-sm text-muted">{{ progressPct(p.id) }}% 已审核</span>
+                <span class="text-sm text-muted">{{ progressPct(p.id) }}% 已完成</span>
               </td>
               <td class="text-sm text-muted">{{ formatDate(p.created) }}</td>
               <td>

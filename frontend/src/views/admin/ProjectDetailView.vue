@@ -23,14 +23,14 @@
           </div>
           <div class="stat-card">
             <div class="stat-value">{{ pageStats.approved }}</div>
-            <div class="stat-label">已审核通过</div>
+            <div class="stat-label">校对完成</div>
           </div>
         </div>
         <div v-if="pageStats.total > 0" class="mt-4">
           <div class="progress">
             <div class="progress-bar" :style="{ width: approvedPct + '%' }"></div>
           </div>
-          <span class="text-sm text-muted mt-1">审核进度: {{ approvedPct }}%</span>
+          <span class="text-sm text-muted mt-1">完成进度: {{ approvedPct }}%</span>
         </div>
       </div>
 
@@ -80,7 +80,7 @@
       <div class="card mb-6">
         <div class="card-title">导出结果</div>
         <p class="text-sm text-muted mb-3">
-          导出当前项目的校对结果 CSV。优先使用结构化校对内容（proofread_row_json），没有则回退到原始内容。
+          导出当前项目的最终校对结果 CSV。只有两次校对一致后的条目会使用最终校对内容，其余条目回退到原始内容。
         </p>
         <div class="flex gap-2 items-center">
           <button class="btn btn-primary" @click="exportCsv" :disabled="exportingCsv">
@@ -133,8 +133,9 @@
                 <th style="width:64px">选择</th>
                 <th>条号</th>
                 <th>状态</th>
-                <th>校对员</th>
-                <th>审核员</th>
+                <th>一校</th>
+                <th>二校</th>
+                <th>退回次数</th>
                 <th>OCR文本预览</th>
                 <th style="width:160px">顺序</th>
               </tr>
@@ -151,8 +152,9 @@
                 </td>
                 <td>第 {{ formatItemNo(pg.page_number, idx) }} 条</td>
                 <td><span :class="statusBadgeClass(pg.status)" class="badge">{{ statusLabel(pg.status) }}</span></td>
-                <td class="text-sm text-muted">{{ pg.expand?.proofreader?.name || '—' }}</td>
-                <td class="text-sm text-muted">{{ pg.expand?.reviewer?.name || '—' }}</td>
+                <td class="text-sm text-muted">{{ pg.expand?.first_proofreader?.name || pg.expand?.first_proofreader?.email || '—' }}</td>
+                <td class="text-sm text-muted">{{ pg.expand?.second_proofreader?.name || pg.expand?.second_proofreader?.email || '—' }}</td>
+                <td class="text-sm text-muted">{{ pg.mismatch_count || 0 }}</td>
                 <td class="text-sm text-muted" style="max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                   {{ pg.ocr_text?.slice(0, 80) || '—' }}
                 </td>
@@ -269,7 +271,7 @@ async function loadPages() {
     let result
     do {
       result = await getPagedProjectPages(projectId, page, perPage, {
-        expand: 'proofreader,reviewer'
+        expand: 'proofreader,first_proofreader,second_proofreader'
       })
       allPages.push(...result.items)
       page += 1
@@ -367,6 +369,8 @@ async function uploadCsv() {
         pdf_page: pdfPage,
         ocr_row_json: JSON.stringify(structuredRow),
         ocr_text: entryText,
+        proofread_round: 1,
+        mismatch_count: 0,
         status: PAGE_STATUS.PENDING
       })
       created++
@@ -390,7 +394,7 @@ async function exportCsv() {
   exportSuccess.value = ''
   try {
     const all = await listAllProjectPages(projectId, {
-      fields: 'id,page_number,pdf_page,ocr_text,proofread_text,ocr_row_json,proofread_row_json'
+      fields: 'id,page_number,pdf_page,status,ocr_text,proofread_text,ocr_row_json,proofread_row_json'
     })
     if (!all.length) {
       throw new Error('当前项目暂无可导出的条目')
@@ -398,7 +402,9 @@ async function exportCsv() {
 
     const headers = []
     const rows = all.map((item) => {
-      const proofObj = safeParseRowJson(item.proofread_row_json)
+      const proofObj = item.status === PAGE_STATUS.APPROVED
+        ? safeParseRowJson(item.proofread_row_json)
+        : null
       const ocrObj = safeParseRowJson(item.ocr_row_json)
       const rowObj = proofObj || ocrObj || { 内容: item.proofread_text || item.ocr_text || '' }
       for (const key of Object.keys(rowObj)) {

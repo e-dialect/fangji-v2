@@ -14,7 +14,7 @@ migrate((db) => {
     required: true,
     options: {
       maxSelect: 1,
-      values: ["admin", "proofreader", "reviewer"]
+      values: ["admin", "proofreader"]
     }
   }))
 
@@ -61,6 +61,17 @@ migrate((db) => {
       { name: "status", type: "select", required: true, options: { maxSelect: 1, values: ["pending", "claimed", "proofreading", "proofread", "reviewing", "approved", "rejected"] } },
       { name: "proofreader", type: "relation", required: false, options: { collectionId: "_pb_users_auth_", cascadeDelete: false, minSelect: null, maxSelect: 1, displayFields: ["email"] } },
       { name: "reviewer", type: "relation", required: false, options: { collectionId: "_pb_users_auth_", cascadeDelete: false, minSelect: null, maxSelect: 1, displayFields: ["email"] } },
+      { name: "first_proofreader", type: "relation", required: false, options: { collectionId: "_pb_users_auth_", cascadeDelete: false, minSelect: null, maxSelect: 1, displayFields: ["email"] } },
+      { name: "first_proofread_text", type: "text", required: false, options: { min: null, max: null, pattern: "" } },
+      { name: "first_proofread_row_json", type: "text", required: false, options: { min: null, max: null, pattern: "" } },
+      { name: "first_proofread_at", type: "date", required: false, options: {} },
+      { name: "second_proofreader", type: "relation", required: false, options: { collectionId: "_pb_users_auth_", cascadeDelete: false, minSelect: null, maxSelect: 1, displayFields: ["email"] } },
+      { name: "second_proofread_text", type: "text", required: false, options: { min: null, max: null, pattern: "" } },
+      { name: "second_proofread_row_json", type: "text", required: false, options: { min: null, max: null, pattern: "" } },
+      { name: "second_proofread_at", type: "date", required: false, options: {} },
+      { name: "proofread_round", type: "number", required: false, options: { min: 1, max: null, noDecimal: true } },
+      { name: "mismatch_count", type: "number", required: false, options: { min: 0, max: null, noDecimal: true } },
+      { name: "last_mismatch_at", type: "date", required: false, options: {} },
       { name: "proofread_at", type: "date", required: false, options: {} },
       { name: "reviewed_at", type: "date", required: false, options: {} }
     ]
