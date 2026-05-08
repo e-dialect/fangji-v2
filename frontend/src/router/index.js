@@ -74,6 +74,11 @@ const routes = [
         component: () => import('@/views/proofreader/TaskHallView.vue')
       },
       {
+        path: 'profile',
+        name: 'ProofreaderProfile',
+        component: () => import('@/views/proofreader/ProfileView.vue')
+      },
+      {
         path: ':id/edit',
         name: 'ProofreadEditor',
         component: () => import('@/views/proofreader/ProofreadEditorView.vue')
