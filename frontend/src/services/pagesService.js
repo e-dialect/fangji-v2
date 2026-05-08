@@ -216,13 +216,19 @@ export async function claimNextProjectPage(projectId, userId) {
   })
 
   const claimable = candidates.filter((page) => isPageClaimableBy(page, userId))
+  let lastClaimError = null
   for (const page of claimable) {
     try {
       return await claimProofreadTask(page.id, userId)
-    } catch {
+    } catch (error) {
+      lastClaimError = error
       // Another proofreader may have claimed this page between list and update.
       // Continue through the ordered queue and surface an error only if none work.
     }
+  }
+
+  if (claimable.length && lastClaimError) {
+    throw lastClaimError
   }
 
   return null
