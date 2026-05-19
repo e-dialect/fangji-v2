@@ -233,17 +233,25 @@ async function submitProofread() {
       rowJson,
       text
     })
-    const nextPage = await claimNextProjectPage(projectId, userId)
-    if (nextPage?.id) {
-      await router.push(`/tasks/${nextPage.id}/edit`)
-      return
-    }
     page.value.status = result.status
     saved.value = result.status === PAGE_STATUS.APPROVED
-      ? '该条目已完成。当前项目暂无下一条可由你处理的任务。'
+      ? '该条目已完成。'
       : result.status === PAGE_STATUS.PENDING
-        ? '该条目已退回任务池。当前项目暂无下一条可由你处理的任务。'
-        : '校对已提交。当前项目暂无下一条可由你处理的任务。'
+        ? '该条目已退回任务池。'
+        : '校对已提交。'
+
+    try {
+      const nextPage = await claimNextProjectPage(projectId, userId)
+      if (nextPage?.id) {
+        await router.push(`/tasks/${nextPage.id}/edit`)
+        return
+      }
+      saved.value += ' 当前项目暂无下一条可由你处理的任务。'
+    } catch (claimError) {
+      saved.value += ' 自动接取下一条失败，请返回项目大厅刷新后重试。'
+      console.warn('Failed to claim next page after successful proofread submit:', claimError)
+    }
+
     await loadNeighbors()
   } catch (e) {
     saveError.value = getPbMessage(e, '提交失败，请重试')

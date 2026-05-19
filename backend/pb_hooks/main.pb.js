@@ -58,10 +58,11 @@ onRecordBeforeCreateRequest((e) => {
 // - pending/proofread → claimed: only allowed while the page is still claimable
 //   and a second proofreading pass cannot be claimed by the first proofreader.
 onRecordBeforeUpdateRequest((e) => {
-  const newStatus = e.record.getString("status")
-  if (newStatus !== "claimed") {
+  const authRecord = e.httpContext?.get && e.httpContext.get("authRecord")
+  if (authRecord?.getString && authRecord.getString("role") === "admin") {
     return
   }
+
   const recordId = e.record.getId()
   if (!recordId) {
     throw new BadRequestError("无效的页面记录ID")
@@ -75,17 +76,60 @@ onRecordBeforeUpdateRequest((e) => {
   }
 
   const oldStatus = current.getString("status")
+  const newStatus = e.record.getString("status")
+  const claimableStatus = oldStatus === "pending" || oldStatus === "proofread"
+  if (!claimableStatus && newStatus !== "claimed") {
+    return
+  }
+
   const authId = e.httpContext?.get && e.httpContext.get("authRecord")?.id
   const newProofreader = e.record.getString("proofreader") || authId
 
-  if (oldStatus !== "pending" && oldStatus !== "proofread") {
+  if (!claimableStatus) {
     throw new BadRequestError("该任务已被其他校对员认领")
   }
 
+  if (newStatus !== "claimed") {
+    throw new BadRequestError("待认领任务只允许执行认领操作")
+  }
   if (!newProofreader) {
     throw new BadRequestError("认领任务失败：缺少校对员身份")
   }
+  if (authRecord && newProofreader !== authId) {
+    throw new BadRequestError("认领任务失败：校对员身份不匹配")
+  }
   if (oldStatus === "proofread" && current.getString("first_proofreader") === newProofreader) {
     throw new BadRequestError("该条目需要由其他校对员处理")
+  }
+
+  const claimOnlyFields = [
+    "project",
+    "project_file",
+    "page_number",
+    "pdf_page",
+    "image",
+    "ocr_text",
+    "ocr_row_json",
+    "proofread_text",
+    "proofread_row_json",
+    "reviewer",
+    "first_proofreader",
+    "first_proofread_text",
+    "first_proofread_row_json",
+    "first_proofread_at",
+    "second_proofreader",
+    "second_proofread_text",
+    "second_proofread_row_json",
+    "second_proofread_at",
+    "proofread_round",
+    "mismatch_count",
+    "last_mismatch_at",
+    "proofread_at",
+    "reviewed_at"
+  ]
+  for (const field of claimOnlyFields) {
+    if (String(e.record.get(field) ?? "") !== String(current.get(field) ?? "")) {
+      throw new BadRequestError("认领任务时不允许修改页面内容")
+    }
   }
 }, "pages")

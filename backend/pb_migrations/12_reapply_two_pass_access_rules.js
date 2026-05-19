@@ -41,7 +41,8 @@ migrate((db) => {
   pages.createRule = '@request.auth.role = "admin"'
   pages.updateRule = [
     '@request.auth.role = "admin"',
-    '|| (@request.auth.role = "proofreader" && (status = "pending" || status = "proofread" || proofreader = @request.auth.id))'
+    '|| (@request.auth.role = "proofreader" && proofreader = @request.auth.id)',
+    '|| (@request.auth.role = "proofreader" && (status = "pending" || status = "proofread") && @request.data.status = "claimed" && @request.data.proofreader = @request.auth.id)'
   ].join(" ")
   pages.deleteRule = '@request.auth.role = "admin"'
 
@@ -62,7 +63,8 @@ migrate((db) => {
   pages.createRule = '@request.auth.role = "admin"'
   pages.updateRule = [
     '@request.auth.role = "admin"',
-    '|| (@request.auth.role = "proofreader" && (status = "pending" || proofreader = @request.auth.id))',
+    '|| (@request.auth.role = "proofreader" && proofreader = @request.auth.id)',
+    '|| (@request.auth.role = "proofreader" && status = "pending" && @request.data.status = "claimed" && @request.data.proofreader = @request.auth.id)',
     '|| (@request.auth.role = "reviewer" && (status = "proofread" || reviewer = @request.auth.id))'
   ].join(" ")
   pages.deleteRule = '@request.auth.role = "admin"'
