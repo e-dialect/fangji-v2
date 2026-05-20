@@ -15,6 +15,7 @@ export default defineConfig({
     host: '0.0.0.0',
     port: devServerPort,
     strictPort: true,
+    allowedHosts: ['imac.tajuren.cn'],
 
     // 关键：Docker + Windows 热更新稳定性
     watch: {
