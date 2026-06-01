@@ -41,6 +41,96 @@
 //       proofreader 可领取 pending 或 proofread（二校）页面，且可更新自己负责的页面
 //   - deleteRule: @request.auth.role = "admin"
 
+function trimEnv(name) {
+  return ($os.getenv(name) || "").trim()
+}
+
+function ensureInitialAppAdmin() {
+  const email = trimEnv("APP_ADMIN_EMAIL").toLowerCase()
+  const password = $os.getenv("APP_ADMIN_PASSWORD") || ""
+  const name = trimEnv("APP_ADMIN_NAME") || "管理员"
+
+  if (!email && !password) {
+    return
+  }
+  if (!email || !password) {
+    console.warn("APP_ADMIN_EMAIL and APP_ADMIN_PASSWORD must be set together; skipping app admin bootstrap.")
+    return
+  }
+  if (password.length < 8) {
+    console.warn("APP_ADMIN_PASSWORD must be at least 8 characters; skipping app admin bootstrap.")
+    return
+  }
+
+  const dao = $app.dao()
+  let existing = null
+  try {
+    existing = dao.findAuthRecordByEmail("users", email)
+  } catch {}
+
+  if (existing) {
+    let changed = false
+    if (existing.getString("role") !== "admin") {
+      existing.set("role", "admin")
+      changed = true
+    }
+    if (!existing.verified()) {
+      existing.setVerified(true)
+      changed = true
+    }
+    if (changed) {
+      dao.saveRecord(existing)
+      console.log("Updated existing app admin:", email)
+    }
+    return
+  }
+
+  const users = dao.findCollectionByNameOrId("users")
+  const record = new Record(users)
+  record.setEmail(email)
+  record.setEmailVisibility(true)
+  record.setPassword(password)
+  record.setVerified(true)
+  record.set("name", name)
+  record.set("role", "admin")
+  dao.saveRecord(record)
+  console.log("Created initial app admin:", email)
+}
+
+function ensureInitialPocketBaseAdmin() {
+  const email = trimEnv("PB_ADMIN_EMAIL").toLowerCase()
+  const password = $os.getenv("PB_ADMIN_PASSWORD") || ""
+
+  if (!email && !password) {
+    return
+  }
+  if (!email || !password) {
+    console.warn("PB_ADMIN_EMAIL and PB_ADMIN_PASSWORD must be set together; skipping PocketBase admin bootstrap.")
+    return
+  }
+  if (password.length < 10) {
+    console.warn("PB_ADMIN_PASSWORD must be at least 10 characters; skipping PocketBase admin bootstrap.")
+    return
+  }
+
+  const dao = $app.dao()
+  try {
+    dao.findAdminByEmail(email)
+    return
+  } catch {}
+
+  const admin = new Admin()
+  admin.email = email
+  admin.setPassword(password)
+  dao.saveAdmin(admin)
+  console.log("Created initial PocketBase admin:", email)
+}
+
+onAfterBootstrap((e) => {
+  ensureInitialAppAdmin()
+  ensureInitialPocketBaseAdmin()
+})
+
 // Hook: when a project_file is created, log it (actual OCR processing
 // would be done by an external worker or manual upload)
 onRecordAfterCreateRequest((e) => {

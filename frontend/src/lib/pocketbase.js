@@ -1,5 +1,12 @@
 import PocketBase from 'pocketbase'
 
-const pb = new PocketBase(import.meta.env.VITE_PB_URL || 'http://127.0.0.1:8090')
+const runtimePbUrl = globalThis.__FANGJI_PB_URL__ || '__FANGJI_PB_URL__'
+const buildTimePbUrl = import.meta.env.VITE_PB_URL
+
+const pbUrl = runtimePbUrl !== '__FANGJI_PB_URL__'
+  ? runtimePbUrl
+  : buildTimePbUrl || window.location.origin
+
+const pb = new PocketBase(pbUrl)
 
 export default pb

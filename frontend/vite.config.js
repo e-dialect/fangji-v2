@@ -3,6 +3,12 @@ import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 
 const devServerPort = Number(process.env.VITE_DEV_SERVER_PORT || 5173)
+const devServerAllowedHosts = process.env.VITE_ALLOWED_HOSTS
+const allowedHosts = devServerAllowedHosts === 'true'
+  ? true
+  : devServerAllowedHosts
+    ? devServerAllowedHosts.split(',').map((host) => host.trim()).filter(Boolean)
+    : undefined
 
 export default defineConfig({
   plugins: [vue()],
@@ -15,7 +21,7 @@ export default defineConfig({
     host: '0.0.0.0',
     port: devServerPort,
     strictPort: true,
-    allowedHosts: ['imac.tajuren.cn'],
+    ...(allowedHosts ? { allowedHosts } : {}),
 
     // 关键：Docker + Windows 热更新稳定性
     watch: {

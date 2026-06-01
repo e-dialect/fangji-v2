@@ -14,7 +14,9 @@ RUN curl -Lo /tmp/pocketbase.zip \
 
 COPY pb_hooks/     /pb/pb_hooks/
 COPY pb_migrations/ /pb/pb_migrations/
+COPY docker-entrypoint.sh /pb/docker-entrypoint.sh
+RUN chmod +x /pb/docker-entrypoint.sh
 
 EXPOSE 8090
 
-CMD ["/pb/pocketbase", "serve", "--http=0.0.0.0:8090"]
+CMD ["/pb/docker-entrypoint.sh"]
