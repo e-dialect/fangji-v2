@@ -62,6 +62,12 @@ onAfterBootstrap((e) => {
     }
 
     const dao = $app.dao()
+    const users = dao.findCollectionByNameOrId("users")
+    if (!users.schema.getFieldByName("role")) {
+      console.warn("users.role is not ready yet; skipping app admin bootstrap until migrations finish.")
+      return
+    }
+
     let existing = null
     try {
       existing = dao.findAuthRecordByEmail("users", email)
@@ -86,7 +92,6 @@ onAfterBootstrap((e) => {
       return
     }
 
-    const users = dao.findCollectionByNameOrId("users")
     const record = new Record(users)
     record.setEmail(email)
     record.setEmailVisibility(true)

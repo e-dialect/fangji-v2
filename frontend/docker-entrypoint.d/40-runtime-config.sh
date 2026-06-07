@@ -1,14 +1,16 @@
 #!/bin/sh
 set -eu
 
-if [ -z "${PB_URL:-}" ]; then
-  echo "PB_URL is empty; frontend will use window.location.origin."
+backend_url="${VITE_BACKEND_URL:-${PB_URL:-}}"
+
+if [ -z "$backend_url" ]; then
+  echo "VITE_BACKEND_URL is empty; frontend will use window.location.origin."
   exit 0
 fi
 
-escaped_pb_url="$(printf '%s' "$PB_URL" | sed -e 's/[\/&]/\\&/g')"
+escaped_backend_url="$(printf '%s' "$backend_url" | sed -e 's/[\/&]/\\&/g')"
 
 find /usr/share/nginx/html -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' \) \
-  -exec sed -i "s|__FANGJI_PB_URL__|${escaped_pb_url}|g" {} +
+  -exec sed -i "s|VITE_BACKEND_URL_RUNTIME_REPLACEMENT|${escaped_backend_url}|g" {} +
 
-echo "Configured frontend PocketBase URL: ${PB_URL}"
+echo "Configured frontend backend URL: ${backend_url}"

@@ -72,8 +72,8 @@ docker compose down
 说明：
 
 - `docker-compose.yml` 是生产/部署入口，不再使用 Vite dev server 对外服务，因此不需要维护 Vite `allowedHosts`。
-- `PB_URL` 留空时，前端自动使用 `window.location.origin`，适合同域名或同端口反向代理部署。
-- `PB_URL` 设置为完整后端地址时，前端会在容器启动时动态替换构建产物里的占位符，适合前后端不同域名部署。
+- `BACKEND_URL` 留空时，前端自动使用 `window.location.origin`，适合同域名或同端口反向代理部署。
+- `BACKEND_URL` 设置为完整后端地址时，前端容器会把构建产物里的 `VITE_BACKEND_URL_RUNTIME_REPLACEMENT` 替换成该地址，适合前后端不同域名部署。
 - PocketBase 数据通过 Docker volume `pb_data` 持久化，重建容器不会清空数据库和上传文件。
 - PocketBase schema 和 API rules 由 `backend/pb_migrations` 自动应用。
 
@@ -147,7 +147,7 @@ npm run build
 npm run preview
 ```
 
-构建产物位于 `frontend/dist/`。Docker 生产镜像支持运行时 `PB_URL` 覆盖，因此同一份镜像可以部署到不同域名。
+构建产物位于 `frontend/dist/`。Docker 生产镜像支持运行时 `BACKEND_URL` 覆盖，因此同一份镜像可以部署到不同域名。
 
 ### 云服务器部署
 
@@ -166,6 +166,7 @@ cp .env.example .env
 ```env
 FRONTEND_PORT=8080
 BACKEND_PORT=127.0.0.1:8090
+BACKEND_URL=
 PB_URL=
 PB_ALLOWED_ORIGINS=
 APP_ADMIN_EMAIL=admin@example.com
@@ -188,7 +189,8 @@ https://fangji.example.com/_/    -> PocketBase Admin UI
 ```env
 FRONTEND_PORT=8080
 BACKEND_PORT=127.0.0.1:8090
-PB_URL=https://api.fangji.example.com
+BACKEND_URL=https://api.fangji.example.com
+PB_URL=
 PB_ALLOWED_ORIGINS=https://fangji.example.com
 APP_ADMIN_EMAIL=admin@example.com
 APP_ADMIN_PASSWORD=请换成强密码

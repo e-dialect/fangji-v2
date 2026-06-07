@@ -1,10 +1,10 @@
 import PocketBase from 'pocketbase'
 
-const runtimePbUrl = globalThis.__FANGJI_PB_URL__ || '__FANGJI_PB_URL__'
+const runtimeBackendUrl = globalThis.__FANGJI_BACKEND_URL__ || 'VITE_BACKEND_URL_RUNTIME_REPLACEMENT'
 const buildTimePbUrl = import.meta.env.VITE_PB_URL
 
-const pbUrl = runtimePbUrl !== '__FANGJI_PB_URL__'
-  ? runtimePbUrl
+const pbUrl = runtimeBackendUrl !== 'VITE_BACKEND_URL_RUNTIME_REPLACEMENT'
+  ? runtimeBackendUrl
   : buildTimePbUrl || window.location.origin
 
 const pb = new PocketBase(pbUrl)
