@@ -15,7 +15,8 @@ RUN curl -Lo /tmp/pocketbase.zip \
 COPY pb_hooks/     /pb/pb_hooks/
 COPY pb_migrations/ /pb/pb_migrations/
 COPY docker-entrypoint.sh /pb/docker-entrypoint.sh
-RUN chmod +x /pb/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /pb/docker-entrypoint.sh \
+    && chmod +x /pb/docker-entrypoint.sh
 
 WORKDIR /pb
 

@@ -42,12 +42,19 @@
 //   - deleteRule: @request.auth.role = "admin"
 
 onAfterBootstrap((e) => {
+  if (($os.getenv("FANGJI_SKIP_ADMIN_BOOTSTRAP") || "").trim() === "1") {
+    return
+  }
+
   const trimEnv = (name) => ($os.getenv(name) || "").trim()
 
   const ensureInitialAppAdmin = () => {
     const email = trimEnv("APP_ADMIN_EMAIL").toLowerCase()
     const password = $os.getenv("APP_ADMIN_PASSWORD") || ""
     const name = trimEnv("APP_ADMIN_NAME") || "管理员"
+    const username = `admin_${email.split("@")[0]}`
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, "_")
 
     if (!email && !password) {
       return
@@ -62,7 +69,13 @@ onAfterBootstrap((e) => {
     }
 
     const dao = $app.dao()
-    const users = dao.findCollectionByNameOrId("users")
+    let users = null
+    try {
+      users = dao.findCollectionByNameOrId("users")
+    } catch {
+      console.warn("users collection is not ready yet; skipping app admin bootstrap until migrations finish.")
+      return
+    }
     if (!users.schema.getFieldByName("role")) {
       console.warn("users.role is not ready yet; skipping app admin bootstrap until migrations finish.")
       return
@@ -93,6 +106,7 @@ onAfterBootstrap((e) => {
     }
 
     const record = new Record(users)
+    record.set("username", username)
     record.setEmail(email)
     record.setEmailVisibility(true)
     record.setPassword(password)
@@ -135,8 +149,17 @@ onAfterBootstrap((e) => {
     console.log("Created initial PocketBase admin:", email)
   }
 
-  ensureInitialAppAdmin()
-  ensureInitialPocketBaseAdmin()
+  try {
+    ensureInitialAppAdmin()
+  } catch (err) {
+    console.warn("App admin bootstrap skipped:", err)
+  }
+
+  try {
+    ensureInitialPocketBaseAdmin()
+  } catch (err) {
+    console.warn("PocketBase admin bootstrap skipped:", err)
+  }
 })
 
 // Hook: when a project_file is created, log it (actual OCR processing

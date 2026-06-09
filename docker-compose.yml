@@ -14,7 +14,7 @@ services:
       - PB_ALLOWED_ORIGINS=${PB_ALLOWED_ORIGINS:-}
     volumes:
       # Persist PocketBase data (uploads, database) across container restarts
-      - ./pb_data:/pb/pb_data
+      - pb_data:/pb/pb_data
     restart: unless-stopped
 
   frontend:
@@ -36,3 +36,6 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  pb_data:
