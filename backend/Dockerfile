@@ -17,6 +17,8 @@ COPY pb_migrations/ /pb/pb_migrations/
 COPY docker-entrypoint.sh /pb/docker-entrypoint.sh
 RUN chmod +x /pb/docker-entrypoint.sh
 
+WORKDIR /pb
+
 EXPOSE 8090
 
 CMD ["/pb/docker-entrypoint.sh"]

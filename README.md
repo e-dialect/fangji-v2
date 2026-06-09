@@ -483,6 +483,17 @@ docker compose logs -f frontend
 
 迁移只会执行一次。如果已用旧数据启动过，并确认不需要旧数据，可删除对应 `pb_data` volume 后重新启动。
 
+### 首次 Docker 部署后端报 `_collections` 不存在
+
+这是 PocketBase 数据库没有完成初始化时读取 collections 造成的。当前 Dockerfile 会固定在 `/pb` 启动，并将数据库写入 `/pb/pb_data`，确保数据卷、迁移和 hooks 使用同一目录。
+
+如果曾经用旧镜像首次启动失败，并且确认没有需要保留的数据，可清理旧 volume 后重新构建：
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
 ### 注册后不是管理员
 
 这是预期行为。公开注册用户会被后端 hook 固定为 `proofreader`。管理员账号请在 PocketBase Admin UI 中创建或修改 `users.role`。
