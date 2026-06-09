@@ -60,16 +60,16 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up -d --
 
 Traefik 部署时访问：
 
-- 前端：`https://imac.tajuren.cn`
-- PocketBase Admin UI：`https://imac.tajuren.cn/_/`
-- PocketBase API：`https://imac.tajuren.cn/api/`
+- 前端：`https://fangji.example.com`
+- PocketBase Admin UI：`https://fangji.example.com/_/`
+- PocketBase API：`https://fangji.example.com/api/`
 
 生产模式下前端会先构建为静态文件，再由 Nginx 托管。默认同源访问 PocketBase：
 
 ```txt
-https://imac.tajuren.cn/      -> 前端
-https://imac.tajuren.cn/api/  -> PocketBase API
-https://imac.tajuren.cn/_/    -> PocketBase Admin UI
+https://fangji.example.com/      -> 前端
+https://fangji.example.com/api/  -> PocketBase API
+https://fangji.example.com/_/    -> PocketBase Admin UI
 ```
 
 常用命令：
@@ -481,7 +481,7 @@ proofreading -> pending
 
 ### Docker Compose 启动后访问不到前端
 
-本项目默认生产入口由 Traefik 暴露，例如 `https://imac.tajuren.cn`。如果本机没有 Traefik，请取消注释 `docker-compose.yml` 里的 `frontend.ports` 后再访问对应宿主机端口。开发模式前端地址是 `http://localhost:5250`；如果访问 `5173`，那是手动本地开发的默认端口。
+本项目默认生产入口由 Traefik 暴露，例如 `https://fangji.example.com`。如果本机没有 Traefik，请取消注释 `docker-compose.yml` 里的 `frontend.ports` 后再访问对应宿主机端口。开发模式前端地址是 `http://localhost:5250`；如果访问 `5173`，那是手动本地开发的默认端口。
 
 可先检查容器状态和日志：
 
