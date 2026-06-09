@@ -1,0 +1,7 @@
+services:
+  backend:
+    volumes:
+      - pb_data:/pb/pb_data
+
+volumes:
+  pb_data:

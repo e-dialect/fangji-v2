@@ -13,8 +13,8 @@ services:
       - PB_ADMIN_PASSWORD=${PB_ADMIN_PASSWORD:-}
       - PB_ALLOWED_ORIGINS=${PB_ALLOWED_ORIGINS:-}
     volumes:
-      # Persist PocketBase data (uploads, database) across container restarts
-      - pb_data:/pb/pb_data
+      # Persist PocketBase data on the host for easy backup and migration.
+      - ./pb_data:/pb/pb_data
     restart: unless-stopped
 
   frontend:
@@ -36,6 +36,3 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
-
-volumes:
-  pb_data:

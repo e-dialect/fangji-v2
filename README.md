@@ -45,6 +45,13 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+Windows 宿主机如果不适合直接挂载 `./pb_data`，用 Docker named volume 启动：
+
+```bash
+cp .env.example .env
+docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up -d --build
+```
+
 生产 `.env` 里通常只需要先改：
 
 - `TRAEFIK_HOST`：公网域名。
@@ -81,7 +88,7 @@ docker compose down
 - Traefik 容器必须和 `frontend` 容器共享 Docker network；如果 Traefik 在另一个 compose 项目里，请把它接入本项目网络或给本项目增加 Traefik 的 external network。
 - `BACKEND_URL` 留空时，前端自动使用 `window.location.origin`，适合同域名或同端口反向代理部署。
 - `BACKEND_URL` 设置为完整后端地址时，前端容器会把构建产物里的 `VITE_BACKEND_URL_RUNTIME_REPLACEMENT` 替换成该地址，适合前后端不同域名部署。
-- PocketBase 数据通过本地目录 `./pb_data` 持久化，重建容器不会清空数据库和上传文件。
+- PocketBase 数据默认通过本地目录 `./pb_data` 持久化，重建容器不会清空数据库和上传文件。Windows 宿主机如果遇到 SQLite 或文件挂载问题，可叠加 `docker-compose.named-volume.yml` 改用 Docker named volume。
 - PocketBase schema 和 API rules 由 `backend/pb_migrations` 自动应用。
 
 ### Docker Compose 开发模式
@@ -91,6 +98,13 @@ docker compose down
 ```bash
 cp .env.dev.example .env
 docker compose -f docker-compose.dev.yml up --build
+```
+
+Windows 宿主机可改用 named volume：
+
+```bash
+cp .env.dev.example .env
+docker compose -f docker-compose.dev.yml -f docker-compose.named-volume.yml up --build
 ```
 
 启动后访问：
@@ -112,6 +126,7 @@ docker compose -f docker-compose.dev.yml down
 
 - Docker 前端开发端口默认使用 `5250`，配置在 [.env.dev.example](.env.dev.example)。
 - 前端代码挂载到容器内，支持热更新。
+- PocketBase 数据默认写入项目根目录 `./pb_data`；Windows 宿主机可叠加 `docker-compose.named-volume.yml` 使用 Docker named volume。
 
 ### 手动本地开发
 
@@ -382,6 +397,7 @@ fangji-v2/
 ├── .env.dev.example
 ├── docker-compose.yml
 ├── docker-compose.dev.yml
+├── docker-compose.named-volume.yml
 ├── frontend/
 │   ├── Dockerfile
 │   ├── nginx.conf
@@ -481,17 +497,27 @@ docker compose logs -f frontend
 - `backend/pb_migrations/`
 - `backend/pb_hooks/`
 
-迁移只会执行一次。如果已用旧数据启动过，并确认不需要旧数据，可删除对应 `pb_data` volume 后重新启动。
+迁移只会执行一次。如果已用旧数据启动过，并确认不需要旧数据：默认本地目录模式可清空 `./pb_data` 后重新启动；如果叠加 `docker-compose.named-volume.yml`，则可用 `docker compose -f docker-compose.yml -f docker-compose.named-volume.yml down -v` 删除对应 named volume 后重新启动。
 
 ### 首次 Docker 部署后端报 `_collections` 不存在
 
 这是 PocketBase 数据库没有完成初始化时读取 collections 造成的。当前 Dockerfile 会固定在 `/pb` 启动，并将数据库写入 `/pb/pb_data`，确保数据卷、迁移和 hooks 使用同一目录。
 
-如果曾经用旧镜像首次启动失败，并且确认没有需要保留的数据，可清理旧 volume 后重新构建：
+如果曾经用旧镜像首次启动失败，并且确认没有需要保留的数据，可清理旧数据后重新构建。
+
+默认本地目录模式：
 
 ```bash
-docker compose down -v
+docker compose down
+rm -rf pb_data/*
 docker compose up --build
+```
+
+如果叠加 `docker-compose.named-volume.yml`：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.named-volume.yml down -v
+docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up --build
 ```
 
 ### 注册后不是管理员

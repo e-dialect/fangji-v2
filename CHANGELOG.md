@@ -6,7 +6,7 @@
 
 - 将生产 Docker Compose 默认入口调整为 Traefik，由 Traefik 路由到 `frontend` 容器的 `80` 端口。
 - 保留但默认注释 `frontend` 和 `backend` 的宿主机 `ports` 映射，便于无 Traefik 或本机调试时手动启用。
-- 将 PocketBase 数据从 Docker named volume 改为本地目录 `./pb_data`，便于备份和迁移。
+- 将 PocketBase 数据默认持久化到本地目录 `./pb_data`，便于备份和迁移；Windows 宿主机可叠加 `docker-compose.named-volume.yml` 切换为 Docker named volume。
 - 拆分环境变量示例：
   - `.env.example` 用于生产 `docker-compose.yml`。
   - `.env.dev.example` 用于开发 `docker-compose.dev.yml`。
