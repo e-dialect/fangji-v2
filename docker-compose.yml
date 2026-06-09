@@ -1,8 +1,10 @@
 services:
   backend:
     build: ./backend
-    ports:
-      - "${BACKEND_PORT:-127.0.0.1:8090}:8090"
+    # Optional host-side backend binding for local reverse proxy/debug access.
+    # Traefik deployments should keep this disabled and let frontend proxy /api to backend:8090.
+    # ports:
+    #   - "${BACKEND_PORT:-127.0.0.1:8090}:8090"
     environment:
       - APP_ADMIN_EMAIL=${APP_ADMIN_EMAIL:-}
       - APP_ADMIN_PASSWORD=${APP_ADMIN_PASSWORD:-}
@@ -12,20 +14,25 @@ services:
       - PB_ALLOWED_ORIGINS=${PB_ALLOWED_ORIGINS:-}
     volumes:
       # Persist PocketBase data (uploads, database) across container restarts
-      - pb_data:/pb/pb_data
+      - ./pb_data:/pb/pb_data
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
-    ports:
-      - "${FRONTEND_PORT:-8080}:80"
+    # Optional direct host port mapping. Keep disabled when Traefik routes to this container.
+    # ports:
+    #   - "${FRONTEND_PORT:-8080}:80"
+    labels:
+      - "traefik.enable=${TRAEFIK_ENABLE:-true}"
+      - "traefik.http.routers.fangji.rule=Host(`${TRAEFIK_HOST:-fangji.example.com}`)"
+      - "traefik.http.routers.fangji.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.fangji.tls=true"
+      - "traefik.http.routers.fangji.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+      # Traefik should route to the frontend Nginx container port, not the host port or backend port.
+      - "traefik.http.services.fangji.loadbalancer.server.port=80"
     environment:
       - VITE_BACKEND_URL=${BACKEND_URL:-}
-      - PB_URL=${PB_URL:-}
     depends_on:
       - backend
     restart: unless-stopped
-
-volumes:
-  pb_data:

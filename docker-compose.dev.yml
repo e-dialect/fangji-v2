@@ -11,7 +11,7 @@ services:
       - PB_ADMIN_PASSWORD=${PB_ADMIN_PASSWORD:-}
       - PB_ALLOWED_ORIGINS=${PB_ALLOWED_ORIGINS:-}
     volumes:
-      - pb_data:/pb/pb_data
+      - ./pb_data:/pb/pb_data
     restart: unless-stopped
 
   frontend:
@@ -33,6 +33,3 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
-
-volumes:
-  pb_data:

@@ -22,6 +22,8 @@ dist/
 *.sw?
 
 # PocketBase data (not tracked in git)
+pb_data/*
+!pb_data/.gitignore
 backend/pb_data/
 backend/pocketbase
 

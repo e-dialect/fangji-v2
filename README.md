@@ -38,26 +38,31 @@
 
 ### Docker Compose 一键运行
 
-推荐本地、个人电脑和云服务器部署使用。需要先安装 Docker Desktop 或 Docker Engine + Compose Plugin。
+推荐云服务器部署使用。当前生产 compose 默认由 Traefik 暴露公网入口；本机没有 Traefik 时，请取消注释 `docker-compose.yml` 里的 `frontend.ports` 后再访问宿主机端口。
 
 ```bash
 cp .env.example .env
 docker compose up -d --build
 ```
 
-启动后访问：
+生产 `.env` 里通常只需要先改：
 
-- 前端：`http://localhost:8080`
-- PocketBase Admin UI：`http://localhost:8080/_/`
-- PocketBase API：`http://localhost:8080/api/`
-- 直连 PocketBase：`http://localhost:8090`
+- `TRAEFIK_HOST`：公网域名。
+- `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD`：方辑业务管理员账号。
+- `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`：需要使用 PocketBase Admin UI `/_/` 时再改。
+
+Traefik 部署时访问：
+
+- 前端：`https://imac.tajuren.cn`
+- PocketBase Admin UI：`https://imac.tajuren.cn/_/`
+- PocketBase API：`https://imac.tajuren.cn/api/`
 
 生产模式下前端会先构建为静态文件，再由 Nginx 托管。默认同源访问 PocketBase：
 
 ```txt
-http://localhost:8080/      -> 前端
-http://localhost:8080/api/  -> PocketBase API
-http://localhost:8080/_/    -> PocketBase Admin UI
+https://imac.tajuren.cn/      -> 前端
+https://imac.tajuren.cn/api/  -> PocketBase API
+https://imac.tajuren.cn/_/    -> PocketBase Admin UI
 ```
 
 常用命令：
@@ -72,9 +77,11 @@ docker compose down
 说明：
 
 - `docker-compose.yml` 是生产/部署入口，不再使用 Vite dev server 对外服务，因此不需要维护 Vite `allowedHosts`。
+- Traefik 只需要路由到 `frontend` 容器的 `80` 端口；`frontend` 内置 Nginx 会把 `/api/` 和 `/_/` 转发到 Docker 内部地址 `backend:8090`。
+- Traefik 容器必须和 `frontend` 容器共享 Docker network；如果 Traefik 在另一个 compose 项目里，请把它接入本项目网络或给本项目增加 Traefik 的 external network。
 - `BACKEND_URL` 留空时，前端自动使用 `window.location.origin`，适合同域名或同端口反向代理部署。
 - `BACKEND_URL` 设置为完整后端地址时，前端容器会把构建产物里的 `VITE_BACKEND_URL_RUNTIME_REPLACEMENT` 替换成该地址，适合前后端不同域名部署。
-- PocketBase 数据通过 Docker volume `pb_data` 持久化，重建容器不会清空数据库和上传文件。
+- PocketBase 数据通过本地目录 `./pb_data` 持久化，重建容器不会清空数据库和上传文件。
 - PocketBase schema 和 API rules 由 `backend/pb_migrations` 自动应用。
 
 ### Docker Compose 开发模式
@@ -82,7 +89,7 @@ docker compose down
 适合需要前端热更新的本地开发。
 
 ```bash
-cp .env.example .env
+cp .env.dev.example .env
 docker compose -f docker-compose.dev.yml up --build
 ```
 
@@ -103,7 +110,7 @@ docker compose -f docker-compose.dev.yml down
 
 说明：
 
-- Docker 前端开发端口默认使用 `5250`，配置在 [.env.example](.env.example)。
+- Docker 前端开发端口默认使用 `5250`，配置在 [.env.dev.example](.env.dev.example)。
 - 前端代码挂载到容器内，支持热更新。
 
 ### 手动本地开发
@@ -161,19 +168,20 @@ cp .env.example .env
 
 4. 编辑 `.env`。
 
-同域名部署示例：
+Traefik 同域名部署示例：
 
 ```env
-FRONTEND_PORT=8080
-BACKEND_PORT=127.0.0.1:8090
-BACKEND_URL=
-PB_URL=
-PB_ALLOWED_ORIGINS=
+TRAEFIK_ENABLE=true
+TRAEFIK_HOST=fangji.example.com
+TRAEFIK_ENTRYPOINT=websecure
+TRAEFIK_CERT_RESOLVER=letsencrypt
 APP_ADMIN_EMAIL=admin@example.com
 APP_ADMIN_PASSWORD=请换成强密码
 APP_ADMIN_NAME=管理员
 PB_ADMIN_EMAIL=pb-admin@example.com
 PB_ADMIN_PASSWORD=请换成另一个强密码
+BACKEND_URL=
+PB_ALLOWED_ORIGINS=
 ```
 
 访问结构：
@@ -184,13 +192,16 @@ https://fangji.example.com/api/  -> PocketBase API
 https://fangji.example.com/_/    -> PocketBase Admin UI
 ```
 
-前后端不同域名示例：
+如果本机没有 Traefik，只是想通过宿主机端口直接访问，请取消注释 `docker-compose.yml` 里的 `frontend.ports`；需要直连 PocketBase 调试时，再取消注释 `backend.ports`。
+
+前后端不同域名需要另外给 `backend` 配 Traefik router。此时 `.env` 类似：
 
 ```env
-FRONTEND_PORT=8080
-BACKEND_PORT=127.0.0.1:8090
+TRAEFIK_ENABLE=true
+TRAEFIK_HOST=fangji.example.com
+TRAEFIK_ENTRYPOINT=websecure
+TRAEFIK_CERT_RESOLVER=letsencrypt
 BACKEND_URL=https://api.fangji.example.com
-PB_URL=
 PB_ALLOWED_ORIGINS=https://fangji.example.com
 APP_ADMIN_EMAIL=admin@example.com
 APP_ADMIN_PASSWORD=请换成强密码
@@ -219,8 +230,7 @@ docker compose logs -f frontend
 - 如果需要进入 PocketBase Admin UI `/_/`，使用 `.env` 里的 `PB_ADMIN_EMAIL` 和 `PB_ADMIN_PASSWORD`。
 - PocketBase collections、字段和 API rules 会由迁移自动应用，不需要进后台手动配置业务规则。
 
-如果服务器前面还有 Nginx/Caddy/宝塔反向代理，请把域名代理到 `127.0.0.1:8080`。如果采用前后端不同域名，API 域名代理到 `127.0.0.1:8090`。
-默认 `BACKEND_PORT=127.0.0.1:8090` 只允许服务器本机反代访问后端；如果确实需要公网直连 PocketBase 端口，可改为 `BACKEND_PORT=8090`。
+如果服务器前面还有 Nginx/Caddy/宝塔反向代理而不是 Traefik，请取消注释 `frontend.ports` 并把域名代理到对应宿主机端口。默认不暴露 `backend` 到宿主机；如果确实需要本机直连 PocketBase 端口，可取消注释 `backend.ports`。
 
 ## 首次配置
 
@@ -367,7 +377,9 @@ PDF页码,词条,读音,释义,例句
 ```text
 fangji-v2/
 ├── README.md
+├── CHANGELOG.md
 ├── .env.example
+├── .env.dev.example
 ├── docker-compose.yml
 ├── docker-compose.dev.yml
 ├── frontend/
@@ -453,7 +465,7 @@ proofreading -> pending
 
 ### Docker Compose 启动后访问不到前端
 
-本项目默认生产入口是 `http://localhost:8080`。开发模式前端地址是 `http://localhost:5250`。如果访问 `5173`，那是手动本地开发的默认端口。
+本项目默认生产入口由 Traefik 暴露，例如 `https://imac.tajuren.cn`。如果本机没有 Traefik，请取消注释 `docker-compose.yml` 里的 `frontend.ports` 后再访问对应宿主机端口。开发模式前端地址是 `http://localhost:5250`；如果访问 `5173`，那是手动本地开发的默认端口。
 
 可先检查容器状态和日志：
 
