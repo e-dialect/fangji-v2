@@ -105,8 +105,8 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
-import { useRoute, useRouter, RouterLink } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter, RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import IpaKeyboard from '@/components/editor/IpaKeyboard.vue'
 import PdfSinglePageViewer from '@/components/editor/PdfSinglePageViewer.vue'
 import { useProjectPdf } from '@/composables/useProjectPdf'
@@ -131,8 +131,18 @@ const loadingPage = ref(true)
 const saving = ref(false)
 const saved = ref('')
 const saveError = ref('')
+const initialRowJson = ref('')
 
 const currentUserId = computed(() => getCurrentUserId() || '')
+const hasUnsavedChanges = computed(() => {
+  return Boolean(
+    page.value &&
+    !loadingPage.value &&
+    !saving.value &&
+    initialRowJson.value &&
+    stringifyEditedRow() !== initialRowJson.value
+  )
+})
 const {
   rowHeaders,
   originalRow,
@@ -173,6 +183,22 @@ watch(() => route.params.id, async () => {
   await loadPage()
 }, { immediate: true })
 
+onBeforeRouteLeave(() => {
+  if (!confirmDiscardChanges()) return false
+})
+
+onBeforeRouteUpdate((to, from) => {
+  if (to.params.id !== from.params.id && !confirmDiscardChanges()) return false
+})
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
+
 async function loadPage() {
   loadingPage.value = true
   page.value = null
@@ -180,11 +206,13 @@ async function loadPage() {
   resetPdf()
   saveError.value = ''
   saved.value = ''
+  initialRowJson.value = ''
 
   try {
     page.value = await getPage(route.params.id, { expand: 'project_file' })
     syncToBasePage()
     hydrateForProofread(page.value)
+    initialRowJson.value = stringifyEditedRow()
     await resolveProjectPdf()
     await loadNeighbors()
     if (page.value.status === PAGE_STATUS.CLAIMED) {
@@ -220,6 +248,17 @@ function insertText(char) {
   onTextChange()
 }
 
+function confirmDiscardChanges() {
+  if (!hasUnsavedChanges.value) return true
+  return window.confirm('当前校对内容尚未提交，确定要离开吗？')
+}
+
+function handleBeforeUnload(event) {
+  if (!hasUnsavedChanges.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
 async function submitProofread() {
   saving.value = true
   saved.value = ''
@@ -233,6 +272,7 @@ async function submitProofread() {
       rowJson,
       text
     })
+    initialRowJson.value = rowJson
     page.value.status = result.status
     saved.value = result.status === PAGE_STATUS.APPROVED
       ? '该条目已完成。'

@@ -326,8 +326,8 @@ function pageQueueFields() {
 
 function normalizeProofreadPayload(rowJson, text) {
   const parsed = safeParseObject(rowJson)
-  if (parsed) return JSON.stringify(sortAndTrimObject(parsed))
-  return String(text || '').replace(/\s+/g, ' ').trim()
+  if (parsed) return JSON.stringify(sortObjectForComparison(parsed))
+  return String(text ?? '')
 }
 
 function safeParseObject(raw) {
@@ -341,10 +341,10 @@ function safeParseObject(raw) {
   }
 }
 
-function sortAndTrimObject(obj) {
+function sortObjectForComparison(obj) {
   return Object.fromEntries(
     Object.keys(obj)
       .sort()
-      .map((key) => [key, String(obj[key] ?? '').trim()])
+      .map((key) => [key, String(obj[key] ?? '')])
   )
 }

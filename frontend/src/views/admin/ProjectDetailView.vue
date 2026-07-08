@@ -42,7 +42,7 @@
           <!-- PDF upload -->
           <div>
             <h4 class="font-semibold mb-2">上传 PDF 文件</h4>
-            <p class="text-sm text-muted mb-3">上传扫描版PDF，系统将自动按页拆分并进行OCR识别（后台处理，可能需要几分钟）。</p>
+            <p class="text-sm text-muted mb-3">上传扫描版 PDF 作为校对原文预览。当前系统不会自动 OCR 或生成条目，请通过 CSV 导入待校对文本。</p>
             <input type="file" accept=".pdf" @change="onPdfSelected" ref="pdfInput" style="display:none" />
             <button class="btn btn-secondary" @click="$refs.pdfInput.click()">选择 PDF 文件</button>
             <span v-if="pdfFile" class="text-sm ml-2">{{ pdfFile.name }}</span>
@@ -51,7 +51,7 @@
                 {{ uploadingPdf ? '上传中...' : '上传 PDF' }}
               </button>
             </div>
-            <div v-if="pdfSuccess" class="alert alert-success mt-2">PDF 上传成功！</div>
+            <div v-if="pdfSuccess" class="alert alert-success mt-2">PDF 上传成功，可在校对编辑器中预览。</div>
             <div v-if="pdfError" class="alert alert-error mt-2">{{ pdfError }}</div>
           </div>
 
@@ -71,7 +71,7 @@
               </button>
             </div>
             <div v-if="csvSuccess" class="alert alert-success mt-2">{{ csvSuccess }}</div>
-            <div v-if="csvError" class="alert alert-error mt-2">{{ csvError }}</div>
+            <div v-if="csvError" class="alert alert-error mt-2" style="white-space:pre-line">{{ csvError }}</div>
           </div>
         </div>
       </div>
@@ -321,6 +321,7 @@ async function uploadCsv() {
   uploadingCsv.value = true
   csvError.value = ''
   csvSuccess.value = ''
+  const createdIds = []
   try {
     const text = await readCsvText(csvFile.value)
     const rows = parseCsv(text.replace(/^\uFEFF/, ''))
@@ -341,51 +342,98 @@ async function uploadCsv() {
       return Number.isFinite(n) ? Math.max(max, n) : max
     }, 0) + 1
 
-    let created = 0
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i]
-      const pdfPageRaw = String(row[pdfPageKey] ?? '').trim()
-      const pdfPage = Number(pdfPageRaw)
-      if (!Number.isInteger(pdfPage) || pdfPage <= 0) {
-        throw new Error(`第 ${i + 2} 行的 PDF页码 无效，请填写正整数`)
-      }
+    const payloads = buildCsvImportPayloads(rows, pdfPageKey, nextPageNum)
 
-      const structuredRow = {}
-      const parts = []
-      for (const [key, value] of Object.entries(row)) {
-        if (key.trim() === 'PDF页码') continue
-        const textPart = String(value ?? '').trim()
-        structuredRow[key] = textPart
-        if (textPart) parts.push(textPart)
-      }
-      const entryText = parts.join(' ').trim()
-      if (!entryText) {
-        throw new Error(`第 ${i + 2} 行去掉 PDF页码 后内容为空`)
-      }
-
-      await createPage({
-        project: projectId,
-        page_number: nextPageNum++,
-        pdf_page: pdfPage,
-        ocr_row_json: JSON.stringify(structuredRow),
-        ocr_text: entryText,
-        proofread_round: 1,
-        mismatch_count: 0,
-        status: PAGE_STATUS.PENDING
-      })
-      created++
+    for (const payload of payloads) {
+      const created = await createPage(payload)
+      if (created?.id) createdIds.push(created.id)
     }
 
-    csvSuccess.value = `成功导入 ${created} 条待校对任务！`
+    csvSuccess.value = `成功导入 ${payloads.length} 条待校对任务！`
     selectedPendingIds.value = []
     csvFile.value = null
     if (csvInput.value) csvInput.value.value = ''
     await loadPages()
   } catch (e) {
-    csvError.value = e?.message || '导入失败，请检查文件格式'
+    let rollbackFailed = 0
+    if (createdIds.length) {
+      rollbackFailed = await rollbackCreatedPages(createdIds)
+    }
+    const baseMessage = getPbMessage(e, '导入失败，请检查文件格式')
+    if (!createdIds.length) {
+      csvError.value = baseMessage
+    } else if (rollbackFailed) {
+      csvError.value = `${baseMessage}\n已尝试回滚本次导入，但有 ${rollbackFailed} 条记录未能删除，请刷新后检查条目列表。`
+    } else {
+      csvError.value = `${baseMessage}\n本次已创建的 ${createdIds.length} 条记录已自动回滚。`
+    }
   } finally {
     uploadingCsv.value = false
   }
+}
+
+function buildCsvImportPayloads(rows, pdfPageKey, firstPageNumber) {
+  const errors = []
+  const payloads = []
+  let nextPageNum = firstPageNumber
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    const csvLineNo = i + 2
+    const pdfPageRaw = String(row[pdfPageKey] ?? '').trim()
+    const pdfPage = Number(pdfPageRaw)
+    if (!Number.isInteger(pdfPage) || pdfPage <= 0) {
+      errors.push(`第 ${csvLineNo} 行：PDF页码 必须是正整数`)
+      continue
+    }
+
+    const structuredRow = {}
+    const parts = []
+    for (const [key, value] of Object.entries(row)) {
+      if (key.trim() === 'PDF页码') continue
+      const textPart = String(value ?? '').trim()
+      structuredRow[key] = textPart
+      if (textPart) parts.push(textPart)
+    }
+
+    const entryText = parts.join(' ').trim()
+    if (!entryText) {
+      errors.push(`第 ${csvLineNo} 行：去掉 PDF页码 后内容不能为空`)
+      continue
+    }
+
+    payloads.push({
+      project: projectId,
+      page_number: nextPageNum++,
+      pdf_page: pdfPage,
+      ocr_row_json: JSON.stringify(structuredRow),
+      ocr_text: entryText,
+      proofread_round: 1,
+      mismatch_count: 0,
+      status: PAGE_STATUS.PENDING
+    })
+  }
+
+  if (errors.length) {
+    throw new Error(formatCsvValidationErrors(errors))
+  }
+
+  return payloads
+}
+
+function formatCsvValidationErrors(errors) {
+  const visible = errors.slice(0, 8)
+  const hiddenCount = errors.length - visible.length
+  return [
+    'CSV 校验未通过，未导入任何条目：',
+    ...visible,
+    hiddenCount > 0 ? `还有 ${hiddenCount} 条错误，请修正后重新导入。` : ''
+  ].filter(Boolean).join('\n')
+}
+
+async function rollbackCreatedPages(ids) {
+  const results = await Promise.allSettled(ids.map((id) => deletePage(id)))
+  return results.filter((result) => result.status === 'rejected').length
 }
 
 async function exportCsv() {

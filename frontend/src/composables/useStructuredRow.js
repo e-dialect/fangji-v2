@@ -29,7 +29,6 @@ export function useStructuredRow() {
 
   function hydrateForProofread(page) {
     const ocrObj = safeParseRowJson(page?.ocr_row_json) || { '内容': page?.ocr_text || '' }
-    const proofObj = safeParseRowJson(page?.proofread_row_json)
     const headers = Object.keys(ocrObj)
 
     rowHeaders.value = headers.length ? headers : ['内容']
@@ -39,8 +38,7 @@ export function useStructuredRow() {
 
     rowHeaders.value.forEach((header) => {
       originalRow.value[header] = String(ocrObj[header] ?? '')
-      const value = proofObj && header in proofObj ? proofObj[header] : ocrObj[header]
-      editedRow.value[header] = String(value ?? '')
+      editedRow.value[header] = String(ocrObj[header] ?? '')
     })
     activeField.value = rowHeaders.value[0] || ''
     editedText.value = composeCurrentText()
