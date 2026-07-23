@@ -3,7 +3,26 @@ export function getPbStatus(error) {
 }
 
 export function getPbMessage(error, fallback = '请求失败，请稍后重试') {
-  return error?.response?.message || error?.message || fallback
+  const response = error?.response
+  const details = Object.values(response?.data || {})
+    .map((item) => String(item?.message || '').trim())
+    .filter(Boolean)
+
+  if (details.length) return details.join('；')
+
+  const responseMessage = String(response?.message || '').trim()
+  const genericMessages = new Set([
+    'Failed to create record.',
+    'Failed to update record.',
+    'Failed to delete record.',
+    'Failed to authenticate.',
+    'Something went wrong while processing your request.'
+  ])
+  if (responseMessage && !genericMessages.has(responseMessage)) return responseMessage
+
+  const directMessage = String(error?.message || '').trim()
+  if (directMessage && !genericMessages.has(directMessage)) return directMessage
+  return fallback
 }
 
 export function formatPbError(prefix, error) {

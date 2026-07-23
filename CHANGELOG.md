@@ -20,6 +20,8 @@
 - 条目列表加载失败支持页面内重试，范围选择和批量操作改为页面内成功/错误反馈。
 - 范围选择支持中文逗号、逆序区间和越界过滤，并新增对应单元测试。
 - 新增全局 Vue 页面异常边界、键盘焦点样式和管理员操作区窄屏布局。
+- 应用启动时刷新本地登录身份，自动清理已失效或指向已删除用户的旧会话，避免管理员关系字段提交失败。
+- PocketBase 字段校验错误优先显示具体原因，通用英文错误改用调用处的中文提示。
 - 将生产 Docker Compose 默认入口调整为 Traefik，由 Traefik 路由到 `frontend` 容器的 `80` 端口。
 - 保留但默认注释 `frontend` 和 `backend` 的宿主机 `ports` 映射，便于无 Traefik 或本机调试时手动启用。
 - 将 PocketBase 数据默认持久化到本地目录 `./pb_data`，便于备份和迁移；Windows 宿主机可叠加 `docker-compose.named-volume.yml` 切换为 Docker named volume。
