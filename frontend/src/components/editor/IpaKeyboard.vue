@@ -11,6 +11,7 @@
           type="button"
           class="ipa-key"
           :title="key"
+          @mousedown.prevent
           @click="$emit('insert', key)"
         >{{ key }}</button>
       </div>

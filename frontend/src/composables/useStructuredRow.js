@@ -19,6 +19,17 @@ export function composeRowText(headers, rowObj) {
     .trim()
 }
 
+export function insertTextAtSelection(currentValue, insertedText, start, end = start) {
+  const current = String(currentValue ?? '')
+  const inserted = String(insertedText ?? '')
+  const safeStart = Number.isInteger(start) ? Math.max(0, Math.min(current.length, start)) : current.length
+  const safeEnd = Number.isInteger(end) ? Math.max(safeStart, Math.min(current.length, end)) : safeStart
+  return {
+    value: current.slice(0, safeStart) + inserted + current.slice(safeEnd),
+    cursor: safeStart + inserted.length
+  }
+}
+
 export function useStructuredRow() {
   const rowHeaders = ref([])
   const originalRow = ref({})
@@ -70,12 +81,21 @@ export function useStructuredRow() {
     return composeRowText(rowHeaders.value, rowObj)
   }
 
-  function insertText(char) {
-    const key = activeField.value || rowHeaders.value[0]
-    if (!key) return
-    const current = String(editedRow.value[key] || '')
-    editedRow.value[key] = current + char
+  function replaceEditedRow(row) {
+    rowHeaders.value.forEach((header) => {
+      editedRow.value[header] = String(row?.[header] ?? originalRow.value[header] ?? '')
+    })
     editedText.value = composeCurrentText()
+  }
+
+  function insertText(char, selection = {}) {
+    const key = activeField.value || rowHeaders.value[0]
+    if (!key) return null
+    const current = String(editedRow.value[key] || '')
+    const result = insertTextAtSelection(current, char, selection.start, selection.end)
+    editedRow.value[key] = result.value
+    editedText.value = composeCurrentText()
+    return result.cursor
   }
 
   function markChanged() {
@@ -95,6 +115,7 @@ export function useStructuredRow() {
     editedText,
     hydrateForProofread,
     hydrateForReview,
+    replaceEditedRow,
     composeCurrentText,
     insertText,
     markChanged,

@@ -3,7 +3,7 @@
     <!-- Left panel: project PDF -->
     <div class="editor-panel">
       <div class="editor-panel-header">
-        <span>📄 项目原始 PDF</span>
+        <span>📄 原文 · 第 {{ currentPdfPage }} 页</span>
         <div class="flex gap-2">
           <button
             class="btn btn-secondary btn-sm"
@@ -15,6 +15,16 @@
             :disabled="currentPdfPage >= allowedPdfPages[1]"
             @click="switchPdfPage(1)"
           >下一页</button>
+          <input
+            v-model.number="pdfPageInput"
+            type="number"
+            class="form-control pdf-page-input"
+            :min="allowedPdfPages[0]"
+            :max="allowedPdfPages[1]"
+            aria-label="PDF 页码"
+            @change="applyPdfPageInput"
+            @keydown.enter.prevent="applyPdfPageInput"
+          />
           <RouterLink to="/tasks" class="btn btn-secondary btn-sm">← 返回项目大厅</RouterLink>
         </div>
       </div>
@@ -41,7 +51,7 @@
     <!-- Right panel: editor + IPA keyboard -->
     <div class="editor-panel">
       <div class="editor-panel-header">
-        <span>✏️ 校对编辑区</span>
+        <span>✏️ 第 {{ page?.page_number || '—' }} 条</span>
         <div class="flex gap-2">
           <button
             class="btn btn-secondary btn-sm"
@@ -64,6 +74,10 @@
         <template v-else>
           <div v-if="saved" class="alert alert-success mb-3">{{ saved }}</div>
           <div v-if="saveError" class="alert alert-error mb-3">{{ saveError }}</div>
+          <div class="editor-meta mb-3">
+            <span>{{ draftStatus || '修改后将自动保存本地草稿' }}</span>
+            <span>快捷键：Ctrl/⌘+S 保存草稿 · Ctrl/⌘+Enter 提交 · Alt+←/→ 切换任务</span>
+          </div>
 
           <label class="form-label">校对表格（按CSV栏目）</label>
           <div class="table-wrapper mb-3">
@@ -84,10 +98,14 @@
                     style="vertical-align:top;min-width:180px"
                   >
                     <textarea
+                      :ref="(el) => setTextareaRef(header, el)"
                       v-model="editedRow[header]"
                       class="form-control"
                       style="min-height:84px;font-family:'Noto Sans', serif;font-size:.95rem;line-height:1.6"
-                      @focus="activeField = header"
+                      @focus="activateField(header, $event)"
+                      @select="rememberSelection(header, $event)"
+                      @keyup="rememberSelection(header, $event)"
+                      @click="rememberSelection(header, $event)"
                       @input="onTextChange"
                       :placeholder="originalRow[header] || ''"
                     ></textarea>
@@ -105,7 +123,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import IpaKeyboard from '@/components/editor/IpaKeyboard.vue'
 import PdfSinglePageViewer from '@/components/editor/PdfSinglePageViewer.vue'
@@ -113,6 +131,13 @@ import { useProjectPdf } from '@/composables/useProjectPdf'
 import { useStructuredRow } from '@/composables/useStructuredRow'
 import { useTaskNeighbors } from '@/composables/useTaskNeighbors'
 import { PAGE_STATUS } from '@/constants/pageStatus'
+import {
+  clearTaskDraft,
+  loadTaskDraft,
+  saveTaskDraft,
+  setTaskFlash,
+  takeTaskFlash
+} from '@/lib/taskDraft'
 import { currentUserId as getCurrentUserId } from '@/services/authService'
 import {
   claimNextProjectPage,
@@ -131,6 +156,12 @@ const saving = ref(false)
 const saved = ref('')
 const saveError = ref('')
 const initialRowJson = ref('')
+const draftStatus = ref('')
+const draftReady = ref(false)
+const pdfPageInput = ref(1)
+const activeSelection = ref({ field: '', start: null, end: null })
+const textareaRefs = new Map()
+let draftTimer = null
 
 const currentUserId = computed(() => getCurrentUserId() || '')
 const hasUnsavedChanges = computed(() => {
@@ -149,6 +180,7 @@ const {
   activeField,
   editedText,
   hydrateForProofread,
+  replaceEditedRow,
   markChanged,
   insertText: insertIntoActiveField,
   stringifyEditedRow
@@ -165,6 +197,10 @@ const {
   switchPdfPage,
   syncToBasePage
 } = useProjectPdf(page)
+
+watch(currentPdfPage, (value) => {
+  pdfPageInput.value = value
+})
 
 const {
   prevTaskId,
@@ -192,13 +228,19 @@ onBeforeRouteUpdate((to, from) => {
 
 onMounted(() => {
   window.addEventListener('beforeunload', handleBeforeUnload)
+  window.addEventListener('keydown', handleEditorShortcut)
 })
 
 onBeforeUnmount(() => {
+  flushDraft()
+  clearDraftTimer()
   window.removeEventListener('beforeunload', handleBeforeUnload)
+  window.removeEventListener('keydown', handleEditorShortcut)
 })
 
 async function loadPage() {
+  clearDraftTimer()
+  draftReady.value = false
   loadingPage.value = true
   page.value = null
   resetNeighbors()
@@ -206,17 +248,24 @@ async function loadPage() {
   saveError.value = ''
   saved.value = ''
   initialRowJson.value = ''
+  draftStatus.value = ''
+  activeSelection.value = { field: '', start: null, end: null }
+  textareaRefs.clear()
 
   try {
     page.value = await getPage(route.params.id, { expand: 'project_file' })
     syncToBasePage()
     hydrateForProofread(page.value)
     initialRowJson.value = stringifyEditedRow()
+    restoreDraft()
     await resolveProjectPdf()
     await loadNeighbors()
+    const flash = takeTaskFlash(window.sessionStorage)
+    if (flash) saved.value = flash
   } catch (e) {
     saveError.value = formatClaimConflict(e, '加载任务失败，请返回项目大厅刷新后重试')
   } finally {
+    draftReady.value = Boolean(page.value)
     loadingPage.value = false
   }
 }
@@ -235,11 +284,45 @@ function onTextChange() {
   saved.value = ''
   saveError.value = ''
   markChanged()
+  scheduleDraftSave()
 }
 
-function insertText(char) {
-  insertIntoActiveField(char)
+async function insertText(char) {
+  const field = activeField.value || rowHeaders.value[0]
+  const textarea = textareaRefs.get(field)
+  const selection = activeSelection.value.field === field
+    ? activeSelection.value
+    : {
+        start: textarea?.selectionStart,
+        end: textarea?.selectionEnd
+      }
+  const cursor = insertIntoActiveField(char, selection)
   onTextChange()
+  if (cursor == null) return
+  await nextTick()
+  const target = textareaRefs.get(field)
+  target?.focus()
+  target?.setSelectionRange(cursor, cursor)
+  activeSelection.value = { field, start: cursor, end: cursor }
+}
+
+function setTextareaRef(header, element) {
+  if (element) textareaRefs.set(header, element)
+  else textareaRefs.delete(header)
+}
+
+function activateField(header, event) {
+  activeField.value = header
+  rememberSelection(header, event)
+}
+
+function rememberSelection(header, event) {
+  const target = event?.target
+  activeSelection.value = {
+    field: header,
+    start: Number.isInteger(target?.selectionStart) ? target.selectionStart : null,
+    end: Number.isInteger(target?.selectionEnd) ? target.selectionEnd : null
+  }
 }
 
 function confirmDiscardChanges() {
@@ -248,12 +331,108 @@ function confirmDiscardChanges() {
 }
 
 function handleBeforeUnload(event) {
+  flushDraft()
   if (!hasUnsavedChanges.value) return
   event.preventDefault()
   event.returnValue = ''
 }
 
+function scheduleDraftSave() {
+  if (!draftReady.value) return
+  clearDraftTimer()
+  draftStatus.value = '草稿保存中...'
+  draftTimer = window.setTimeout(() => flushDraft(), 500)
+}
+
+function flushDraft() {
+  clearDraftTimer()
+  if (!draftReady.value || !page.value || !currentUserId.value || !initialRowJson.value) return
+  try {
+    if (!hasUnsavedChanges.value) {
+      clearTaskDraft(window.localStorage, {
+        userId: currentUserId.value,
+        pageId: page.value.id
+      })
+      draftStatus.value = ''
+      return
+    }
+    const draft = saveTaskDraft(window.localStorage, {
+      userId: currentUserId.value,
+      pageId: page.value.id,
+      sourceSignature: initialRowJson.value,
+      row: JSON.parse(stringifyEditedRow())
+    })
+    draftStatus.value = draft ? `草稿已保存于 ${formatDraftTime(draft.savedAt)}` : ''
+  } catch {
+    draftStatus.value = '草稿保存失败，请勿关闭页面'
+  }
+}
+
+function restoreDraft() {
+  const draft = loadTaskDraft(window.localStorage, {
+    userId: currentUserId.value,
+    pageId: page.value?.id,
+    sourceSignature: initialRowJson.value
+  })
+  if (!draft) return
+  replaceEditedRow(draft.row)
+  if (stringifyEditedRow() === initialRowJson.value) {
+    clearTaskDraft(window.localStorage, {
+      userId: currentUserId.value,
+      pageId: page.value.id
+    })
+    return
+  }
+  draftStatus.value = `已恢复 ${formatDraftTime(draft.savedAt)} 的本地草稿`
+}
+
+function clearDraftTimer() {
+  if (draftTimer) {
+    window.clearTimeout(draftTimer)
+    draftTimer = null
+  }
+}
+
+function formatDraftTime(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '刚才'
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function handleEditorShortcut(event) {
+  if (event.defaultPrevented) return
+  const control = event.ctrlKey || event.metaKey
+  if (control && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    flushDraft()
+    return
+  }
+  if (control && event.key === 'Enter') {
+    event.preventDefault()
+    if (!saving.value && !loadingPage.value) submitProofread()
+    return
+  }
+  if (!event.altKey || control) return
+  if (event.key === 'ArrowLeft' && prevTaskId.value) {
+    event.preventDefault()
+    gotoPrevTask()
+  } else if (event.key === 'ArrowRight' && nextTaskId.value) {
+    event.preventDefault()
+    gotoNextTask()
+  }
+}
+
+function applyPdfPageInput() {
+  const nextPage = Number(pdfPageInput.value)
+  currentPdfPage.value = Math.max(
+    allowedPdfPages.value[0],
+    Math.min(allowedPdfPages.value[1], Number.isInteger(nextPage) ? nextPage : allowedPdfPages.value[0])
+  )
+  pdfPageInput.value = currentPdfPage.value
+}
+
 async function submitProofread() {
+  if (saving.value || !page.value) return
   saving.value = true
   saved.value = ''
   saveError.value = ''
@@ -268,6 +447,11 @@ async function submitProofread() {
     })
     initialRowJson.value = rowJson
     page.value.status = result.status
+    clearTaskDraft(window.localStorage, {
+      userId,
+      pageId: page.value.id
+    })
+    draftStatus.value = ''
     saved.value = result.message || (
       result.status === PAGE_STATUS.APPROVED
         ? '该条目已完成。'
@@ -279,6 +463,7 @@ async function submitProofread() {
     try {
       const nextPage = await claimNextProjectPage(projectId, userId)
       if (nextPage?.id) {
+        setTaskFlash(window.sessionStorage, saved.value)
         await router.push(`/tasks/${nextPage.id}/edit`)
         return
       }
