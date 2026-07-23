@@ -20,7 +20,7 @@
           <div class="profile-name">{{ displayName }}</div>
         </div>
         <div class="profile-rank">
-          <span>正确率排行</span>
+          <span>一致率排行</span>
           <strong>{{ rankLabel(stats.accuracyRank) }}</strong>
         </div>
         <div class="profile-rank">
@@ -40,18 +40,18 @@
         </div>
         <div class="stat-card">
           <div class="stat-value">{{ accuracyLabel }}</div>
-          <div class="stat-label">校对条目正确率</div>
+          <div class="stat-label">双校一致率</div>
         </div>
         <div class="stat-card">
           <div class="stat-value">{{ stats.correctCount }}</div>
-          <div class="stat-label">双评通过条目</div>
+          <div class="stat-label">结果一致的校对次数</div>
         </div>
       </section>
 
       <div class="card mt-6">
         <div class="card-title">排行说明</div>
         <div class="profile-note">
-          正确率按已完成条目计算；同一条目的不同校对参与会分别计入记录。排行基于当前系统中已有校对记录的校对员生成。
+          一致率按已完成比对的校对尝试计算；等待另一人二校的尝试暂不进入分母。不一致记录会永久保留并计入统计。
         </div>
       </div>
     </template>

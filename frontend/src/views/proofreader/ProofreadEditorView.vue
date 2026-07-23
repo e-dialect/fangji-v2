@@ -118,8 +118,7 @@ import {
   claimNextProjectPage,
   getPage,
   listProofreaderNeighborTasks,
-  submitTwoPassProofread,
-  updatePage
+  submitTwoPassProofread
 } from '@/services/pagesService'
 import { formatClaimConflict, getPbMessage } from '@/utils/pbErrors'
 
@@ -215,11 +214,6 @@ async function loadPage() {
     initialRowJson.value = stringifyEditedRow()
     await resolveProjectPdf()
     await loadNeighbors()
-    if (page.value.status === PAGE_STATUS.CLAIMED) {
-      await updatePage(page.value.id, { status: PAGE_STATUS.PROOFREADING })
-      page.value.status = PAGE_STATUS.PROOFREADING
-      await loadNeighbors()
-    }
   } catch (e) {
     saveError.value = formatClaimConflict(e, '加载任务失败，请返回项目大厅刷新后重试')
   } finally {
@@ -274,11 +268,13 @@ async function submitProofread() {
     })
     initialRowJson.value = rowJson
     page.value.status = result.status
-    saved.value = result.status === PAGE_STATUS.APPROVED
-      ? '该条目已完成。'
-      : result.status === PAGE_STATUS.PENDING
-        ? '该条目已退回任务池。'
-        : '校对已提交。'
+    saved.value = result.message || (
+      result.status === PAGE_STATUS.APPROVED
+        ? '该条目已完成。'
+        : result.status === PAGE_STATUS.ARBITRATION
+          ? '两次结果不一致，已转交管理员仲裁。'
+          : '校对已提交。'
+    )
 
     try {
       const nextPage = await claimNextProjectPage(projectId, userId)

@@ -1,6 +1,5 @@
 import pb from '@/lib/pocketbase'
 import {
-  CLAIMABLE_PROOFREAD_STATUSES,
   PAGE_STATUS,
   PROOFREADER_ACTIVE_STATUSES,
   statusFilter
@@ -138,10 +137,9 @@ export async function countActiveProofreaderTasks(userId) {
 }
 
 export async function claimProofreadTask(pageId, userId) {
-  return pb.collection('pages').update(pageId, {
-    status: PAGE_STATUS.CLAIMED,
-    proofreader: userId
-  }, { requestKey: null })
+  const page = await getPage(pageId, { fields: 'id,project' })
+  if (!page?.project) throw new Error('任务缺少项目信息')
+  return claimNextProjectPage(page.project, userId)
 }
 
 export async function getPage(pageId, options = {}) {
@@ -199,105 +197,18 @@ export async function listProofreaderNeighborTasks(projectId, userId) {
 
 export async function claimNextProjectPage(projectId, userId) {
   if (!projectId || !userId) throw new Error('缺少项目或校对员身份')
-
-  const active = await pb.collection('pages').getFullList({
-    filter: `project="${projectId}" && ${relationFilter('proofreader', userId)} && (${statusFilter(PROOFREADER_ACTIVE_STATUSES)})`,
-    sort: 'page_number',
-    fields: pageQueueFields(),
+  return pb.send(`/api/fangji/projects/${encodeURIComponent(projectId)}/claim`, {
+    method: 'POST',
     requestKey: null
   })
-  if (active.length) return active[0]
-
-  const candidates = await pb.collection('pages').getFullList({
-    filter: `project="${projectId}" && (${statusFilter(CLAIMABLE_PROOFREAD_STATUSES)})`,
-    sort: 'page_number',
-    fields: pageQueueFields(),
-    requestKey: null
-  })
-
-  const claimable = candidates.filter((page) => isPageClaimableBy(page, userId))
-  let lastClaimError = null
-  for (const page of claimable) {
-    try {
-      return await claimProofreadTask(page.id, userId)
-    } catch (error) {
-      lastClaimError = error
-      // Another proofreader may have claimed this page between list and update.
-      // Continue through the ordered queue and surface an error only if none work.
-    }
-  }
-
-  if (claimable.length && lastClaimError) {
-    throw lastClaimError
-  }
-
-  return null
 }
 
 export async function submitTwoPassProofread(pageId, userId, { rowJson, text }) {
-  const latest = await getPage(pageId)
-  if (!PROOFREADER_ACTIVE_STATUSES.includes(latest.status) || latest.proofreader !== userId) {
-    throw new Error('该条目当前不属于你，请返回项目大厅刷新后重试')
-  }
-
-  const now = new Date().toISOString()
-  const firstProofreader = latest.first_proofreader || ''
-  const normalizedCurrent = normalizeProofreadPayload(rowJson, text)
-
-  if (!firstProofreader) {
-    return updatePage(pageId, {
-      first_proofreader: userId,
-      first_proofread_row_json: rowJson,
-      first_proofread_text: text,
-      first_proofread_at: now,
-      second_proofreader: null,
-      second_proofread_row_json: '',
-      second_proofread_text: '',
-      second_proofread_at: null,
-      proofread_row_json: rowJson,
-      proofread_text: text,
-      proofread_at: now,
-      status: PAGE_STATUS.PROOFREAD,
-      proofreader: null
-    })
-  }
-
-  if (firstProofreader === userId) {
-    throw new Error('该条目需要由其他校对员处理')
-  }
-
-  const normalizedFirst = normalizeProofreadPayload(latest.first_proofread_row_json, latest.first_proofread_text)
-  if (normalizedFirst === normalizedCurrent) {
-    return updatePage(pageId, {
-      second_proofreader: userId,
-      second_proofread_row_json: rowJson,
-      second_proofread_text: text,
-      second_proofread_at: now,
-      proofread_row_json: rowJson,
-      proofread_text: text,
-      proofread_at: now,
-      status: PAGE_STATUS.APPROVED,
-      proofreader: null
-    })
-  }
-
-  return updatePage(pageId, {
-    first_proofreader: null,
-    first_proofread_row_json: '',
-    first_proofread_text: '',
-    first_proofread_at: null,
-    second_proofreader: null,
-    second_proofread_row_json: '',
-    second_proofread_text: '',
-    second_proofread_at: null,
-    proofread_row_json: '',
-    proofread_text: '',
-    proofread_at: null,
-    proofread_round: Number(latest.proofread_round || 1) + 1,
-    mismatch_count: Number(latest.mismatch_count || 0) + 1,
-    last_mismatch_at: now,
-    status: PAGE_STATUS.PENDING,
-    proofreader: null
+  if (!pageId || !userId) throw new Error('缺少任务或校对员身份')
+  return pb.send(`/api/fangji/pages/${encodeURIComponent(pageId)}/submit`, {
+    method: 'POST',
+    body: { rowJson, text },
+    requestKey: null
   })
 }
 
@@ -305,46 +216,4 @@ export function isPageClaimableBy(page, userId) {
   if (!page || !userId) return false
   if (page.status === PAGE_STATUS.PENDING) return true
   return page.status === PAGE_STATUS.PROOFREAD && page.first_proofreader !== userId
-}
-
-function pageQueueFields() {
-  return [
-    'id',
-    'project',
-    'project_file',
-    'page_number',
-    'pdf_page',
-    'status',
-    'proofreader',
-    'first_proofreader',
-    'first_proofread_row_json',
-    'first_proofread_text',
-    'ocr_row_json',
-    'ocr_text'
-  ].join(',')
-}
-
-function normalizeProofreadPayload(rowJson, text) {
-  const parsed = safeParseObject(rowJson)
-  if (parsed) return JSON.stringify(sortObjectForComparison(parsed))
-  return String(text ?? '')
-}
-
-function safeParseObject(raw) {
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw)
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') return null
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-function sortObjectForComparison(obj) {
-  return Object.fromEntries(
-    Object.keys(obj)
-      .sort()
-      .map((key) => [key, String(obj[key] ?? '')])
-  )
 }

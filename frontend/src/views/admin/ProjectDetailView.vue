@@ -135,8 +135,9 @@
                 <th>状态</th>
                 <th>一校</th>
                 <th>二校</th>
-                <th>退回次数</th>
+                <th>不一致次数</th>
                 <th>OCR文本预览</th>
+                <th style="width:100px">操作</th>
                 <th style="width:160px">顺序</th>
               </tr>
             </thead>
@@ -157,6 +158,16 @@
                 <td class="text-sm text-muted">{{ pg.mismatch_count || 0 }}</td>
                 <td class="text-sm text-muted" style="max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                   {{ pg.ocr_text?.slice(0, 80) || '—' }}
+                </td>
+                <td>
+                  <RouterLink
+                    v-if="pg.status === PAGE_STATUS.ARBITRATION"
+                    :to="`/admin/projects/${projectId}/arbitration/${pg.id}`"
+                    class="btn btn-warn btn-sm"
+                  >
+                    仲裁
+                  </RouterLink>
+                  <span v-else class="text-muted">—</span>
                 </td>
                 <td>
                   <div class="flex gap-2">

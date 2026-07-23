@@ -1,0 +1,482 @@
+/// <reference path="../pb_data/types.d.ts" />
+
+const FANGJI_API = "/api/fangji"
+
+// Claiming is serialized in a database transaction. An existing active task in
+// the same project always wins; otherwise the first eligible queue item is used.
+routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
+  const auth = c.get("authRecord")
+  if (!auth || auth.getString("role") !== "proofreader") {
+    throw new ForbiddenError("无权执行此操作")
+  }
+  const summarize = (page) => ({
+    id: page.getId(),
+    project: page.getString("project"),
+    project_file: page.getString("project_file"),
+    page_number: page.getInt("page_number"),
+    pdf_page: page.getInt("pdf_page"),
+    status: page.getString("status"),
+    proofreader: page.getString("proofreader"),
+    first_proofreader: page.getString("first_proofreader"),
+    second_proofreader: page.getString("second_proofreader"),
+    proofread_round: page.getInt("proofread_round") || 1,
+    mismatch_count: page.getInt("mismatch_count") || 0
+  })
+  const userId = auth.getId()
+  const projectId = c.pathParam("projectId")
+  let claimed = null
+
+  $app.dao().runInTransaction((txDao) => {
+    try {
+      txDao.findRecordById("projects", projectId)
+    } catch {
+      throw new NotFoundError("项目不存在")
+    }
+
+    const active = txDao.findRecordsByFilter(
+      "pages",
+      `project = "${projectId}" && proofreader = "${userId}" && (status = "claimed" || status = "proofreading")`,
+      "page_number",
+      1,
+      0
+    )
+    if (active.length) {
+      claimed = active[0]
+      if (claimed.getString("status") === "claimed") {
+        claimed.set("status", "proofreading")
+        txDao.saveRecord(claimed)
+      }
+      return
+    }
+
+    const candidates = txDao.findRecordsByFilter(
+      "pages",
+      `project = "${projectId}" && (status = "pending" || status = "proofread")`,
+      "page_number",
+      100000,
+      0
+    )
+    for (const page of candidates) {
+      if (page.getString("status") === "proofread" && page.getString("first_proofreader") === userId) {
+        continue
+      }
+      page.set("proofreader", userId)
+      page.set("status", "proofreading")
+      txDao.saveRecord(page)
+      claimed = page
+      break
+    }
+  })
+
+  return c.json(200, claimed ? summarize(claimed) : null)
+}, $apis.requireRecordAuth("users"))
+
+// The complete pass submission and comparison happens atomically on the
+// server. First-pass content is persisted only in the private attempts table.
+routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
+  const auth = c.get("authRecord")
+  if (!auth || auth.getString("role") !== "proofreader") {
+    throw new ForbiddenError("无权执行此操作")
+  }
+  const parseRow = (raw) => {
+    const value = String(raw || "")
+    if (!value || value.length > 2 * 1024 * 1024) {
+      throw new BadRequestError("校对内容为空或过大")
+    }
+    let parsed = null
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      throw new BadRequestError("校对内容格式无效")
+    }
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object" || !Object.keys(parsed).length) {
+      throw new BadRequestError("校对内容必须是非空字段对象")
+    }
+    return parsed
+  }
+  const canonicalize = (parsed) => {
+    const result = {}
+    Object.keys(parsed).sort().forEach((key) => {
+      result[key] = String(parsed[key] == null ? "" : parsed[key])
+    })
+    return JSON.stringify(result)
+  }
+  const userId = auth.getId()
+  const pageId = c.pathParam("pageId")
+  const body = new DynamicModel({ rowJson: "", text: "" })
+  c.bind(body)
+
+  const parsedRow = parseRow(body.rowJson)
+  const normalizedCurrent = canonicalize(parsedRow)
+  const rowJson = JSON.stringify(parsedRow)
+  const text = String(body.text || "")
+  const now = new Date().toISOString()
+  let response = null
+
+  $app.dao().runInTransaction((txDao) => {
+    let page = null
+    try {
+      page = txDao.findRecordById("pages", pageId)
+    } catch {
+      throw new NotFoundError("条目不存在")
+    }
+
+    const status = page.getString("status")
+    if ((status !== "claimed" && status !== "proofreading") || page.getString("proofreader") !== userId) {
+      throw new BadRequestError("该条目当前不属于你，请返回项目大厅刷新后重试")
+    }
+
+    const attemptsCollection = txDao.findCollectionByNameOrId("proofreading_attempts")
+    const round = page.getInt("proofread_round") || 1
+    const firstProofreader = page.getString("first_proofreader")
+
+    if (!firstProofreader) {
+      const first = new Record(attemptsCollection)
+      first.set("page", pageId)
+      first.set("project", page.getString("project"))
+      first.set("proofreader", userId)
+      first.set("round", round)
+      first.set("pass_no", 1)
+      first.set("kind", "first")
+      first.set("row_json", rowJson)
+      first.set("text", text)
+      first.set("outcome", "waiting")
+      first.set("submitted_at", now)
+      txDao.saveRecord(first)
+
+      page.set("first_proofreader", userId)
+      page.set("first_proofread_at", now)
+      page.set("second_proofreader", null)
+      page.set("second_proofread_at", null)
+      page.set("proofread_row_json", "")
+      page.set("proofread_text", "")
+      page.set("proofread_at", now)
+      page.set("status", "proofread")
+      page.set("proofreader", null)
+      txDao.saveRecord(page)
+
+      response = {
+        id: pageId,
+        status: "proofread",
+        outcome: "waiting",
+        message: "一校已提交，正在等待另一位校对员独立二校。"
+      }
+      return
+    }
+
+    if (firstProofreader === userId) {
+      throw new BadRequestError("该条目需要由其他校对员处理")
+    }
+
+    const firstAttempts = txDao.findRecordsByFilter(
+      "proofreading_attempts",
+      `page = "${pageId}" && round = ${round} && pass_no = 1`,
+      "",
+      1,
+      0
+    )
+    if (!firstAttempts.length) {
+      throw new BadRequestError("未找到该轮一校记录，请联系管理员处理")
+    }
+
+    const first = firstAttempts[0]
+    const normalizedFirst = canonicalize(parseRow(first.getString("row_json")))
+    const isMatch = normalizedFirst === normalizedCurrent
+
+    const second = new Record(attemptsCollection)
+    second.set("page", pageId)
+    second.set("project", page.getString("project"))
+    second.set("proofreader", userId)
+    second.set("round", round)
+    second.set("pass_no", 2)
+    second.set("kind", "second")
+    second.set("row_json", rowJson)
+    second.set("text", text)
+    second.set("outcome", isMatch ? "matched" : "mismatched")
+    second.set("submitted_at", now)
+    txDao.saveRecord(second)
+
+    first.set("outcome", isMatch ? "matched" : "mismatched")
+    txDao.saveRecord(first)
+
+    page.set("second_proofreader", userId)
+    page.set("second_proofread_at", now)
+    page.set("proofread_at", now)
+    page.set("proofreader", null)
+
+    if (isMatch) {
+      page.set("proofread_row_json", rowJson)
+      page.set("proofread_text", text)
+      page.set("status", "approved")
+      txDao.saveRecord(page)
+      response = {
+        id: pageId,
+        status: "approved",
+        outcome: "matched",
+        message: "两次校对一致，该条目已完成。"
+      }
+      return
+    }
+
+    page.set("proofread_row_json", "")
+    page.set("proofread_text", "")
+    page.set("mismatch_count", page.getInt("mismatch_count") + 1)
+    page.set("last_mismatch_at", now)
+    page.set("status", "arbitration")
+    txDao.saveRecord(page)
+    response = {
+      id: pageId,
+      status: "arbitration",
+      outcome: "mismatched",
+      message: "两次校对不一致，已保留双方结果并转交管理员仲裁。"
+    }
+  })
+
+  return c.json(200, response)
+}, $apis.requireRecordAuth("users"))
+
+routerAdd("GET", `${FANGJI_API}/pages/:pageId/arbitration`, (c) => {
+  const auth = c.get("authRecord")
+  if (!auth || auth.getString("role") !== "admin") {
+    throw new ForbiddenError("无权执行此操作")
+  }
+  const summarizeAttempt = (dao, attempt) => {
+    let displayName = attempt.getString("proofreader")
+    try {
+      const user = dao.findRecordById("users", attempt.getString("proofreader"))
+      displayName = user.getString("name") || user.getString("email") || displayName
+    } catch {}
+    return {
+      id: attempt.getId(),
+      proofreader: attempt.getString("proofreader"),
+      proofreader_name: displayName,
+      round: attempt.getInt("round"),
+      pass_no: attempt.getInt("pass_no"),
+      kind: attempt.getString("kind"),
+      row_json: attempt.getString("row_json"),
+      text: attempt.getString("text"),
+      outcome: attempt.getString("outcome"),
+      submitted_at: String(attempt.get("submitted_at") || "")
+    }
+  }
+  const pageId = c.pathParam("pageId")
+  const dao = $app.dao()
+
+  let page = null
+  try {
+    page = dao.findRecordById("pages", pageId)
+  } catch {
+    throw new NotFoundError("条目不存在")
+  }
+  if (page.getString("status") !== "arbitration") {
+    throw new BadRequestError("该条目当前不需要仲裁")
+  }
+
+  const round = page.getInt("proofread_round") || 1
+  const attempts = dao.findRecordsByFilter(
+    "proofreading_attempts",
+    `page = "${pageId}" && round = ${round}`,
+    "pass_no",
+    3,
+    0
+  )
+
+  return c.json(200, {
+    page: {
+      id: page.getId(),
+      project: page.getString("project"),
+      project_file: page.getString("project_file"),
+      page_number: page.getInt("page_number"),
+      pdf_page: page.getInt("pdf_page"),
+      status: page.getString("status"),
+      proofreader: page.getString("proofreader"),
+      first_proofreader: page.getString("first_proofreader"),
+      second_proofreader: page.getString("second_proofreader"),
+      proofread_round: page.getInt("proofread_round") || 1,
+      mismatch_count: page.getInt("mismatch_count") || 0,
+      ocr_row_json: page.getString("ocr_row_json"),
+      ocr_text: page.getString("ocr_text")
+    },
+    attempts: attempts.map((attempt) => summarizeAttempt(dao, attempt))
+  })
+}, $apis.requireRecordAuth("users"))
+
+routerAdd("POST", `${FANGJI_API}/pages/:pageId/arbitrate`, (c) => {
+  const auth = c.get("authRecord")
+  if (!auth || auth.getString("role") !== "admin") {
+    throw new ForbiddenError("无权执行此操作")
+  }
+  const parseRow = (raw) => {
+    const value = String(raw || "")
+    if (!value || value.length > 2 * 1024 * 1024) {
+      throw new BadRequestError("校对内容为空或过大")
+    }
+    let parsed = null
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      throw new BadRequestError("校对内容格式无效")
+    }
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object" || !Object.keys(parsed).length) {
+      throw new BadRequestError("校对内容必须是非空字段对象")
+    }
+    return parsed
+  }
+  const pageId = c.pathParam("pageId")
+  const body = new DynamicModel({ rowJson: "", text: "", note: "" })
+  c.bind(body)
+
+  const parsedRow = parseRow(body.rowJson)
+  const rowJson = JSON.stringify(parsedRow)
+  const text = String(body.text || "")
+  const note = String(body.note || "").slice(0, 4000)
+  const now = new Date().toISOString()
+  let response = null
+
+  $app.dao().runInTransaction((txDao) => {
+    let page = null
+    try {
+      page = txDao.findRecordById("pages", pageId)
+    } catch {
+      throw new NotFoundError("条目不存在")
+    }
+    if (page.getString("status") !== "arbitration") {
+      throw new BadRequestError("该条目当前不需要仲裁")
+    }
+
+    const round = page.getInt("proofread_round") || 1
+    const existing = txDao.findRecordsByFilter(
+      "proofreading_attempts",
+      `page = "${pageId}" && round = ${round} && pass_no = 3`,
+      "",
+      1,
+      0
+    )
+    if (existing.length) {
+      throw new BadRequestError("该条目已经完成仲裁")
+    }
+
+    const attempt = new Record(txDao.findCollectionByNameOrId("proofreading_attempts"))
+    attempt.set("page", pageId)
+    attempt.set("project", page.getString("project"))
+    attempt.set("proofreader", auth.getId())
+    attempt.set("round", round)
+    attempt.set("pass_no", 3)
+    attempt.set("kind", "arbitration")
+    attempt.set("row_json", rowJson)
+    attempt.set("text", text)
+    attempt.set("outcome", "arbitrated")
+    attempt.set("submitted_at", now)
+    txDao.saveRecord(attempt)
+
+    page.set("proofread_row_json", rowJson)
+    page.set("proofread_text", text)
+    page.set("proofread_at", now)
+    page.set("arbitrated_by", auth.getId())
+    page.set("arbitrated_at", now)
+    page.set("arbitration_note", note)
+    page.set("status", "approved")
+    page.set("proofreader", null)
+    txDao.saveRecord(page)
+
+    response = {
+      id: pageId,
+      status: "approved",
+      message: "仲裁结果已保存，条目已完成。"
+    }
+  })
+
+  return c.json(200, response)
+}, $apis.requireRecordAuth("users"))
+
+routerAdd("GET", `${FANGJI_API}/proofreader-stats`, (c) => {
+  const auth = c.get("authRecord")
+  if (!auth || auth.getString("role") !== "proofreader") {
+    throw new ForbiddenError("无权执行此操作")
+  }
+  const dao = $app.dao()
+  const attempts = dao.findRecordsByFilter(
+    "proofreading_attempts",
+    'kind = "first" || kind = "second"',
+    "created",
+    1000000,
+    0
+  )
+  const statsByUser = {}
+
+  for (const attempt of attempts) {
+    const userId = attempt.getString("proofreader")
+    if (!userId) continue
+    if (!statsByUser[userId]) {
+      statsByUser[userId] = {
+        userId,
+        projects: {},
+        proofreadCount: 0,
+        evaluatedCount: 0,
+        matchedCount: 0
+      }
+    }
+    const stats = statsByUser[userId]
+    const projectId = attempt.getString("project")
+    if (projectId) stats.projects[projectId] = true
+    stats.proofreadCount += 1
+    const outcome = attempt.getString("outcome")
+    if (outcome === "matched" || outcome === "mismatched") {
+      stats.evaluatedCount += 1
+      if (outcome === "matched") stats.matchedCount += 1
+    }
+  }
+
+  if (!statsByUser[auth.getId()]) {
+    statsByUser[auth.getId()] = {
+      userId: auth.getId(),
+      projects: {},
+      proofreadCount: 0,
+      evaluatedCount: 0,
+      matchedCount: 0
+    }
+  }
+
+  const profiles = Object.keys(statsByUser).map((userId) => {
+    const item = statsByUser[userId]
+    return {
+      userId,
+      projectCount: Object.keys(item.projects).length,
+      proofreadCount: item.proofreadCount,
+      evaluatedCount: item.evaluatedCount,
+      correctCount: item.matchedCount,
+      accuracy: item.evaluatedCount
+        ? Math.round(item.matchedCount / item.evaluatedCount * 1000) / 10
+        : 0
+    }
+  })
+
+  function rank(sorted, userId, valueKey) {
+    const index = sorted.findIndex((item) => item.userId === userId)
+    if (index < 0) return null
+    let result = 1
+    for (let i = 1; i <= index; i += 1) {
+      if (sorted[i - 1][valueKey] !== sorted[i][valueKey]) result = i + 1
+    }
+    return result
+  }
+
+  const accuracySorted = profiles.slice().sort((a, b) =>
+    (b.accuracy - a.accuracy) ||
+    (b.evaluatedCount - a.evaluatedCount) ||
+    a.userId.localeCompare(b.userId)
+  )
+  const countSorted = profiles.slice().sort((a, b) =>
+    (b.proofreadCount - a.proofreadCount) ||
+    (b.accuracy - a.accuracy) ||
+    a.userId.localeCompare(b.userId)
+  )
+  const current = profiles.find((item) => item.userId === auth.getId())
+
+  return c.json(200, {
+    ...current,
+    accuracyRank: rank(accuracySorted, auth.getId(), "accuracy"),
+    proofreadRank: rank(countSorted, auth.getId(), "proofreadCount"),
+    rankedProofreaderCount: profiles.length
+  })
+}, $apis.requireRecordAuth("users"))

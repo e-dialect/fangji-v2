@@ -60,6 +60,11 @@ const routes = [
         path: 'projects/:id',
         name: 'ProjectDetail',
         component: () => import('@/views/admin/ProjectDetailView.vue')
+      },
+      {
+        path: 'projects/:projectId/arbitration/:pageId',
+        name: 'Arbitration',
+        component: () => import('@/views/admin/ArbitrationView.vue')
       }
     ]
   },
