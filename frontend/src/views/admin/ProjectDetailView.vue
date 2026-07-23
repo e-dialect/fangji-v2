@@ -93,24 +93,74 @@
 
       <!-- Pages list -->
       <div class="card">
-        <div class="card-title">文本条目列表 ({{ pages.length }} 条)</div>
+        <div class="card-title">
+          文本条目列表（共 {{ pages.length }} 条<span v-if="hasActiveListFilter">，筛选出 {{ filteredPages.length }} 条</span>）
+        </div>
+        <div v-if="mutationSuccess" class="alert alert-success" role="status">{{ mutationSuccess }}</div>
+        <div v-if="mutationError" class="alert alert-error" role="alert">{{ mutationError }}</div>
+        <div v-if="pages.length" class="admin-list-filters mb-4">
+          <label class="admin-filter-field">
+            <span>搜索条目</span>
+            <input
+              v-model="searchQuery"
+              type="search"
+              class="form-control"
+              placeholder="条号、PDF页码、文本或校对员"
+            />
+          </label>
+          <label class="admin-filter-field">
+            <span>状态</span>
+            <select v-model="selectedStatus" class="form-control">
+              <option value="">全部状态</option>
+              <option v-for="option in statusOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+          <label class="admin-filter-field admin-filter-size">
+            <span>每页显示</span>
+            <select v-model.number="listPageSize" class="form-control">
+              <option :value="10">10 条</option>
+              <option :value="25">25 条</option>
+              <option :value="50">50 条</option>
+              <option :value="100">100 条</option>
+            </select>
+          </label>
+          <button
+            v-if="hasActiveListFilter"
+            type="button"
+            class="btn btn-secondary btn-sm"
+            @click="resetListFilters"
+          >
+            清除筛选
+          </button>
+        </div>
         <div v-if="loadingPages" class="text-muted text-sm">加载中...</div>
+        <div v-else-if="pagesError" class="alert alert-error">
+          {{ pagesError }}
+          <button type="button" class="btn btn-secondary btn-sm ml-2" @click="loadPages">重新加载</button>
+        </div>
         <div v-else-if="pages.length === 0" class="empty-state">
           <div class="empty-state-icon">📄</div>
-          <div class="empty-state-text">暂无条目，请上传 PDF 或 CSV 文件</div>
+          <div class="empty-state-text">暂无条目，请上传 CSV 文件</div>
         </div>
-        <div v-else class="table-wrapper">
-          <div class="flex items-center justify-between mb-3">
+        <div v-else-if="filteredPages.length === 0" class="empty-state">
+          <div class="empty-state-icon">🔎</div>
+          <div class="empty-state-text">没有符合当前条件的条目</div>
+          <button type="button" class="btn btn-secondary mt-3" @click="resetListFilters">清除筛选</button>
+        </div>
+        <div v-else>
+          <div class="admin-table-actions mb-3">
             <div class="text-sm text-muted">
-              已选择 {{ selectedPendingIds.length }} 条待校对条目
+              已选择 {{ selectedPendingIds.length }} 条待校对条目；范围按完整列表条号选择
             </div>
-            <div class="flex gap-2">
+            <div class="admin-bulk-actions">
               <input
                 v-model.trim="rangeSelectInput"
                 type="text"
                 class="form-control"
-                style="width: 220px;"
                 placeholder="输入范围，如 1-33 或 1,3,5-8"
+                aria-label="按完整列表范围选择条目"
                 :disabled="mutatingRows"
               />
               <button class="btn btn-secondary btn-sm" @click="selectByRange" :disabled="mutatingRows || !rangeSelectInput">
@@ -127,6 +177,7 @@
               </button>
             </div>
           </div>
+          <div class="table-wrapper">
           <table>
             <thead>
               <tr>
@@ -142,16 +193,17 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(pg, idx) in pages" :key="pg.id">
+              <tr v-for="(pg, idx) in displayedPages" :key="pg.id">
                 <td>
                   <input
                     type="checkbox"
                     :checked="selectedPendingIds.includes(pg.id)"
                     :disabled="!isPending(pg) || mutatingRows"
+                    :aria-label="`选择第 ${formatItemNo(pg.page_number, displayedPageOffset + idx)} 条`"
                     @change="toggleRowSelection(pg.id, $event.target.checked)"
                   />
                 </td>
-                <td>第 {{ formatItemNo(pg.page_number, idx) }} 条</td>
+                <td>第 {{ formatItemNo(pg.page_number, displayedPageOffset + idx) }} 条</td>
                 <td><span :class="statusBadgeClass(pg.status)" class="badge">{{ statusLabel(pg.status) }}</span></td>
                 <td class="text-sm text-muted">{{ pg.expand?.first_proofreader?.name || pg.expand?.first_proofreader?.email || '—' }}</td>
                 <td class="text-sm text-muted">{{ pg.expand?.second_proofreader?.name || pg.expand?.second_proofreader?.email || '—' }}</td>
@@ -190,6 +242,28 @@
               </tr>
             </tbody>
           </table>
+          </div>
+          <nav v-if="listPagination.totalPages > 1" class="admin-pagination" aria-label="条目分页">
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              :disabled="listPagination.page <= 1"
+              @click="currentListPage -= 1"
+            >
+              上一页
+            </button>
+            <span class="text-sm text-muted">
+              第 {{ listPagination.page }} / {{ listPagination.totalPages }} 页
+            </span>
+            <button
+              type="button"
+              class="btn btn-secondary btn-sm"
+              :disabled="listPagination.page >= listPagination.totalPages"
+              @click="currentListPage += 1"
+            >
+              下一页
+            </button>
+          </nav>
         </div>
       </div>
     </template>
@@ -197,11 +271,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import { parseCsv } from '@/lib/csvParser'
+import { filterAdminPages, paginateItems, parseRangeInput } from '@/lib/adminPageList'
 import { safeParseRowJson } from '@/composables/useStructuredRow'
-import { PAGE_STATUS, PROOFREAD_PROGRESS_STATUSES, statusBadgeClass, statusLabel } from '@/constants/pageStatus'
+import {
+  PAGE_STATUS,
+  PAGE_STATUS_LABELS,
+  PROOFREAD_PROGRESS_STATUSES,
+  statusBadgeClass,
+  statusLabel
+} from '@/constants/pageStatus'
 import { createPage, deletePage, getPagedProjectPages, listAllProjectPages, updatePage } from '@/services/pagesService'
 import { createProjectPdf } from '@/services/projectFilesService'
 import { getProject } from '@/services/projectsService'
@@ -213,6 +294,7 @@ const projectId = Array.isArray(route.params.id) ? route.params.id[0] : route.pa
 const project = ref(null)
 const projectError = ref('')
 const pages = ref([])
+const pagesError = ref('')
 const loadingProject = ref(true)
 const loadingPages = ref(true)
 const pageStats = ref({ total: 0, proofread: 0, approved: 0 })
@@ -224,6 +306,8 @@ const csvFile = ref(null)
 const uploadingPdf = ref(false)
 const uploadingCsv = ref(false)
 const mutatingRows = ref(false)
+const mutationSuccess = ref('')
+const mutationError = ref('')
 const pdfSuccess = ref(false)
 const pdfError = ref('')
 const csvSuccess = ref('')
@@ -233,6 +317,12 @@ const exportError = ref('')
 const exportSuccess = ref('')
 const selectedPendingIds = ref([])
 const rangeSelectInput = ref('')
+const searchQuery = ref('')
+const selectedStatus = ref('')
+const currentListPage = ref(1)
+const listPageSize = ref(25)
+
+const statusOptions = Object.entries(PAGE_STATUS_LABELS).map(([value, label]) => ({ value, label }))
 
 const approvedPct = computed(() => {
   if (!pageStats.value.total) return 0
@@ -240,6 +330,18 @@ const approvedPct = computed(() => {
 })
 
 const pendingPages = computed(() => pages.value.filter((p) => p.status === PAGE_STATUS.PENDING))
+const filteredPages = computed(() => filterAdminPages(pages.value, {
+  query: searchQuery.value,
+  status: selectedStatus.value
+}))
+const listPagination = computed(() => paginateItems(
+  filteredPages.value,
+  currentListPage.value,
+  listPageSize.value
+))
+const displayedPages = computed(() => listPagination.value.items)
+const displayedPageOffset = computed(() => (listPagination.value.page - 1) * listPagination.value.perPage)
+const hasActiveListFilter = computed(() => Boolean(searchQuery.value.trim() || selectedStatus.value))
 const allPendingSelected = computed(() => {
   if (!pendingPages.value.length) return false
   return pendingPages.value.every((p) => selectedPendingIds.value.includes(p.id))
@@ -250,6 +352,14 @@ const pendingIndexById = computed(() => {
     map[p.id] = i
   })
   return map
+})
+
+watch([searchQuery, selectedStatus, listPageSize], () => {
+  currentListPage.value = 1
+})
+
+watch(() => listPagination.value.page, (page) => {
+  if (currentListPage.value !== page) currentListPage.value = page
 })
 
 onMounted(async () => {
@@ -275,6 +385,7 @@ onMounted(async () => {
 
 async function loadPages() {
   loadingPages.value = true
+  pagesError.value = ''
   try {
     const perPage = 50
     const allPages = []
@@ -293,10 +404,21 @@ async function loadPages() {
     pageStats.value.proofread = allPages.filter(p => PROOFREAD_PROGRESS_STATUSES.includes(p.status)).length
     pageStats.value.approved = allPages.filter(p => p.status === PAGE_STATUS.APPROVED).length
   } catch (e) {
-    console.error(e)
+    pagesError.value = getPbMessage(e, '条目列表加载失败，请稍后重试。')
   } finally {
     loadingPages.value = false
   }
+}
+
+function resetListFilters() {
+  searchQuery.value = ''
+  selectedStatus.value = ''
+  currentListPage.value = 1
+}
+
+function clearMutationFeedback() {
+  mutationSuccess.value = ''
+  mutationError.value = ''
 }
 
 function onPdfSelected(e) {
@@ -593,6 +715,7 @@ async function movePendingRow(id, direction) {
   if (!current || !target) return
 
   mutatingRows.value = true
+  clearMutationFeedback()
   try {
     const maxPageNum = pages.value.reduce((max, p) => {
       const n = Number(p.page_number)
@@ -606,43 +729,20 @@ async function movePendingRow(id, direction) {
     await updatePage(target.id, { page_number: currentPageNum })
     await updatePage(current.id, { page_number: targetPageNum })
     await loadPages()
+    mutationSuccess.value = `第 ${currentPageNum} 条已${direction < 0 ? '上移' : '下移'}。`
   } catch (e) {
-    alert(getPbMessage(e, '顺序调整失败，请重试'))
+    mutationError.value = getPbMessage(e, '顺序调整失败，请重试')
   } finally {
     mutatingRows.value = false
   }
 }
 
-function parseRangeInput(text, max) {
-  const raw = String(text || '').trim()
-  if (!raw) return []
-  const indices = new Set()
-  const parts = raw.split(',').map((s) => s.trim()).filter(Boolean)
-
-  for (const part of parts) {
-    if (part.includes('-')) {
-      const [startStr, endStr] = part.split('-').map((s) => s.trim())
-      const start = Number(startStr)
-      const end = Number(endStr)
-      if (!Number.isInteger(start) || !Number.isInteger(end)) continue
-      const from = Math.max(1, Math.min(start, end))
-      const to = Math.min(max, Math.max(start, end))
-      for (let i = from; i <= to; i++) indices.add(i - 1)
-    } else {
-      const n = Number(part)
-      if (!Number.isInteger(n)) continue
-      if (n >= 1 && n <= max) indices.add(n - 1)
-    }
-  }
-
-  return Array.from(indices).sort((a, b) => a - b)
-}
-
 function selectByRange() {
   if (mutatingRows.value) return
+  clearMutationFeedback()
   const indexes = parseRangeInput(rangeSelectInput.value, pages.value.length)
   if (!indexes.length) {
-    alert('范围格式无效，请输入如 1-33 或 1,3,5-8')
+    mutationError.value = '范围格式无效，请输入如 1-33 或 1,3,5-8。'
     return
   }
 
@@ -654,7 +754,9 @@ function selectByRange() {
 
   selectedPendingIds.value = ids
   if (!ids.length) {
-    alert('该范围内没有可操作的待校对条目（仅 pending 可选）')
+    mutationError.value = '该范围内没有可操作的待校对条目（仅待校对状态可选）。'
+  } else {
+    mutationSuccess.value = `已按范围选择 ${ids.length} 条待校对条目。`
   }
 }
 
@@ -695,14 +797,20 @@ async function moveSelectedRowsDown() {
     }
   }
 
-  if (!moved) return
+  if (!moved) {
+    clearMutationFeedback()
+    mutationError.value = '所选条目已经位于可下移范围的末尾。'
+    return
+  }
 
   mutatingRows.value = true
+  clearMutationFeedback()
   try {
     await applyPendingOrderByIds(reordered)
     await loadPages()
+    mutationSuccess.value = `已下移 ${selectedPendingIds.value.length} 条待校对条目。`
   } catch (e) {
-    alert(getPbMessage(e, '批量下移失败，请重试'))
+    mutationError.value = getPbMessage(e, '批量下移失败，请重试')
   } finally {
     mutatingRows.value = false
   }
@@ -725,14 +833,17 @@ async function deleteSelectedRows() {
   const ok = window.confirm(`确认删除已选择的 ${selectedPendingIds.value.length} 条待校对条目吗？此操作不可恢复。`)
   if (!ok) return
 
+  const deleteCount = selectedPendingIds.value.length
   mutatingRows.value = true
+  clearMutationFeedback()
   try {
     await Promise.all(selectedPendingIds.value.map((id) => deletePage(id)))
     selectedPendingIds.value = []
     await resequenceAllRows()
     await loadPages()
+    mutationSuccess.value = `已删除 ${deleteCount} 条待校对条目，并重新整理条号。`
   } catch (e) {
-    alert(getPbMessage(e, '批量删除失败，请重试'))
+    mutationError.value = getPbMessage(e, '批量删除失败，请重试')
   } finally {
     mutatingRows.value = false
   }
