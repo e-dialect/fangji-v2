@@ -7,16 +7,23 @@ export function getFileUrl(record, fileName) {
 
 export async function createProjectPdf({ projectId, file }) {
   const formData = new FormData()
-  formData.append('project', projectId)
   formData.append('file', file)
-  formData.append('original_filename', file.name)
-  formData.append('status', 'processing')
-  return pb.collection('project_files').create(formData)
+  return pb.send(`/api/fangji/projects/${encodeURIComponent(projectId)}/files/pdf`, {
+    method: 'POST',
+    body: formData,
+    requestKey: null
+  })
+}
+
+export async function getProjectFile(recordId) {
+  return pb.collection('project_files').getOne(recordId, {
+    requestKey: null
+  })
 }
 
 export async function findLatestProjectPdf(projectId) {
   const list = await pb.collection('project_files').getFullList({
-    filter: `project="${projectId}"`,
+    filter: `project="${projectId}" && status="ready"`,
     sort: '-created',
     requestKey: null
   })

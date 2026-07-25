@@ -296,7 +296,7 @@ docker compose logs -f frontend
 2. 在“上传 PDF 文件”区域选择 PDF。
 3. 点击“上传 PDF”。
 
-PDF 用于校对员编辑时预览原文。当前代码只负责保存和展示 PDF，不会自动 OCR，也不会自动生成条目；待校对文本主要通过 CSV 导入。
+PDF 用于校对员编辑时预览原文。文件上传后由后端检查大小、扩展名和 PDF 文件签名；只有状态变为 `ready` 的文件才会用于预览。PDF 不会自动 OCR 或生成条目，待校对文本主要通过 CSV 导入。
 
 ### 4. 管理员导入 CSV
 
@@ -310,8 +310,12 @@ PDF 用于校对员编辑时预览原文。当前代码只负责保存和展示 
 - `PDF页码` 必须是正整数，用于编辑器定位 PDF 页。
 - 除 `PDF页码` 外的列会作为结构化字段展示在校对表格中。
 - 去掉 `PDF页码` 后内容全空的行会被拒绝。
-- 导入前会先校验整份 CSV；校验失败不会写入任何条目，写入过程中失败会尝试回滚本次已创建条目。
+- 浏览器只上传一次文件，解析、校验和数据库写入都在后端作业中完成。
+- 格式错误的行会记录 CSV 行号、字段、错误代码和原因，并被跳过；其他合法行继续导入。
+- 前端会显示后端作业状态、成功/跳过数量和前 100 条错误明细。
+- CSV 支持标准引号转义和引号字段内换行，不允许空表头、重复表头或行列数量不一致。
 - 支持 `UTF-8`、`GB18030`、`GBK` 编码识别。
+- 相同项目重复上传内容相同的 CSV 时会复用既有成功或处理中作业，避免重复导入。
 
 ### 5. 管理员管理条目
 
@@ -437,7 +441,7 @@ fangji-v2/
 │       ├── components/             # 导航、编辑器、PDF 预览、IPA 键盘
 │       ├── composables/            # PDF、结构化字段、任务导航复用逻辑
 │       ├── constants/              # 条目状态和状态标签
-│       ├── lib/                    # PocketBase 客户端、CSV 解析、diff 工具
+│       ├── lib/                    # PocketBase 客户端、草稿和 diff 工具
 │       ├── router/                 # Vue Router 与角色路由守卫
 │       ├── services/               # PocketBase 数据访问封装
 │       ├── stores/                 # Pinia 登录状态
@@ -445,9 +449,11 @@ fangji-v2/
 │       └── views/                  # 登录、注册、管理员、校对员页面
 └── backend/
     ├── Dockerfile
+    ├── main.go                     # 自定义 PocketBase 启动入口
+    ├── import_service.go           # PDF 校验和持久化 CSV 导入队列
     ├── docker-entrypoint.sh
     ├── pb_hooks/                   # PocketBase hooks
-    └── pb_migrations/              # Schema、权限和双人二校迁移
+    └── pb_migrations/              # Schema、权限、导入作业和双人二校迁移
 ```
 
 ## 开发说明
@@ -455,7 +461,7 @@ fangji-v2/
 ### 技术栈
 
 - 前端：Vue 3、Vite、Vue Router、Pinia
-- 后端：PocketBase
+- 后端：PocketBase 0.21.3 自定义 Go 构建
 - 样式：纯 CSS
 - PDF 预览：静态引入 PDF.js
 - 部署：Docker Compose

@@ -1,16 +1,18 @@
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /src
+COPY go.mod go.sum* ./
+RUN go mod download
+COPY main.go import_service.go import_service_test.go ./
+RUN go test ./...
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pocketbase .
+
 FROM alpine:3.19
 
-ARG PB_VERSION=0.21.3
-ARG TARGETARCH=amd64
+RUN apk add --no-cache ca-certificates
 
-RUN apk add --no-cache curl unzip ca-certificates
-
-# Download PocketBase binary for the target architecture
-RUN curl -Lo /tmp/pocketbase.zip \
-    "https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_${TARGETARCH}.zip" \
-    && unzip /tmp/pocketbase.zip -d /pb/ \
-    && rm /tmp/pocketbase.zip \
-    && chmod +x /pb/pocketbase
+COPY --from=builder /out/pocketbase /pb/pocketbase
+RUN chmod +x /pb/pocketbase
 
 COPY pb_hooks/     /pb/pb_hooks/
 COPY pb_migrations/ /pb/pb_migrations/

@@ -48,10 +48,11 @@
             <span v-if="pdfFile" class="text-sm ml-2">{{ pdfFile.name }}</span>
             <div v-if="pdfFile" class="mt-3">
               <button class="btn btn-primary" @click="uploadPdf" :disabled="uploadingPdf">
-                {{ uploadingPdf ? '上传中...' : '上传 PDF' }}
+                {{ uploadingPdf ? '上传处理中...' : '上传 PDF' }}
               </button>
             </div>
-            <div v-if="pdfSuccess" class="alert alert-success mt-2">PDF 上传成功，可在校对编辑器中预览。</div>
+            <div v-if="pdfProcessing" class="alert mt-2">PDF 已上传，后端正在校验文件...</div>
+            <div v-if="pdfSuccess" class="alert alert-success mt-2">PDF 校验完成，可在校对编辑器中预览。</div>
             <div v-if="pdfError" class="alert alert-error mt-2">{{ pdfError }}</div>
           </div>
 
@@ -67,11 +68,54 @@
             <span v-if="csvFile" class="text-sm ml-2">{{ csvFile.name }}</span>
             <div v-if="csvFile" class="mt-3">
               <button class="btn btn-primary" @click="uploadCsv" :disabled="uploadingCsv">
-                {{ uploadingCsv ? '导入中...' : '导入 CSV' }}
+                {{ uploadingCsv ? '上传处理中...' : '导入 CSV' }}
               </button>
+            </div>
+            <div v-if="csvJob" class="import-job-card mt-3">
+              <div class="flex items-center justify-between gap-2">
+                <strong>{{ csvJobStatusLabel }}</strong>
+                <span class="text-sm text-muted">作业 {{ csvJob.id }}</span>
+              </div>
+              <div class="progress mt-2">
+                <div class="progress-bar" :style="{ width: csvJobProgress + '%' }"></div>
+              </div>
+              <div class="text-sm mt-2">
+                已处理 {{ csvJob.processed_count || 0 }} 条；
+                成功 {{ csvJob.success_count || 0 }} 条；
+                跳过 {{ csvJob.failed_count || 0 }} 条
+              </div>
+              <div v-if="csvJob.error_message" class="text-sm text-muted mt-1">{{ csvJob.error_message }}</div>
             </div>
             <div v-if="csvSuccess" class="alert alert-success mt-2">{{ csvSuccess }}</div>
             <div v-if="csvError" class="alert alert-error mt-2" style="white-space:pre-line">{{ csvError }}</div>
+            <div v-if="csvImportErrors.length" class="mt-3">
+              <div class="font-semibold mb-2">
+                错误明细（显示前 {{ csvImportErrors.length }} 条）
+              </div>
+              <div class="table-wrapper import-error-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>CSV 行</th>
+                      <th>字段</th>
+                      <th>错误代码</th>
+                      <th>原因</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="item in csvImportErrors" :key="item.id">
+                      <td>{{ item.row_number || '—' }}</td>
+                      <td>{{ item.column_name || '—' }}</td>
+                      <td><code>{{ item.error_code }}</code></td>
+                      <td>
+                        {{ item.message }}
+                        <span v-if="item.raw_value" class="text-muted">（值：{{ item.raw_value }}）</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -271,9 +315,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
-import { parseCsv } from '@/lib/csvParser'
 import { filterAdminPages, paginateItems, parseRangeInput } from '@/lib/adminPageList'
 import { safeParseRowJson } from '@/composables/useStructuredRow'
 import {
@@ -283,8 +326,9 @@ import {
   statusBadgeClass,
   statusLabel
 } from '@/constants/pageStatus'
-import { createPage, deletePage, getPagedProjectPages, listAllProjectPages, updatePage } from '@/services/pagesService'
-import { createProjectPdf } from '@/services/projectFilesService'
+import { deletePage, getPagedProjectPages, listAllProjectPages, updatePage } from '@/services/pagesService'
+import { createProjectPdf, getProjectFile } from '@/services/projectFilesService'
+import { createCsvImport, getImportJob, listImportJobErrors } from '@/services/importJobsService'
 import { getProject } from '@/services/projectsService'
 import { getPbMessage, getPbStatus } from '@/utils/pbErrors'
 
@@ -309,9 +353,12 @@ const mutatingRows = ref(false)
 const mutationSuccess = ref('')
 const mutationError = ref('')
 const pdfSuccess = ref(false)
+const pdfProcessing = ref(false)
 const pdfError = ref('')
 const csvSuccess = ref('')
 const csvError = ref('')
+const csvJob = ref(null)
+const csvImportErrors = ref([])
 const exportingCsv = ref(false)
 const exportError = ref('')
 const exportSuccess = ref('')
@@ -321,6 +368,8 @@ const searchQuery = ref('')
 const selectedStatus = ref('')
 const currentListPage = ref(1)
 const listPageSize = ref(25)
+let pdfPollGeneration = 0
+let csvPollGeneration = 0
 
 const statusOptions = Object.entries(PAGE_STATUS_LABELS).map(([value, label]) => ({ value, label }))
 
@@ -353,6 +402,20 @@ const pendingIndexById = computed(() => {
   })
   return map
 })
+const csvJobProgress = computed(() => {
+  const processed = Number(csvJob.value?.processed_count || 0)
+  const total = Number(csvJob.value?.total_count || 0)
+  if (csvJob.value?.status === 'completed' || csvJob.value?.status === 'completed_with_errors') return 100
+  if (!total) return csvJob.value?.status === 'processing' ? 10 : 0
+  return Math.min(99, Math.round((processed / total) * 100))
+})
+const csvJobStatusLabel = computed(() => ({
+  queued: '等待后端处理',
+  processing: '后端正在导入',
+  completed: '导入完成',
+  completed_with_errors: '导入完成，部分条目已跳过',
+  failed: '导入失败'
+})[csvJob.value?.status] || '准备导入')
 
 watch([searchQuery, selectedStatus, listPageSize], () => {
   currentListPage.value = 1
@@ -381,6 +444,11 @@ onMounted(async () => {
   }
   loadingProject.value = false
   await loadPages()
+})
+
+onBeforeUnmount(() => {
+  pdfPollGeneration += 1
+  csvPollGeneration += 1
 })
 
 async function loadPages() {
@@ -424,6 +492,7 @@ function clearMutationFeedback() {
 function onPdfSelected(e) {
   pdfFile.value = e.target.files[0] || null
   pdfSuccess.value = false
+  pdfProcessing.value = false
   pdfError.value = ''
 }
 
@@ -431,21 +500,40 @@ function onCsvSelected(e) {
   csvFile.value = e.target.files[0] || null
   csvSuccess.value = ''
   csvError.value = ''
+  csvJob.value = null
+  csvImportErrors.value = []
 }
 
 async function uploadPdf() {
   if (!pdfFile.value) return
   uploadingPdf.value = true
   pdfError.value = ''
+  pdfSuccess.value = false
+  pdfProcessing.value = false
+  const generation = ++pdfPollGeneration
   try {
-    await createProjectPdf({ projectId, file: pdfFile.value })
-    pdfSuccess.value = true
+    let record = await createProjectPdf({ projectId, file: pdfFile.value })
+    pdfProcessing.value = record.status === 'processing'
     pdfFile.value = null
     if (pdfInput.value) pdfInput.value.value = ''
+    while (record.status === 'processing' && generation === pdfPollGeneration) {
+      await pollDelay(1000)
+      record = await getProjectFile(record.id)
+    }
+    if (generation !== pdfPollGeneration) return
+    pdfProcessing.value = false
+    if (record.status === 'ready') {
+      pdfSuccess.value = true
+    } else {
+      pdfError.value = record.error_message || 'PDF 后端校验失败'
+    }
   } catch (e) {
-    pdfError.value = getPbMessage(e, '上传失败，请重试')
+    pdfError.value = getPbStatus(e) === 413
+      ? 'PDF 文件超过 50 MB 上限'
+      : getPbMessage(e, '上传失败，请重试')
+    pdfProcessing.value = false
   } finally {
-    uploadingPdf.value = false
+    if (generation === pdfPollGeneration) uploadingPdf.value = false
   }
 }
 
@@ -454,119 +542,45 @@ async function uploadCsv() {
   uploadingCsv.value = true
   csvError.value = ''
   csvSuccess.value = ''
-  const createdIds = []
+  csvJob.value = null
+  csvImportErrors.value = []
+  const generation = ++csvPollGeneration
   try {
-    const text = await readCsvText(csvFile.value)
-    const rows = parseCsv(text.replace(/^\uFEFF/, ''))
-    if (!rows.length) throw new Error('CSV 文件为空或无法读取有效行')
-
-    const headerKeys = Object.keys(rows[0] || {})
-    const pdfPageKey = headerKeys.find((k) => k.trim() === 'PDF页码')
-    if (!pdfPageKey) {
-      throw new Error('CSV 缺少必填字段：PDF页码')
-    }
-
-    // Determine next page number from existing pages.
-    const existingPages = await listAllProjectPages(projectId, {
-      fields: 'page_number'
-    })
-    let nextPageNum = existingPages.reduce((max, p) => {
-      const n = Number(p.page_number)
-      return Number.isFinite(n) ? Math.max(max, n) : max
-    }, 0) + 1
-
-    const payloads = buildCsvImportPayloads(rows, pdfPageKey, nextPageNum)
-
-    for (const payload of payloads) {
-      const created = await createPage(payload)
-      if (created?.id) createdIds.push(created.id)
-    }
-
-    csvSuccess.value = `成功导入 ${payloads.length} 条待校对任务！`
-    selectedPendingIds.value = []
+    let job = await createCsvImport({ projectId, file: csvFile.value })
+    csvJob.value = job
     csvFile.value = null
     if (csvInput.value) csvInput.value.value = ''
-    await loadPages()
-  } catch (e) {
-    let rollbackFailed = 0
-    if (createdIds.length) {
-      rollbackFailed = await rollbackCreatedPages(createdIds)
+    while (['queued', 'processing'].includes(job.status) && generation === csvPollGeneration) {
+      await pollDelay(1000)
+      job = await getImportJob(job.id)
+      csvJob.value = job
     }
-    const baseMessage = getPbMessage(e, '导入失败，请检查文件格式')
-    if (!createdIds.length) {
-      csvError.value = baseMessage
-    } else if (rollbackFailed) {
-      csvError.value = `${baseMessage}\n已尝试回滚本次导入，但有 ${rollbackFailed} 条记录未能删除，请刷新后检查条目列表。`
+    if (generation !== csvPollGeneration) return
+
+    if (job.status === 'failed') {
+      csvError.value = job.error_message || 'CSV 后端处理失败'
     } else {
-      csvError.value = `${baseMessage}\n本次已创建的 ${createdIds.length} 条记录已自动回滚。`
+      csvSuccess.value = job.failed_count > 0
+        ? `成功导入 ${job.success_count} 条，跳过 ${job.failed_count} 条错误记录。`
+        : `成功导入 ${job.success_count} 条待校对任务！`
+      selectedPendingIds.value = []
+      if (job.failed_count > 0) {
+        const result = await listImportJobErrors(job.id, 1, 100)
+        csvImportErrors.value = result.items
+      }
+      await loadPages()
     }
+  } catch (e) {
+    csvError.value = getPbStatus(e) === 413
+      ? 'CSV 文件超过 50 MB 上限'
+      : getPbMessage(e, '导入失败，请检查文件格式')
   } finally {
-    uploadingCsv.value = false
+    if (generation === csvPollGeneration) uploadingCsv.value = false
   }
 }
 
-function buildCsvImportPayloads(rows, pdfPageKey, firstPageNumber) {
-  const errors = []
-  const payloads = []
-  let nextPageNum = firstPageNumber
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i]
-    const csvLineNo = i + 2
-    const pdfPageRaw = String(row[pdfPageKey] ?? '').trim()
-    const pdfPage = Number(pdfPageRaw)
-    if (!Number.isInteger(pdfPage) || pdfPage <= 0) {
-      errors.push(`第 ${csvLineNo} 行：PDF页码 必须是正整数`)
-      continue
-    }
-
-    const structuredRow = {}
-    const parts = []
-    for (const [key, value] of Object.entries(row)) {
-      if (key.trim() === 'PDF页码') continue
-      const textPart = String(value ?? '').trim()
-      structuredRow[key] = textPart
-      if (textPart) parts.push(textPart)
-    }
-
-    const entryText = parts.join(' ').trim()
-    if (!entryText) {
-      errors.push(`第 ${csvLineNo} 行：去掉 PDF页码 后内容不能为空`)
-      continue
-    }
-
-    payloads.push({
-      project: projectId,
-      page_number: nextPageNum++,
-      pdf_page: pdfPage,
-      ocr_row_json: JSON.stringify(structuredRow),
-      ocr_text: entryText,
-      proofread_round: 1,
-      mismatch_count: 0,
-      status: PAGE_STATUS.PENDING
-    })
-  }
-
-  if (errors.length) {
-    throw new Error(formatCsvValidationErrors(errors))
-  }
-
-  return payloads
-}
-
-function formatCsvValidationErrors(errors) {
-  const visible = errors.slice(0, 8)
-  const hiddenCount = errors.length - visible.length
-  return [
-    'CSV 校验未通过，未导入任何条目：',
-    ...visible,
-    hiddenCount > 0 ? `还有 ${hiddenCount} 条错误，请修正后重新导入。` : ''
-  ].filter(Boolean).join('\n')
-}
-
-async function rollbackCreatedPages(ids) {
-  const results = await Promise.allSettled(ids.map((id) => deletePage(id)))
-  return results.filter((result) => result.status === 'rejected').length
+function pollDelay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
 async function exportCsv() {
@@ -622,45 +636,6 @@ async function exportCsv() {
   } finally {
     exportingCsv.value = false
   }
-}
-
-async function readCsvText(file) {
-  const buffer = await file.arrayBuffer()
-  const bytes = new Uint8Array(buffer)
-
-  // Try UTF-8 first, then common Chinese CSV encodings.
-  const candidates = ['utf-8', 'gb18030', 'gbk']
-  let best = ''
-  let bestScore = Number.POSITIVE_INFINITY
-
-  for (const encoding of candidates) {
-    try {
-      const decoded = new TextDecoder(encoding, { fatal: false }).decode(bytes)
-      const score = textGarbleScore(decoded)
-      if (score < bestScore) {
-        best = decoded
-        bestScore = score
-      }
-      // Clean UTF-8 result: return early for speed and stability.
-      if (encoding === 'utf-8' && score === 0) return decoded
-    } catch {
-      // Ignore unsupported encodings and continue fallback.
-    }
-  }
-
-  if (!best) {
-    throw new Error('CSV 文件编码无法识别，请保存为 UTF-8 或 GB18030 后重试')
-  }
-  return best
-}
-
-function textGarbleScore(text) {
-  if (!text) return 0
-  // Replacement char usually indicates decode mismatch.
-  const replacementCount = (text.match(/\uFFFD/g) || []).length
-  // Null chars are also a strong signal of broken decoding.
-  const nullCount = (text.match(/\u0000/g) || []).length
-  return replacementCount * 10 + nullCount
 }
 
 function toCsvCell(value) {
