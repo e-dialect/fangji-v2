@@ -174,6 +174,26 @@ onRecordBeforeCreateRequest((e) => {
   e.record.set("role", "proofreader")
 }, "users")
 
+// A signed-in user may update profile fields, but role assignment is an
+// administrator-only operation. Registration protection alone is not enough:
+// without this check a proofreader could PATCH their own role to admin.
+onRecordBeforeUpdateRequest((e) => {
+  const authRecord = e.httpContext?.get && e.httpContext.get("authRecord")
+  if (authRecord?.getString && authRecord.getString("role") === "admin") {
+    return
+  }
+
+  let current = null
+  try {
+    current = $app.dao().findRecordById("users", e.record.getId())
+  } catch {
+    throw new BadRequestError("用户记录不存在或已被删除")
+  }
+  if (e.record.getString("role") !== current.getString("role")) {
+    throw new ForbiddenError("不允许修改账户角色")
+  }
+}, "users")
+
 // Hook: enforce valid status transitions on pages to prevent race conditions.
 //
 // - pending/proofread → claimed: only allowed while the page is still claimable

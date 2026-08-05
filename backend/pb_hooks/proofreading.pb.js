@@ -71,6 +71,98 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
   return c.json(200, claimed ? summarize(claimed) : null)
 }, $apis.requireRecordAuth("users"))
 
+// Reordering is a single server-side transaction. The request must contain
+// each selected pending page exactly once. This supports paginated admin views
+// while stale or cross-project selections are rejected in the transaction.
+routerAdd("POST", `${FANGJI_API}/projects/:projectId/pages/reorder`, (c) => {
+  const auth = c.get("authRecord")
+  if (!auth || auth.getString("role") !== "admin") throw new ForbiddenError("无权执行此操作")
+  const projectId = c.pathParam("projectId")
+  const body = new DynamicModel({ orderedIds: [] })
+  c.bind(body)
+  if (!Array.isArray(body.orderedIds) || !body.orderedIds.length || body.orderedIds.length > 100000) {
+    throw new BadRequestError("待校对条目顺序无效")
+  }
+  const orderedIds = body.orderedIds.map((id) => String(id))
+  if (new Set(orderedIds).size !== orderedIds.length) throw new BadRequestError("待校对条目不能重复")
+
+  $app.dao().runInTransaction((txDao) => {
+    try { txDao.findRecordById("projects", projectId) } catch { throw new NotFoundError("项目不存在") }
+    const pending = orderedIds.map((id) => {
+      let page = null
+      try { page = txDao.findRecordById("pages", id) } catch { throw new BadRequestError("待校对条目已变化，请刷新后重试") }
+      if (page.getString("project") !== projectId || page.getString("status") !== "pending") {
+        throw new BadRequestError("只能调整当前项目中仍待校对的条目")
+      }
+      return page
+    })
+    const pendingById = {}
+    pending.forEach((page) => { pendingById[page.getId()] = page })
+
+    const slots = pending.map((page) => page.getInt("page_number")).sort((a, b) => a - b)
+    const all = txDao.findRecordsByFilter("pages", `project = "${projectId}"`, "-page_number", 100000, 0)
+    const maxPageNumber = all.length ? all[0].getInt("page_number") : 0
+    pending.forEach((page, index) => {
+      page.set("page_number", maxPageNumber + index + 1)
+      txDao.saveRecord(page)
+    })
+    orderedIds.forEach((id, index) => {
+      const page = pendingById[id]
+      page.set("page_number", slots[index])
+      txDao.saveRecord(page)
+    })
+  })
+
+  return c.json(200, { count: orderedIds.length })
+}, $apis.requireRecordAuth("users"))
+
+// Delete and project-wide resequencing are atomic. Only pages that are still
+// pending at transaction time may be deleted.
+routerAdd("POST", `${FANGJI_API}/projects/:projectId/pages/delete-pending`, (c) => {
+  const auth = c.get("authRecord")
+  if (!auth || auth.getString("role") !== "admin") throw new ForbiddenError("无权执行此操作")
+  const projectId = c.pathParam("projectId")
+  const body = new DynamicModel({ ids: [] })
+  c.bind(body)
+  if (!Array.isArray(body.ids) || !body.ids.length || body.ids.length > 100000) {
+    throw new BadRequestError("待删除条目无效")
+  }
+  const ids = body.ids.map((id) => String(id))
+  if (new Set(ids).size !== ids.length) throw new BadRequestError("待删除条目不能重复")
+
+  $app.dao().runInTransaction((txDao) => {
+    try { txDao.findRecordById("projects", projectId) } catch { throw new NotFoundError("项目不存在") }
+    const targets = ids.map((id) => {
+      let page = null
+      try { page = txDao.findRecordById("pages", id) } catch { throw new BadRequestError("待删除条目不存在") }
+      if (page.getString("project") !== projectId || page.getString("status") !== "pending") {
+        throw new BadRequestError("只能删除当前项目中仍待校对的条目")
+      }
+      return page
+    })
+    targets.forEach((page) => txDao.deleteRecord(page))
+
+    const remaining = txDao.findRecordsByFilter(
+      "pages",
+      `project = "${projectId}"`,
+      "page_number,created",
+      100000,
+      0
+    )
+    const maxPageNumber = remaining.reduce((max, page) => Math.max(max, page.getInt("page_number")), 0)
+    remaining.forEach((page, index) => {
+      page.set("page_number", maxPageNumber + index + 1)
+      txDao.saveRecord(page)
+    })
+    remaining.forEach((page, index) => {
+      page.set("page_number", index + 1)
+      txDao.saveRecord(page)
+    })
+  })
+
+  return c.json(200, { deleted_count: ids.length })
+}, $apis.requireRecordAuth("users"))
+
 // The complete pass submission and comparison happens atomically on the
 // server. First-pass content is persisted only in the private attempts table.
 routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
@@ -78,42 +170,50 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
   if (!auth || auth.getString("role") !== "proofreader") {
     throw new ForbiddenError("无权执行此操作")
   }
-  const parseRow = (raw) => {
+  const userId = auth.getId()
+  const pageId = c.pathParam("pageId")
+  const body = new DynamicModel({ rowJson: "", text: "" })
+  c.bind(body)
+  const parseRowObject = (raw) => {
     const value = String(raw || "")
-    if (!value || value.length > 2 * 1024 * 1024) {
-      throw new BadRequestError("校对内容为空或过大")
-    }
+    if (!value || value.length > 2 * 1024 * 1024) throw new BadRequestError("校对内容为空或过大")
     let parsed = null
-    try {
-      parsed = JSON.parse(value)
-    } catch {
-      throw new BadRequestError("校对内容格式无效")
-    }
+    try { parsed = JSON.parse(value) } catch { throw new BadRequestError("校对内容格式无效") }
     if (!parsed || Array.isArray(parsed) || typeof parsed !== "object" || !Object.keys(parsed).length) {
       throw new BadRequestError("校对内容必须是非空字段对象")
     }
     return parsed
   }
-  const canonicalize = (parsed) => {
+  const validateSubmittedRow = (raw, page) => {
+    const parsed = parseRowObject(raw)
+    let source = { "内容": page.getString("ocr_text") }
+    try {
+      const candidate = JSON.parse(page.getString("ocr_row_json"))
+      if (candidate && !Array.isArray(candidate) && typeof candidate === "object" && Object.keys(candidate).length) source = candidate
+    } catch {}
+    const sourceKeys = Object.keys(source)
+    const expectedKeys = sourceKeys.slice().sort()
+    const actualKeys = Object.keys(parsed).sort()
+    if (expectedKeys.length !== actualKeys.length || expectedKeys.some((key, index) => key !== actualKeys[index])) {
+      throw new BadRequestError(`校对字段必须与原始字段一致：${expectedKeys.join("、")}`)
+    }
+    for (const key of expectedKeys) {
+      if (typeof parsed[key] !== "string") throw new BadRequestError(`字段“${key}”必须是文本`)
+    }
+    if (!expectedKeys.some((key) => parsed[key].trim() !== "")) throw new BadRequestError("校对内容不能全部为空")
+    return { parsed, keys: sourceKeys }
+  }
+  const canonicalizeRow = (parsed) => {
     const result = {}
-    Object.keys(parsed).sort().forEach((key) => {
-      result[key] = String(parsed[key] == null ? "" : parsed[key])
-    })
+    Object.keys(parsed).sort().forEach((key) => { result[key] = parsed[key] })
     return JSON.stringify(result)
   }
-  const userId = auth.getId()
-  const pageId = c.pathParam("pageId")
-  const body = new DynamicModel({ rowJson: "", text: "" })
-  c.bind(body)
-
-  const parsedRow = parseRow(body.rowJson)
-  const normalizedCurrent = canonicalize(parsedRow)
-  const rowJson = JSON.stringify(parsedRow)
-  const text = String(body.text || "")
+  const composeRowText = (keys, parsed) => keys.map((key) => parsed[key].trim()).filter(Boolean).join(" ")
   const now = new Date().toISOString()
   let response = null
 
-  $app.dao().runInTransaction((txDao) => {
+  try {
+    $app.dao().runInTransaction((txDao) => {
     let page = null
     try {
       page = txDao.findRecordById("pages", pageId)
@@ -125,6 +225,12 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
     if ((status !== "claimed" && status !== "proofreading") || page.getString("proofreader") !== userId) {
       throw new BadRequestError("该条目当前不属于你，请返回项目大厅刷新后重试")
     }
+
+    const validatedRow = validateSubmittedRow(body.rowJson, page)
+    const parsedRow = validatedRow.parsed
+    const normalizedCurrent = canonicalizeRow(parsedRow)
+    const rowJson = JSON.stringify(parsedRow)
+    const text = composeRowText(validatedRow.keys, parsedRow)
 
     const attemptsCollection = txDao.findCollectionByNameOrId("proofreading_attempts")
     const round = page.getInt("proofread_round") || 1
@@ -180,7 +286,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
     }
 
     const first = firstAttempts[0]
-    const normalizedFirst = canonicalize(parseRow(first.getString("row_json")))
+    const normalizedFirst = canonicalizeRow(parseRowObject(first.getString("row_json")))
     const isMatch = normalizedFirst === normalizedCurrent
 
     const second = new Record(attemptsCollection)
@@ -230,7 +336,11 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
       outcome: "mismatched",
       message: "两次校对不一致，已保留双方结果并转交管理员仲裁。"
     }
-  })
+    })
+  } catch (error) {
+    console.warn("Proofread submission failed:", pageId, error)
+    throw error
+  }
 
   return c.json(200, response)
 }, $apis.requireRecordAuth("users"))
@@ -306,29 +416,35 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/arbitrate`, (c) => {
   if (!auth || auth.getString("role") !== "admin") {
     throw new ForbiddenError("无权执行此操作")
   }
-  const parseRow = (raw) => {
-    const value = String(raw || "")
-    if (!value || value.length > 2 * 1024 * 1024) {
-      throw new BadRequestError("校对内容为空或过大")
-    }
-    let parsed = null
-    try {
-      parsed = JSON.parse(value)
-    } catch {
-      throw new BadRequestError("校对内容格式无效")
-    }
-    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object" || !Object.keys(parsed).length) {
-      throw new BadRequestError("校对内容必须是非空字段对象")
-    }
-    return parsed
-  }
   const pageId = c.pathParam("pageId")
   const body = new DynamicModel({ rowJson: "", text: "", note: "" })
   c.bind(body)
-
-  const parsedRow = parseRow(body.rowJson)
-  const rowJson = JSON.stringify(parsedRow)
-  const text = String(body.text || "")
+  const validateSubmittedRow = (raw, page) => {
+    const value = String(raw || "")
+    if (!value || value.length > 2 * 1024 * 1024) throw new BadRequestError("校对内容为空或过大")
+    let parsed = null
+    try { parsed = JSON.parse(value) } catch { throw new BadRequestError("校对内容格式无效") }
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object" || !Object.keys(parsed).length) {
+      throw new BadRequestError("校对内容必须是非空字段对象")
+    }
+    let source = { "内容": page.getString("ocr_text") }
+    try {
+      const candidate = JSON.parse(page.getString("ocr_row_json"))
+      if (candidate && !Array.isArray(candidate) && typeof candidate === "object" && Object.keys(candidate).length) source = candidate
+    } catch {}
+    const sourceKeys = Object.keys(source)
+    const expectedKeys = sourceKeys.slice().sort()
+    const actualKeys = Object.keys(parsed).sort()
+    if (expectedKeys.length !== actualKeys.length || expectedKeys.some((key, index) => key !== actualKeys[index])) {
+      throw new BadRequestError(`校对字段必须与原始字段一致：${expectedKeys.join("、")}`)
+    }
+    for (const key of expectedKeys) {
+      if (typeof parsed[key] !== "string") throw new BadRequestError(`字段“${key}”必须是文本`)
+    }
+    if (!expectedKeys.some((key) => parsed[key].trim() !== "")) throw new BadRequestError("校对内容不能全部为空")
+    return { parsed, keys: sourceKeys }
+  }
+  const composeRowText = (keys, parsed) => keys.map((key) => parsed[key].trim()).filter(Boolean).join(" ")
   const note = String(body.note || "").slice(0, 4000)
   const now = new Date().toISOString()
   let response = null
@@ -343,6 +459,11 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/arbitrate`, (c) => {
     if (page.getString("status") !== "arbitration") {
       throw new BadRequestError("该条目当前不需要仲裁")
     }
+
+    const validatedRow = validateSubmittedRow(body.rowJson, page)
+    const parsedRow = validatedRow.parsed
+    const rowJson = JSON.stringify(parsedRow)
+    const text = composeRowText(validatedRow.keys, parsedRow)
 
     const round = page.getInt("proofread_round") || 1
     const existing = txDao.findRecordsByFilter(

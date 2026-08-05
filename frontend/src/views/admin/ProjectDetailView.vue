@@ -359,10 +359,16 @@ import {
   statusBadgeClass,
   statusLabel
 } from '@/constants/pageStatus'
-import { deletePage, getPagedProjectPages, listAllProjectPages, updatePage } from '@/services/pagesService'
+import {
+  deletePendingPages,
+  getPagedProjectPages,
+  listAllProjectPages,
+  reorderPendingPages
+} from '@/services/pagesService'
 import { createProjectPdf, getProjectFile } from '@/services/projectFilesService'
 import { commitCsvImport, createCsvInspection, getImportJob, listImportJobErrors } from '@/services/importJobsService'
 import { csvFatalMessage, parseCsvInspection } from '@/lib/csvInspection'
+import { toSafeCsvCell } from '@/lib/csvExport'
 import { getProject } from '@/services/projectsService'
 import { getPbMessage, getPbStatus } from '@/utils/pbErrors'
 
@@ -692,10 +698,10 @@ async function exportCsv() {
     })
 
     const finalHeaders = ['PDF页码', ...headers]
-    const lines = [finalHeaders.map(toCsvCell).join(',')]
+    const lines = [finalHeaders.map(toSafeCsvCell).join(',')]
     for (const row of rows) {
       const values = [row.pageNumber, ...headers.map((h) => row.rowObj[h] ?? '')]
-      lines.push(values.map(toCsvCell).join(','))
+      lines.push(values.map(toSafeCsvCell).join(','))
     }
 
     const csvText = '\uFEFF' + lines.join('\r\n')
@@ -716,14 +722,6 @@ async function exportCsv() {
   } finally {
     exportingCsv.value = false
   }
-}
-
-function toCsvCell(value) {
-  const str = String(value ?? '')
-  if (/[",\r\n]/.test(str)) {
-    return `"${str.replace(/"/g, '""')}"`
-  }
-  return str
 }
 
 function isPending(row) {
@@ -766,23 +764,15 @@ async function movePendingRow(id, direction) {
   if (targetIdx < 0 || targetIdx >= pendingPages.value.length) return
 
   const current = pendingPages.value[idx]
-  const target = pendingPages.value[targetIdx]
-  if (!current || !target) return
+  if (!current || !pendingPages.value[targetIdx]) return
 
   mutatingRows.value = true
   clearMutationFeedback()
   try {
-    const maxPageNum = pages.value.reduce((max, p) => {
-      const n = Number(p.page_number)
-      return Number.isFinite(n) ? Math.max(max, n) : max
-    }, 0)
-    const tempPageNum = maxPageNum + 1
     const currentPageNum = Number(current.page_number)
-    const targetPageNum = Number(target.page_number)
-
-    await updatePage(current.id, { page_number: tempPageNum })
-    await updatePage(target.id, { page_number: currentPageNum })
-    await updatePage(current.id, { page_number: targetPageNum })
+    const orderedIds = pendingPages.value.map((page) => page.id)
+    ;[orderedIds[idx], orderedIds[targetIdx]] = [orderedIds[targetIdx], orderedIds[idx]]
+    await reorderPendingPages(projectId, orderedIds)
     await loadPages()
     mutationSuccess.value = `第 ${currentPageNum} 条已${direction < 0 ? '上移' : '下移'}。`
   } catch (e) {
@@ -816,20 +806,8 @@ function selectByRange() {
 }
 
 async function applyPendingOrderByIds(orderedPendingIds) {
-  const pending = pendingPages.value
-  if (!pending.length) return
-  const pageNumbers = pending.map((p) => Number(p.page_number)).sort((a, b) => a - b)
-  const pendingById = Object.fromEntries(pending.map((p) => [p.id, p]))
-
-  for (let i = 0; i < orderedPendingIds.length; i++) {
-    const id = orderedPendingIds[i]
-    const row = pendingById[id]
-    if (!row) continue
-    const nextNo = pageNumbers[i]
-    if (Number(row.page_number) !== nextNo) {
-      await updatePage(id, { page_number: nextNo })
-    }
-  }
+  if (!orderedPendingIds.length) return
+  await reorderPendingPages(projectId, orderedPendingIds)
 }
 
 async function moveSelectedRowsDown() {
@@ -871,18 +849,6 @@ async function moveSelectedRowsDown() {
   }
 }
 
-async function resequenceAllRows() {
-  const all = await listAllProjectPages(projectId, {
-    fields: 'id,page_number'
-  })
-  for (let i = 0; i < all.length; i++) {
-    const desired = i + 1
-    if (Number(all[i].page_number) !== desired) {
-      await updatePage(all[i].id, { page_number: desired })
-    }
-  }
-}
-
 async function deleteSelectedRows() {
   if (mutatingRows.value || selectedPendingIds.value.length === 0) return
   const ok = window.confirm(`确认删除已选择的 ${selectedPendingIds.value.length} 条待校对条目吗？此操作不可恢复。`)
@@ -892,9 +858,8 @@ async function deleteSelectedRows() {
   mutatingRows.value = true
   clearMutationFeedback()
   try {
-    await Promise.all(selectedPendingIds.value.map((id) => deletePage(id)))
+    await deletePendingPages(projectId, selectedPendingIds.value)
     selectedPendingIds.value = []
-    await resequenceAllRows()
     await loadPages()
     mutationSuccess.value = `已删除 ${deleteCount} 条待校对条目，并重新整理条号。`
   } catch (e) {

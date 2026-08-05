@@ -161,6 +161,22 @@ export async function deletePage(pageId) {
   return pb.collection('pages').delete(pageId, { requestKey: null })
 }
 
+export async function reorderPendingPages(projectId, orderedIds) {
+  return pb.send(`/api/fangji/projects/${encodeURIComponent(projectId)}/pages/reorder`, {
+    method: 'POST',
+    body: { orderedIds },
+    requestKey: null
+  })
+}
+
+export async function deletePendingPages(projectId, ids) {
+  return pb.send(`/api/fangji/projects/${encodeURIComponent(projectId)}/pages/delete-pending`, {
+    method: 'POST',
+    body: { ids },
+    requestKey: null
+  })
+}
+
 export async function listAllProjectPages(projectId, options = {}) {
   return pb.collection('pages').getFullList({
     filter: `project="${projectId}"`,
