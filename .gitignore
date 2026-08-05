@@ -30,3 +30,7 @@ backend/pocketbase
 # OS
 .DS_Store
 Thumbs.db
+
+# Local test fixtures
+字典/
+词典/

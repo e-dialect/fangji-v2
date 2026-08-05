@@ -23,7 +23,7 @@ export async function getProjectFile(recordId) {
 
 export async function findLatestProjectPdf(projectId) {
   const list = await pb.collection('project_files').getFullList({
-    filter: `project="${projectId}" && status="ready"`,
+    filter: `project="${projectId}" && status="ready" && is_primary=true`,
     sort: '-created',
     requestKey: null
   })

@@ -52,7 +52,9 @@
               </button>
             </div>
             <div v-if="pdfProcessing" class="alert mt-2">PDF 已上传，后端正在校验文件...</div>
-            <div v-if="pdfSuccess" class="alert alert-success mt-2">PDF 校验完成，可在校对编辑器中预览。</div>
+            <div v-if="pdfSuccess" class="alert alert-success mt-2">
+              PDF 深度校验完成，共 {{ pdfMetadata?.page_count || 0 }} 页，已设为项目主 PDF，可在校对编辑器中预览。
+            </div>
             <div v-if="pdfError" class="alert alert-error mt-2">{{ pdfError }}</div>
           </div>
 
@@ -60,15 +62,15 @@
           <div>
             <h4 class="font-semibold mb-2">上传 CSV 文件（每行一条待校对文本）</h4>
             <p class="text-sm text-muted mb-3">
-              CSV 需包含字段 <code>PDF页码</code>。<br>
-              系统会将每行去掉 <code>PDF页码</code> 字段后的内容导入为新条目。
+              CSV 需包含 <code>PDF页码</code>、<code>page</code>、<code>pdf_page</code> 或 <code>页码</code> 中的一个字段。<br>
+              系统会在后端预检，并将每行去掉页码字段后的内容导入为新条目。
             </p>
             <input type="file" accept=".csv" @change="onCsvSelected" ref="csvInput" style="display:none" />
             <button class="btn btn-secondary" @click="$refs.csvInput.click()">选择 CSV 文件</button>
             <span v-if="csvFile" class="text-sm ml-2">{{ csvFile.name }}</span>
             <div v-if="csvFile" class="mt-3">
               <button class="btn btn-primary" @click="uploadCsv" :disabled="uploadingCsv">
-                {{ uploadingCsv ? '上传处理中...' : '导入 CSV' }}
+                {{ uploadingCsv ? '后端预检中...' : '后端预检 CSV' }}
               </button>
             </div>
             <div v-if="csvJob" class="import-job-card mt-3">
@@ -84,7 +86,38 @@
                 成功 {{ csvJob.success_count || 0 }} 条；
                 跳过 {{ csvJob.failed_count || 0 }} 条
               </div>
-              <div v-if="csvJob.error_message" class="text-sm text-muted mt-1">{{ csvJob.error_message }}</div>
+              <div v-if="csvJob.error_message && csvJob.status !== 'failed'" class="text-sm text-muted mt-1">{{ csvJob.error_message }}</div>
+            </div>
+            <div v-if="csvInspection" class="csv-inspection mt-3">
+              <div class="font-semibold">后端预检结果</div>
+              <div class="text-sm mt-2">
+                编码：{{ csvInspection.encoding || '未知' }}；
+                页码字段：<code>{{ csvInspection.pdfPageField }}</code>；
+                共 {{ csvInspection.totalRows }} 行，可导入 {{ csvInspection.validRows }} 行，需跳过 {{ csvInspection.invalidRows }} 行。
+              </div>
+              <div class="text-sm mt-2">
+                检测到的表头：<code>{{ csvInspection.headers.join('、') }}</code>
+              </div>
+              <div v-if="csvInspection.preview.length" class="table-wrapper mt-2">
+                <table>
+                  <thead>
+                    <tr><th v-for="header in csvPreviewHeaders" :key="header">{{ header }}</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(row, index) in csvInspection.preview" :key="index">
+                      <td v-for="header in csvPreviewHeaders" :key="header">{{ row[header] }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <button
+                v-if="csvJob?.status === 'validated'"
+                class="btn btn-primary mt-3"
+                @click="confirmCsvImport"
+                :disabled="uploadingCsv"
+              >
+                {{ uploadingCsv ? '导入处理中...' : '确认导入' }}
+              </button>
             </div>
             <div v-if="csvSuccess" class="alert alert-success mt-2">{{ csvSuccess }}</div>
             <div v-if="csvError" class="alert alert-error mt-2" style="white-space:pre-line">{{ csvError }}</div>
@@ -328,7 +361,8 @@ import {
 } from '@/constants/pageStatus'
 import { deletePage, getPagedProjectPages, listAllProjectPages, updatePage } from '@/services/pagesService'
 import { createProjectPdf, getProjectFile } from '@/services/projectFilesService'
-import { createCsvImport, getImportJob, listImportJobErrors } from '@/services/importJobsService'
+import { commitCsvImport, createCsvInspection, getImportJob, listImportJobErrors } from '@/services/importJobsService'
+import { csvFatalMessage, parseCsvInspection } from '@/lib/csvInspection'
 import { getProject } from '@/services/projectsService'
 import { getPbMessage, getPbStatus } from '@/utils/pbErrors'
 
@@ -353,6 +387,7 @@ const mutatingRows = ref(false)
 const mutationSuccess = ref('')
 const mutationError = ref('')
 const pdfSuccess = ref(false)
+const pdfMetadata = ref(null)
 const pdfProcessing = ref(false)
 const pdfError = ref('')
 const csvSuccess = ref('')
@@ -405,17 +440,21 @@ const pendingIndexById = computed(() => {
 const csvJobProgress = computed(() => {
   const processed = Number(csvJob.value?.processed_count || 0)
   const total = Number(csvJob.value?.total_count || 0)
-  if (csvJob.value?.status === 'completed' || csvJob.value?.status === 'completed_with_errors') return 100
-  if (!total) return csvJob.value?.status === 'processing' ? 10 : 0
+  if (['validated', 'completed', 'completed_with_errors'].includes(csvJob.value?.status)) return 100
+  if (!total) return ['inspecting', 'processing'].includes(csvJob.value?.status) ? 10 : 0
   return Math.min(99, Math.round((processed / total) * 100))
 })
 const csvJobStatusLabel = computed(() => ({
+  inspecting: '后端正在预检',
+  validated: '后端预检完成',
   queued: '等待后端处理',
   processing: '后端正在导入',
   completed: '导入完成',
   completed_with_errors: '导入完成，部分条目已跳过',
   failed: '导入失败'
 })[csvJob.value?.status] || '准备导入')
+const csvInspection = computed(() => parseCsvInspection(csvJob.value?.inspection_json))
+const csvPreviewHeaders = computed(() => csvInspection.value?.headers.slice(0, 6) || [])
 
 watch([searchQuery, selectedStatus, listPageSize], () => {
   currentListPage.value = 1
@@ -455,7 +494,7 @@ async function loadPages() {
   loadingPages.value = true
   pagesError.value = ''
   try {
-    const perPage = 50
+    const perPage = 500
     const allPages = []
     let page = 1
     let result
@@ -492,6 +531,7 @@ function clearMutationFeedback() {
 function onPdfSelected(e) {
   pdfFile.value = e.target.files[0] || null
   pdfSuccess.value = false
+  pdfMetadata.value = null
   pdfProcessing.value = false
   pdfError.value = ''
 }
@@ -509,6 +549,7 @@ async function uploadPdf() {
   uploadingPdf.value = true
   pdfError.value = ''
   pdfSuccess.value = false
+  pdfMetadata.value = null
   pdfProcessing.value = false
   const generation = ++pdfPollGeneration
   try {
@@ -524,6 +565,7 @@ async function uploadPdf() {
     pdfProcessing.value = false
     if (record.status === 'ready') {
       pdfSuccess.value = true
+      pdfMetadata.value = record
     } else {
       pdfError.value = record.error_message || 'PDF 后端校验失败'
     }
@@ -546,11 +588,11 @@ async function uploadCsv() {
   csvImportErrors.value = []
   const generation = ++csvPollGeneration
   try {
-    let job = await createCsvImport({ projectId, file: csvFile.value })
+    let job = await createCsvInspection({ projectId, file: csvFile.value })
     csvJob.value = job
     csvFile.value = null
     if (csvInput.value) csvInput.value.value = ''
-    while (['queued', 'processing'].includes(job.status) && generation === csvPollGeneration) {
+    while (['inspecting', 'queued', 'processing'].includes(job.status) && generation === csvPollGeneration) {
       await pollDelay(1000)
       job = await getImportJob(job.id)
       csvJob.value = job
@@ -558,22 +600,60 @@ async function uploadCsv() {
     if (generation !== csvPollGeneration) return
 
     if (job.status === 'failed') {
-      csvError.value = job.error_message || 'CSV 后端处理失败'
-    } else {
-      csvSuccess.value = job.failed_count > 0
-        ? `成功导入 ${job.success_count} 条，跳过 ${job.failed_count} 条错误记录。`
-        : `成功导入 ${job.success_count} 条待校对任务！`
-      selectedPendingIds.value = []
+      csvError.value = csvFatalMessage(job)
+    } else if (job.status === 'validated') {
+      const inspection = parseCsvInspection(job.inspection_json)
+      csvSuccess.value = inspection
+        ? `后端预检完成：${inspection.validRows} 条可导入，${inspection.invalidRows} 条需跳过。请确认后开始导入。`
+        : '后端预检完成，请确认后开始导入。'
       if (job.failed_count > 0) {
         const result = await listImportJobErrors(job.id, 1, 100)
         csvImportErrors.value = result.items
       }
+    } else if (['completed', 'completed_with_errors'].includes(job.status)) {
+      csvSuccess.value = '相同文件已经导入，无需重复处理。'
       await loadPages()
     }
   } catch (e) {
     csvError.value = getPbStatus(e) === 413
       ? 'CSV 文件超过 50 MB 上限'
       : getPbMessage(e, '导入失败，请检查文件格式')
+  } finally {
+    if (generation === csvPollGeneration) uploadingCsv.value = false
+  }
+}
+
+async function confirmCsvImport() {
+  if (csvJob.value?.status !== 'validated') return
+  uploadingCsv.value = true
+  csvError.value = ''
+  csvSuccess.value = ''
+  csvImportErrors.value = []
+  const generation = ++csvPollGeneration
+  try {
+    let job = await commitCsvImport(csvJob.value.id)
+    csvJob.value = job
+    while (['queued', 'processing'].includes(job.status) && generation === csvPollGeneration) {
+      await pollDelay(1000)
+      job = await getImportJob(job.id)
+      csvJob.value = job
+    }
+    if (generation !== csvPollGeneration) return
+    if (job.status === 'failed') {
+      csvError.value = csvFatalMessage(job)
+      return
+    }
+    csvSuccess.value = job.failed_count > 0
+      ? `成功导入 ${job.success_count} 条，跳过 ${job.failed_count} 条错误记录。`
+      : `成功导入 ${job.success_count} 条待校对任务！`
+    if (job.failed_count > 0) {
+      const result = await listImportJobErrors(job.id, 1, 100)
+      csvImportErrors.value = result.items
+    }
+    selectedPendingIds.value = []
+    await loadPages()
+  } catch (e) {
+    csvError.value = getPbMessage(e, '确认导入失败，请稍后重试。')
   } finally {
     if (generation === csvPollGeneration) uploadingCsv.value = false
   }

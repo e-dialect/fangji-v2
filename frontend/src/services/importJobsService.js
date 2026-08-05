@@ -10,6 +10,24 @@ export async function createCsvImport({ projectId, file }) {
   })
 }
 
+export async function createCsvInspection({ projectId, file }) {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('inspect_only', 'true')
+  return pb.send(`/api/fangji/projects/${encodeURIComponent(projectId)}/imports/csv`, {
+    method: 'POST',
+    body: formData,
+    requestKey: null
+  })
+}
+
+export async function commitCsvImport(jobId) {
+  return pb.send(`/api/fangji/imports/${encodeURIComponent(jobId)}/commit`, {
+    method: 'POST',
+    requestKey: null
+  })
+}
+
 export async function getImportJob(jobId) {
   return pb.collection('import_jobs').getOne(jobId, {
     requestKey: null

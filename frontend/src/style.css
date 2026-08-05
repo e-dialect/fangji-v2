@@ -85,6 +85,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 /* Alerts */
 .alert { padding: .75rem 1rem; border-radius: var(--radius); margin-bottom: 1rem; font-size: .9rem; }
 .import-job-card { padding: .85rem; border: 1px solid var(--gray-200); border-radius: var(--radius); background: var(--gray-50); }
+.csv-inspection { padding: .85rem; border: 1px solid var(--gray-300); border-radius: var(--radius); background: var(--primary-light); }
+.csv-inspection table { min-width: 640px; }
+.csv-inspection td { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .import-error-table { max-height: 320px; overflow: auto; }
 .import-error-table table { min-width: 680px; }
 .import-error-table td { vertical-align: top; }
