@@ -136,12 +136,6 @@ export async function countActiveProofreaderTasks(userId) {
   return countPages(`${relationFilter('proofreader', userId)} && (${statusFilter(PROOFREADER_ACTIVE_STATUSES)})`)
 }
 
-export async function claimProofreadTask(pageId, userId) {
-  const page = await getPage(pageId, { fields: 'id,project' })
-  if (!page?.project) throw new Error('任务缺少项目信息')
-  return claimNextProjectPage(page.project, userId)
-}
-
 export async function getPage(pageId, options = {}) {
   return pb.collection('pages').getOne(pageId, {
     requestKey: null,

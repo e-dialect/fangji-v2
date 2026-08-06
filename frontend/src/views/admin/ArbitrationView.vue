@@ -116,6 +116,9 @@ async function loadCase() {
   error.value = ''
   try {
     const result = await getArbitrationCase(pageId)
+    if (result?.page?.project && projectId && result.page.project !== projectId) {
+      throw new Error('仲裁条目与当前项目不匹配，请返回项目详情页后重新进入。')
+    }
     caseData.value = result
     Object.assign(originalRow, safeParseRowJson(result.page?.ocr_row_json) || { 内容: result.page?.ocr_text || '' })
     Object.assign(firstRow, safeParseRowJson(result.attempts?.find((item) => item.pass_no === 1)?.row_json) || {})
