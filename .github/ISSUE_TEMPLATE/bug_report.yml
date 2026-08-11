@@ -1,0 +1,88 @@
+name: Bug 报告
+description: 报告可以稳定复现的错误或行为异常
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。提交前请搜索已有 issue，并删除日志、截图中的账号、token 和真实语料。
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题描述
+      description: 简洁说明发生了什么，以及它为什么是一个问题。
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本或提交
+      description: 部署版本、镜像标签或 commit SHA。
+      placeholder: "例如：main@30b7e42"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: 运行方式
+      options:
+        - Docker Compose 生产模式
+        - Docker Compose 开发模式
+        - 手动启动前后端
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 提供最小、连续、可重复的操作步骤和必要的非敏感测试数据。
+      placeholder: |
+        1. 登录为……
+        2. 打开……
+        3. 点击……
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 可选；请先删除密码、token、邮箱、真实语料等敏感信息。
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 浏览器、操作系统、反向代理、文件类型和大小等相关信息。
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 issue，未发现相同问题。
+          required: true
+        - label: 我已移除敏感信息和不可公开的数据。
+          required: true

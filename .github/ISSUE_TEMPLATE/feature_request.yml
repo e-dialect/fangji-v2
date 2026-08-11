@@ -1,0 +1,74 @@
+name: 功能请求
+description: 提议一个与方言材料校对流程相关的改进
+title: "[功能]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请先描述问题和使用场景，再提出方案。较大的需求建议拆成可独立验收的阶段。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题与使用场景
+      description: 谁在什么流程中遇到了什么问题？目前如何绕过？
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 期望结果
+      description: 用可观察、可验收的行为描述完成后的结果。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 可选；说明数据、权限、界面或部署方面的实现思路。
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案
+      description: 已考虑过哪些更简单的处理方式？为什么不够？
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 每行一个可以验证的条件。
+      placeholder: |
+        - [ ] ……
+        - [ ] ……
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 主要影响范围
+      multiple: true
+      options:
+        - 管理端
+        - 校对员工作台
+        - CSV/PDF 导入
+        - PocketBase schema、hook 或 API
+        - 部署与运维
+        - 文档与贡献流程
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 issue，未发现相同需求。
+          required: true
+        - label: 我没有在正文中放入真实账号、token 或不可公开语料。
+          required: true

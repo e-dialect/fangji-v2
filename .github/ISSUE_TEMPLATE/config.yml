@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: e-dialect 组织级贡献指南
+    url: https://github.com/e-dialect/.github/blob/main/CONTRIBUTING.md
+    about: 查看 CLA、通用 Git 流程、提交规范和社区协作要求。
+  - name: e-dialect 社区行为准则
+    url: https://github.com/e-dialect/.github/blob/main/CODE_OF_CONDUCT.md
+    about: 查看社区沟通规范与举报渠道。
