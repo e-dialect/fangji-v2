@@ -56,12 +56,13 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up -d --
 
 - `TRAEFIK_HOST`：公网域名。
 - `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD`：方辑业务管理员账号。
-- `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`：需要使用 PocketBase Admin UI `/_/` 时再改。
+- `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`：需要创建 PocketBase 管理员时再改；生产入口默认不会公开 Admin UI。
+- `ENABLE_POCKETBASE_ADMIN_UI`：默认 `false`。仅在受控维护窗口临时设为 `true`。
 
 Traefik 部署时访问：
 
 - 前端：`https://fangji.example.com`
-- PocketBase Admin UI：`https://fangji.example.com/_/`
+- PocketBase Admin UI：默认对 `https://fangji.example.com/_/` 返回 404。
 - PocketBase API：`https://fangji.example.com/api/`
 
 生产模式下前端会先构建为静态文件，再由 Nginx 托管。默认同源访问 PocketBase：
@@ -69,7 +70,7 @@ Traefik 部署时访问：
 ```txt
 https://fangji.example.com/      -> 前端
 https://fangji.example.com/api/  -> PocketBase API
-https://fangji.example.com/_/    -> PocketBase Admin UI
+https://fangji.example.com/_/    -> 默认 404；显式启用后才代理 Admin UI
 ```
 
 常用命令：
@@ -84,7 +85,9 @@ docker compose down
 说明：
 
 - `docker-compose.yml` 是生产/部署入口，不再使用 Vite dev server 对外服务，因此不需要维护 Vite `allowedHosts`。
-- Traefik 只需要路由到 `frontend` 容器的 `80` 端口；`frontend` 内置 Nginx 会把 `/api/` 和 `/_/` 转发到 Docker 内部地址 `backend:8090`。
+- Traefik 只需要路由到 `frontend` 容器的 `80` 端口；`frontend` 内置 Nginx 会把 `/api/` 转发到 Docker 内部地址 `backend:8090`。
+- 生产入口默认隐藏 PocketBase Admin UI。确需维护时，将 `ENABLE_POCKETBASE_ADMIN_UI=true` 后执行 `docker compose up -d --force-recreate frontend`；完成后改回 `false` 并再次重建前端容器。
+- HTTPS/HSTS 应由 Traefik 或最外层 TLS 终止代理统一配置；应用 Nginx 始终通过容器内 HTTP 提供服务。
 - Traefik 容器必须和 `frontend` 容器共享 Docker network；如果 Traefik 在另一个 compose 项目里，请把它接入本项目网络或给本项目增加 Traefik 的 external network。
 - `BACKEND_URL` 留空时，前端自动使用 `window.location.origin`，适合同域名或同端口反向代理部署。
 - `BACKEND_URL` 设置为完整后端地址时，前端容器会把构建产物里的 `VITE_BACKEND_URL_RUNTIME_REPLACEMENT` 替换成该地址，适合前后端不同域名部署。
@@ -195,6 +198,7 @@ APP_ADMIN_PASSWORD=请换成强密码
 APP_ADMIN_NAME=管理员
 PB_ADMIN_EMAIL=pb-admin@example.com
 PB_ADMIN_PASSWORD=请换成另一个强密码
+ENABLE_POCKETBASE_ADMIN_UI=false
 BACKEND_URL=
 PB_ALLOWED_ORIGINS=
 ```
@@ -204,7 +208,7 @@ PB_ALLOWED_ORIGINS=
 ```txt
 https://fangji.example.com/      -> 前端
 https://fangji.example.com/api/  -> PocketBase API
-https://fangji.example.com/_/    -> PocketBase Admin UI
+https://fangji.example.com/_/    -> 默认 404；维护窗口可显式启用
 ```
 
 如果本机没有 Traefik，只是想通过宿主机端口直接访问，请取消注释 `docker-compose.yml` 里的 `frontend.ports`；需要直连 PocketBase 调试时，再取消注释 `backend.ports`。
@@ -223,6 +227,7 @@ APP_ADMIN_PASSWORD=请换成强密码
 APP_ADMIN_NAME=管理员
 PB_ADMIN_EMAIL=pb-admin@example.com
 PB_ADMIN_PASSWORD=请换成另一个强密码
+ENABLE_POCKETBASE_ADMIN_UI=false
 ```
 
 5. 启动服务：
@@ -242,7 +247,7 @@ docker compose logs -f frontend
 7. 首次登录应用：
 
 - 使用 `.env` 里的 `APP_ADMIN_EMAIL` 和 `APP_ADMIN_PASSWORD` 登录网站。
-- 如果需要进入 PocketBase Admin UI `/_/`，使用 `.env` 里的 `PB_ADMIN_EMAIL` 和 `PB_ADMIN_PASSWORD`。
+- 如果需要进入 PocketBase Admin UI，先在受控维护窗口设置 `ENABLE_POCKETBASE_ADMIN_UI=true` 并重建前端容器，再使用 `.env` 里的 `PB_ADMIN_EMAIL` 和 `PB_ADMIN_PASSWORD`。完成后立即关闭入口并重建前端。
 - PocketBase collections、字段和 API rules 会由迁移自动应用，不需要进后台手动配置业务规则。
 
 如果服务器前面还有 Nginx/Caddy/宝塔反向代理而不是 Traefik，请取消注释 `frontend.ports` 并把域名代理到对应宿主机端口。默认不暴露 `backend` 到宿主机；如果确实需要本机直连 PocketBase 端口，可取消注释 `backend.ports`。
@@ -522,7 +527,7 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up --bui
 
 ### 注册后不是管理员
 
-这是预期行为。公开注册用户会被后端 hook 固定为 `proofreader`。管理员账号请在 PocketBase Admin UI 中创建或修改 `users.role`。
+这是预期行为。公开注册用户会被后端 hook 固定为 `proofreader`。Docker 首次启动可通过 `APP_ADMIN_EMAIL`、`APP_ADMIN_PASSWORD` 创建业务管理员；如需使用 PocketBase Admin UI 修改 `users.role`，请按生产部署说明临时启用入口，完成后立即关闭。
 
 ### CSV 导入提示缺少 PDF页码
 

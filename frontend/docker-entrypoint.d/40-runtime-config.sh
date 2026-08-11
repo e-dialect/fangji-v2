@@ -1,6 +1,25 @@
 #!/bin/sh
 set -eu
 
+admin_ui_value="$(printf '%s' "${ENABLE_POCKETBASE_ADMIN_UI:-false}" | tr '[:upper:]' '[:lower:]')"
+
+case "$admin_ui_value" in
+  1|true|yes|on)
+    admin_ui_mode="enabled"
+    ;;
+  0|false|no|off|'')
+    admin_ui_mode="disabled"
+    ;;
+  *)
+    echo "Invalid ENABLE_POCKETBASE_ADMIN_UI value: ${ENABLE_POCKETBASE_ADMIN_UI}" >&2
+    exit 1
+    ;;
+esac
+
+cp "/opt/fangji/nginx/pocketbase-admin-${admin_ui_mode}.conf" \
+  /etc/nginx/snippets/pocketbase-admin.conf
+echo "PocketBase Admin UI proxy: ${admin_ui_mode}"
+
 backend_url="${VITE_BACKEND_URL:-${PB_URL:-}}"
 
 if [ -z "$backend_url" ]; then
