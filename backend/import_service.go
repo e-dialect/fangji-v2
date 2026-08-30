@@ -38,10 +38,11 @@ import (
 )
 
 const (
-	maxCSVBytes  = 50 * 1024 * 1024
-	maxPDFBytes  = 50 * 1024 * 1024
-	batchSize    = 250
-	pdfValidator = "pdfcpu v0.8.1"
+	maxCSVBytes          = 50 * 1024 * 1024
+	maxPDFBytes          = 50 * 1024 * 1024
+	batchSize            = 250
+	artifactCleanupBatch = 500
+	pdfValidator         = "pdfcpu v0.8.1"
 )
 
 type importWork struct {
@@ -613,6 +614,19 @@ func (s *importService) markFatal(work importWork, code, message string, cause e
 		})
 		return
 	}
+	var cleanupErr error
+	if work.kind == "csv" {
+		cleanupErr = s.clearJobPages(work.id)
+		if cleanupErr != nil {
+			message += " 暂存条目自动清理失败，请联系管理员处理。"
+			logUpload("error", "failed_csv_staging_cleanup_failed", map[string]any{
+				"request_id": work.requestID,
+				"job_id":     work.id,
+				"error_code": code,
+				"error":      cleanupErr.Error(),
+			})
+		}
+	}
 	record.Set("status", "failed")
 	if work.kind == "pdf" {
 		record.Set("status", "error")
@@ -634,16 +648,17 @@ func (s *importService) markFatal(work importWork, code, message string, cause e
 		return
 	}
 	logUpload("error", "work_failed", map[string]any{
-		"request_id": work.requestID,
-		"kind":       work.kind,
-		"record_id":  work.id,
-		"project_id": record.GetString("project"),
-		"file_name":  record.GetString("original_filename"),
-		"file_size":  record.GetInt("file_size"),
-		"file_hash":  record.GetString("file_hash"),
-		"error_code": code,
-		"message":    message,
-		"error":      errorText(cause),
+		"request_id":    work.requestID,
+		"kind":          work.kind,
+		"record_id":     work.id,
+		"project_id":    record.GetString("project"),
+		"file_name":     record.GetString("original_filename"),
+		"file_size":     record.GetInt("file_size"),
+		"file_hash":     record.GetString("file_hash"),
+		"error_code":    code,
+		"message":       message,
+		"error":         errorText(cause),
+		"cleanup_error": errorText(cleanupErr),
 	})
 }
 
@@ -1122,18 +1137,23 @@ func (s *importService) processCSV(work importWork) {
 }
 
 func (s *importService) clearJobArtifacts(jobID string) error {
-	pagesToDelete, err := s.app.Dao().FindRecordsByFilter(
-		"pages",
-		fmt.Sprintf("import_job = %q", jobID),
-		"",
-		100000,
-		0,
-	)
-	if err != nil {
-		return err
-	}
+	return s.app.Dao().RunInTransaction(func(txDao *daos.Dao) error {
+		if err := deleteJobPages(txDao, jobID); err != nil {
+			return err
+		}
+		return deleteRecordBatches(txDao, "import_job_errors", fmt.Sprintf("job = %q", jobID))
+	})
+}
+
+func (s *importService) clearJobPages(jobID string) error {
+	return s.app.Dao().RunInTransaction(func(txDao *daos.Dao) error {
+		return deleteJobPages(txDao, jobID)
+	})
+}
+
+func deleteJobPages(dao *daos.Dao, jobID string) error {
 	var attemptCount int
-	if err := s.app.Dao().DB().NewQuery(
+	if err := dao.DB().NewQuery(
 		`SELECT COUNT(*)
 		 FROM proofreading_attempts attempts
 		 INNER JOIN pages ON pages.id = attempts.page
@@ -1141,40 +1161,80 @@ func (s *importService) clearJobArtifacts(jobID string) error {
 	).Bind(dbx.Params{"jobID": jobID}).Row(&attemptCount); err != nil {
 		return err
 	}
-	for _, page := range pagesToDelete {
-		if !isDiscardableImportPage(
-			page.GetString("status"),
-			page.GetString("proofreader"),
-			page.GetString("first_proofreader"),
-			page.GetString("second_proofreader"),
-			attemptCount > 0,
-		) {
-			return fmt.Errorf("refusing to delete published import page %s during recovery", page.Id)
-		}
-	}
-	errorsToDelete, err := s.app.Dao().FindRecordsByFilter(
-		"import_job_errors",
-		fmt.Sprintf("job = %q", jobID),
-		"",
-		100000,
-		0,
-	)
-	if err != nil {
+
+	filter := fmt.Sprintf("import_job = %q", jobID)
+	if err := walkRecordBatches(
+		artifactCleanupBatch,
+		true,
+		func(limit, offset int) ([]*models.Record, error) {
+			return dao.FindRecordsByFilter("pages", filter, "id", limit, offset)
+		},
+		func(pages []*models.Record) error {
+			for _, page := range pages {
+				if !isDiscardableImportPage(
+					page.GetString("status"),
+					page.GetString("proofreader"),
+					page.GetString("first_proofreader"),
+					page.GetString("second_proofreader"),
+					attemptCount > 0,
+				) {
+					return fmt.Errorf("refusing to delete published import page %s during recovery", page.Id)
+				}
+			}
+			return nil
+		},
+	); err != nil {
 		return err
 	}
-	return s.app.Dao().RunInTransaction(func(txDao *daos.Dao) error {
-		for _, page := range pagesToDelete {
-			if err := txDao.DeleteRecord(page); err != nil {
-				return err
+	return deleteRecordBatches(dao, "pages", filter)
+}
+
+func deleteRecordBatches(dao *daos.Dao, collection, filter string) error {
+	return walkRecordBatches(
+		artifactCleanupBatch,
+		false,
+		func(limit, offset int) ([]*models.Record, error) {
+			return dao.FindRecordsByFilter(collection, filter, "id", limit, offset)
+		},
+		func(records []*models.Record) error {
+			for _, record := range records {
+				if err := dao.DeleteRecord(record); err != nil {
+					return err
+				}
 			}
+			return nil
+		},
+	)
+}
+
+func walkRecordBatches(
+	batchSize int,
+	advanceOffset bool,
+	fetch func(limit, offset int) ([]*models.Record, error),
+	visit func([]*models.Record) error,
+) error {
+	if batchSize <= 0 {
+		return errors.New("record batch size must be positive")
+	}
+	offset := 0
+	for {
+		records, err := fetch(batchSize, offset)
+		if err != nil {
+			return err
 		}
-		for _, item := range errorsToDelete {
-			if err := txDao.DeleteRecord(item); err != nil {
-				return err
-			}
+		if len(records) == 0 {
+			return nil
 		}
-		return nil
-	})
+		if err := visit(records); err != nil {
+			return err
+		}
+		if len(records) < batchSize {
+			return nil
+		}
+		if advanceOffset {
+			offset += len(records)
+		}
+	}
 }
 
 func isDiscardableImportPage(status, proofreader, firstProofreader, secondProofreader string, hasAttempts bool) bool {

@@ -7,6 +7,8 @@ import (
 	"log"
 	"strings"
 	"testing"
+
+	"github.com/pocketbase/pocketbase/models"
 )
 
 func minimalTestPDF(pageCount int) []byte {
@@ -95,6 +97,80 @@ func TestIsDiscardableImportPage(t *testing.T) {
 				t.Fatalf("got %v; want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestWalkRecordBatchesCrossesBatchBoundary(t *testing.T) {
+	records := make([]*models.Record, 7)
+	var visited int
+	var offsets []int
+	err := walkRecordBatches(
+		3,
+		true,
+		func(limit, offset int) ([]*models.Record, error) {
+			offsets = append(offsets, offset)
+			if offset >= len(records) {
+				return nil, nil
+			}
+			end := offset + limit
+			if end > len(records) {
+				end = len(records)
+			}
+			return records[offset:end], nil
+		},
+		func(batch []*models.Record) error {
+			visited += len(batch)
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if visited != len(records) {
+		t.Fatalf("visited %d records; want %d", visited, len(records))
+	}
+	if fmt.Sprint(offsets) != "[0 3 6]" {
+		t.Fatalf("unexpected scan offsets: %v", offsets)
+	}
+}
+
+func TestRecoveryCleanupDeletesAcrossProductionBatchBoundary(t *testing.T) {
+	originalPageCount := artifactCleanupBatch + 1
+	remaining := make([]*models.Record, originalPageCount)
+	var deleted int
+	var offsets []int
+	err := walkRecordBatches(
+		artifactCleanupBatch,
+		false,
+		func(limit, offset int) ([]*models.Record, error) {
+			offsets = append(offsets, offset)
+			if len(remaining) < limit {
+				limit = len(remaining)
+			}
+			return remaining[:limit], nil
+		},
+		func(batch []*models.Record) error {
+			deleted += len(batch)
+			remaining = remaining[len(batch):]
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != originalPageCount || len(remaining) != 0 {
+		t.Fatalf("deleted %d records with %d remaining", deleted, len(remaining))
+	}
+	if fmt.Sprint(offsets) != "[0 0]" {
+		t.Fatalf("delete batches must always fetch from offset zero: %v", offsets)
+	}
+
+	// Recovery reimports every valid row after cleanup. If even one old staged
+	// page survived the batch boundary, this count would exceed success_count.
+	successCount := originalPageCount
+	remaining = append(remaining, make([]*models.Record, successCount)...)
+	if len(remaining) != successCount {
+		t.Fatalf("recovered page count %d does not match success_count %d", len(remaining), successCount)
 	}
 }
 
