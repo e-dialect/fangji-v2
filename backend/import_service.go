@@ -1137,7 +1137,11 @@ func (s *importService) processCSV(work importWork) {
 }
 
 func (s *importService) clearJobArtifacts(jobID string) error {
-	return s.app.Dao().RunInTransaction(func(txDao *daos.Dao) error {
+	return clearJobArtifacts(s.app.Dao(), jobID)
+}
+
+func clearJobArtifacts(dao *daos.Dao, jobID string) error {
+	return dao.RunInTransaction(func(txDao *daos.Dao) error {
 		if err := deleteJobPages(txDao, jobID); err != nil {
 			return err
 		}

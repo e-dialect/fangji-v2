@@ -8,7 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pocketbase/pocketbase/daos"
 	"github.com/pocketbase/pocketbase/models"
+	"github.com/pocketbase/pocketbase/models/schema"
+	"github.com/pocketbase/pocketbase/tests"
 )
 
 func minimalTestPDF(pageCount int) []byte {
@@ -135,42 +138,123 @@ func TestWalkRecordBatchesCrossesBatchBoundary(t *testing.T) {
 }
 
 func TestRecoveryCleanupDeletesAcrossProductionBatchBoundary(t *testing.T) {
-	originalPageCount := artifactCleanupBatch + 1
-	remaining := make([]*models.Record, originalPageCount)
-	var deleted int
-	var offsets []int
-	err := walkRecordBatches(
-		artifactCleanupBatch,
-		false,
-		func(limit, offset int) ([]*models.Record, error) {
-			offsets = append(offsets, offset)
-			if len(remaining) < limit {
-				limit = len(remaining)
-			}
-			return remaining[:limit], nil
-		},
-		func(batch []*models.Record) error {
-			deleted += len(batch)
-			remaining = remaining[len(batch):]
-			return nil
-		},
-	)
+	dao, collections := newArtifactCleanupTestDao(t)
+	targetJobID := "target-job"
+	otherJobID := "other-job"
+	targetCount := artifactCleanupBatch + 1
+
+	seedCleanupArtifacts(t, dao, collections, targetJobID, targetCount, "importing")
+	seedCleanupArtifacts(t, dao, collections, otherJobID, 1, "importing")
+
+	if err := clearJobArtifacts(dao, targetJobID); err != nil {
+		t.Fatal(err)
+	}
+
+	assertRecordCount(t, dao, "pages", fmt.Sprintf("import_job = %q", targetJobID), 0)
+	assertRecordCount(t, dao, "import_job_errors", fmt.Sprintf("job = %q", targetJobID), 0)
+	assertRecordCount(t, dao, "pages", fmt.Sprintf("import_job = %q", otherJobID), 1)
+	assertRecordCount(t, dao, "import_job_errors", fmt.Sprintf("job = %q", otherJobID), 1)
+}
+
+func TestRecoveryCleanupRollsBackWhenPublishedPageExists(t *testing.T) {
+	dao, collections := newArtifactCleanupTestDao(t)
+	jobID := "protected-job"
+	stagedCount := artifactCleanupBatch + 1
+
+	seedCleanupArtifacts(t, dao, collections, jobID, stagedCount, "importing")
+	seedCleanupArtifacts(t, dao, collections, jobID, 1, "pending")
+
+	err := clearJobArtifacts(dao, jobID)
+	if err == nil || !strings.Contains(err.Error(), "refusing to delete published import page") {
+		t.Fatalf("expected published-page safety error, got %v", err)
+	}
+
+	assertRecordCount(t, dao, "pages", fmt.Sprintf("import_job = %q", jobID), stagedCount+1)
+	assertRecordCount(t, dao, "import_job_errors", fmt.Sprintf("job = %q", jobID), stagedCount+1)
+}
+
+func newArtifactCleanupTestDao(t *testing.T) (*daos.Dao, map[string]*models.Collection) {
+	t.Helper()
+	app, err := tests.NewTestApp()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if deleted != originalPageCount || len(remaining) != 0 {
-		t.Fatalf("deleted %d records with %d remaining", deleted, len(remaining))
+	t.Cleanup(app.Cleanup)
+
+	collections := map[string]*models.Collection{
+		"pages": {
+			Name: "pages",
+			Type: models.CollectionTypeBase,
+			Schema: schema.NewSchema(
+				&schema.SchemaField{Name: "import_job", Type: schema.FieldTypeText},
+				&schema.SchemaField{Name: "status", Type: schema.FieldTypeText},
+				&schema.SchemaField{Name: "proofreader", Type: schema.FieldTypeText},
+				&schema.SchemaField{Name: "first_proofreader", Type: schema.FieldTypeText},
+				&schema.SchemaField{Name: "second_proofreader", Type: schema.FieldTypeText},
+			),
+		},
+		"proofreading_attempts": {
+			Name: "proofreading_attempts",
+			Type: models.CollectionTypeBase,
+			Schema: schema.NewSchema(
+				&schema.SchemaField{Name: "page", Type: schema.FieldTypeText},
+			),
+		},
+		"import_job_errors": {
+			Name: "import_job_errors",
+			Type: models.CollectionTypeBase,
+			Schema: schema.NewSchema(
+				&schema.SchemaField{Name: "job", Type: schema.FieldTypeText},
+			),
+		},
 	}
-	if fmt.Sprint(offsets) != "[0 0]" {
-		t.Fatalf("delete batches must always fetch from offset zero: %v", offsets)
+	for _, name := range []string{"pages", "proofreading_attempts", "import_job_errors"} {
+		if err := app.Dao().SaveCollection(collections[name]); err != nil {
+			t.Fatalf("create %s test collection: %v", name, err)
+		}
 	}
 
-	// Recovery reimports every valid row after cleanup. If even one old staged
-	// page survived the batch boundary, this count would exceed success_count.
-	successCount := originalPageCount
-	remaining = append(remaining, make([]*models.Record, successCount)...)
-	if len(remaining) != successCount {
-		t.Fatalf("recovered page count %d does not match success_count %d", len(remaining), successCount)
+	return app.Dao(), collections
+}
+
+func seedCleanupArtifacts(
+	t *testing.T,
+	dao *daos.Dao,
+	collections map[string]*models.Collection,
+	jobID string,
+	count int,
+	status string,
+) {
+	t.Helper()
+	if err := dao.RunInTransaction(func(txDao *daos.Dao) error {
+		for index := 0; index < count; index++ {
+			page := models.NewRecord(collections["pages"])
+			page.Set("import_job", jobID)
+			page.Set("status", status)
+			if err := txDao.SaveRecord(page); err != nil {
+				return err
+			}
+
+			jobError := models.NewRecord(collections["import_job_errors"])
+			jobError.Set("job", jobID)
+			if err := txDao.SaveRecord(jobError); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("seed cleanup artifacts: %v", err)
+	}
+}
+
+func assertRecordCount(t *testing.T, dao *daos.Dao, collection, filter string, want int) {
+	t.Helper()
+	records, err := dao.FindRecordsByFilter(collection, filter, "id", 1000000, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != want {
+		t.Fatalf("%s records matching %q: got %d; want %d", collection, filter, len(records), want)
 	}
 }
 
