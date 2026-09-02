@@ -614,19 +614,6 @@ func (s *importService) markFatal(work importWork, code, message string, cause e
 		})
 		return
 	}
-	var cleanupErr error
-	if work.kind == "csv" {
-		cleanupErr = s.clearJobPages(work.id)
-		if cleanupErr != nil {
-			message += " 暂存条目自动清理失败，请联系管理员处理。"
-			logUpload("error", "failed_csv_staging_cleanup_failed", map[string]any{
-				"request_id": work.requestID,
-				"job_id":     work.id,
-				"error_code": code,
-				"error":      cleanupErr.Error(),
-			})
-		}
-	}
 	record.Set("status", "failed")
 	if work.kind == "pdf" {
 		record.Set("status", "error")
@@ -636,16 +623,46 @@ func (s *importService) markFatal(work importWork, code, message string, cause e
 	if work.kind == "csv" || work.kind == "csv_inspect" {
 		record.Set("finished_at", types.NowDateTime())
 	}
-	if err := s.app.Dao().SaveRecord(record); err != nil {
+	var cleanup func() error
+	if work.kind == "csv" {
+		cleanup = func() error {
+			return s.clearJobPages(work.id)
+		}
+	}
+	persistErr, cleanupErr := persistBeforeCleanup(
+		func() error { return s.app.Dao().SaveRecord(record) },
+		cleanup,
+	)
+	if persistErr != nil {
 		logUpload("error", "fatal_status_persist_failed", map[string]any{
 			"request_id": work.requestID,
 			"kind":       work.kind,
 			"record_id":  work.id,
 			"project_id": record.GetString("project"),
 			"error_code": code,
-			"error":      err.Error(),
+			"error":      persistErr.Error(),
 		})
 		return
+	}
+	if cleanupErr != nil {
+		message += " 暂存条目自动清理失败，请联系管理员处理。"
+		record.Set("error_message", message)
+		logUpload("error", "failed_csv_staging_cleanup_failed", map[string]any{
+			"request_id": work.requestID,
+			"job_id":     work.id,
+			"error_code": code,
+			"error":      cleanupErr.Error(),
+		})
+		if err := s.app.Dao().SaveRecord(record); err != nil {
+			logUpload("error", "fatal_cleanup_message_persist_failed", map[string]any{
+				"request_id": work.requestID,
+				"kind":       work.kind,
+				"record_id":  work.id,
+				"project_id": record.GetString("project"),
+				"error_code": code,
+				"error":      err.Error(),
+			})
+		}
 	}
 	logUpload("error", "work_failed", map[string]any{
 		"request_id":    work.requestID,
@@ -660,6 +677,16 @@ func (s *importService) markFatal(work importWork, code, message string, cause e
 		"error":         errorText(cause),
 		"cleanup_error": errorText(cleanupErr),
 	})
+}
+
+func persistBeforeCleanup(persist func() error, cleanup func() error) (persistErr, cleanupErr error) {
+	if err := persist(); err != nil {
+		return err, nil
+	}
+	if cleanup == nil {
+		return nil, nil
+	}
+	return nil, cleanup()
 }
 
 func (s *importService) processPDF(work importWork) {

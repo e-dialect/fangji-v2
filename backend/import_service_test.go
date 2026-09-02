@@ -103,6 +103,78 @@ func TestIsDiscardableImportPage(t *testing.T) {
 	}
 }
 
+func TestPersistBeforeCleanupSkipsCleanupWhenPersistFails(t *testing.T) {
+	persistFailure := fmt.Errorf("persist failed")
+	cleanupCalled := false
+
+	persistErr, cleanupErr := persistBeforeCleanup(
+		func() error { return persistFailure },
+		func() error {
+			cleanupCalled = true
+			return nil
+		},
+	)
+
+	if persistErr != persistFailure {
+		t.Fatalf("got persist error %v; want %v", persistErr, persistFailure)
+	}
+	if cleanupErr != nil {
+		t.Fatalf("unexpected cleanup error: %v", cleanupErr)
+	}
+	if cleanupCalled {
+		t.Fatal("cleanup must not run before the failed status is persisted")
+	}
+}
+
+func TestPersistBeforeCleanupRunsInOrder(t *testing.T) {
+	var calls []string
+	persistErr, cleanupErr := persistBeforeCleanup(
+		func() error {
+			calls = append(calls, "persist")
+			return nil
+		},
+		func() error {
+			calls = append(calls, "cleanup")
+			return nil
+		},
+	)
+
+	if persistErr != nil || cleanupErr != nil {
+		t.Fatalf("unexpected errors: persist=%v cleanup=%v", persistErr, cleanupErr)
+	}
+	if fmt.Sprint(calls) != "[persist cleanup]" {
+		t.Fatalf("unexpected call order: %v", calls)
+	}
+}
+
+func TestPersistBeforeCleanupKeepsPersistedStateWhenCleanupFails(t *testing.T) {
+	cleanupFailure := fmt.Errorf("cleanup failed")
+	persisted := false
+
+	persistErr, cleanupErr := persistBeforeCleanup(
+		func() error {
+			persisted = true
+			return nil
+		},
+		func() error {
+			if !persisted {
+				t.Fatal("cleanup ran before persistence")
+			}
+			return cleanupFailure
+		},
+	)
+
+	if persistErr != nil {
+		t.Fatalf("unexpected persist error: %v", persistErr)
+	}
+	if cleanupErr != cleanupFailure {
+		t.Fatalf("got cleanup error %v; want %v", cleanupErr, cleanupFailure)
+	}
+	if !persisted {
+		t.Fatal("failed status was not persisted")
+	}
+}
+
 func TestWalkRecordBatchesCrossesBatchBoundary(t *testing.T) {
 	records := make([]*models.Record, 7)
 	var visited int
@@ -168,7 +240,6 @@ func TestRecoveryCleanupRollsBackWhenPublishedPageExists(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "refusing to delete published import page") {
 		t.Fatalf("expected published-page safety error, got %v", err)
 	}
-
 	assertRecordCount(t, dao, "pages", fmt.Sprintf("import_job = %q", jobID), stagedCount+1)
 	assertRecordCount(t, dao, "import_job_errors", fmt.Sprintf("job = %q", jobID), stagedCount+1)
 }
