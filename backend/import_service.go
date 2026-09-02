@@ -1209,7 +1209,7 @@ func deleteJobPages(dao *daos.Dao, jobID string) error {
 					page.GetString("second_proofreader"),
 					attemptCount > 0,
 				) {
-					return fmt.Errorf("refusing to delete published import page %s during recovery", page.Id)
+					return fmt.Errorf("refusing to delete published import page %s during cleanup", page.Id)
 				}
 			}
 			return nil

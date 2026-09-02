@@ -240,6 +240,10 @@ func TestRecoveryCleanupRollsBackWhenPublishedPageExists(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "refusing to delete published import page") {
 		t.Fatalf("expected published-page safety error, got %v", err)
 	}
+	if !strings.Contains(err.Error(), "during cleanup") {
+		t.Fatalf("cleanup safety error should identify the cleanup context: %v", err)
+	}
+
 	assertRecordCount(t, dao, "pages", fmt.Sprintf("import_job = %q", jobID), stagedCount+1)
 	assertRecordCount(t, dao, "import_job_errors", fmt.Sprintf("job = %q", jobID), stagedCount+1)
 }
