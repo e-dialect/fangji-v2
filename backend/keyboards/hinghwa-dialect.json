@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "id": "hinghwa-dialect",
+  "name": "莆仙方言键盘",
+  "description": "合并莆仙方言 IPA、大词典拼音方案与平话字（BUC）字符。",
+  "sections": [
+    {
+      "id": "consonants",
+      "label": "辅音",
+      "defaultOpen": true,
+      "keys": [
+        { "value": "ʰ" }, { "value": "ʦ" }, { "value": "ɬ" }, { "value": "θ" },
+        { "value": "ŋ" }, { "value": "β" }, { "value": "ɣ" }, { "value": "ʔ" },
+        { "value": "Ø" }
+      ]
+    },
+    {
+      "id": "vowels",
+      "label": "元音",
+      "defaultOpen": true,
+      "keys": [
+        { "value": "ɛ" }, { "value": "ø" }, { "value": "ɒ" }, { "value": "œ" },
+        { "value": "ɵ" }, { "value": "ə" }, { "value": "ɯ" }, { "value": "ɐ" },
+        { "value": "æ" }, { "value": "ᴇ" }, { "value": "ɤ" }
+      ]
+    },
+    {
+      "id": "nasalized",
+      "label": "鼻化",
+      "defaultOpen": false,
+      "keys": [
+        { "value": "ã" }, { "value": "ẽ" }, { "value": "ĩ" }, { "value": "ø̃" },
+        { "value": "ỹ" }, { "value": "ɒ̃" }, { "value": "ũ" }, { "value": "ɔ̃" },
+        { "value": "ɛ̃" }, { "value": "œ̃" }, { "value": "ɐ̃" }, { "value": "õ" }
+      ]
+    },
+    {
+      "id": "superscript-digits",
+      "label": "数字上标",
+      "defaultOpen": true,
+      "keys": [
+        { "value": "⁰" }, { "value": "¹" }, { "value": "²" }, { "value": "³" },
+        { "value": "⁴" }, { "value": "⁵" }, { "value": "⁶" }, { "value": "⁷" },
+        { "value": "⁸" }
+      ]
+    },
+    {
+      "id": "dictionary-romanization",
+      "label": "大词典拼音方案",
+      "defaultOpen": false,
+      "keys": [
+        { "value": "ü" }, { "value": "ñ" }, { "value": "ệ" },
+        { "value": "ẹ" }, { "value": "ê" }, { "value": "ô" }
+      ]
+    },
+    {
+      "id": "buc-lowercase",
+      "label": "平话字 (BUC) — 小写",
+      "defaultOpen": false,
+      "keys": [
+        { "value": "á" }, { "value": "â" }, { "value": "a̍" }, { "value": "ā" },
+        { "value": "é" }, { "value": "ê" }, { "value": "e̍" }, { "value": "ē" },
+        { "value": "í" }, { "value": "î" }, { "value": "i̍" }, { "value": "ī" },
+        { "value": "ó" }, { "value": "ô" }, { "value": "o̍" }, { "value": "ō" },
+        { "value": "ú" }, { "value": "û" }, { "value": "u̍" }, { "value": "ū" },
+        { "value": "a̤" }, { "value": "á̤" }, { "value": "â̤" }, { "value": "a̤̍" }, { "value": "ā̤" },
+        { "value": "e̤" }, { "value": "é̤" }, { "value": "ê̤" }, { "value": "e̤̍" }, { "value": "ē̤" },
+        { "value": "o̤" }, { "value": "ó̤" }, { "value": "ô̤" }, { "value": "o̤̍" }, { "value": "ō̤" },
+        { "value": "ṳ" }, { "value": "ṳ́" }, { "value": "ṳ̂" }, { "value": "ṳ̍" }, { "value": "ṳ̄" },
+        { "value": "ń" }, { "value": "n̂" }, { "value": "n̍" }, { "value": "n̄" },
+        { "value": "ⁿ" }, { "value": "ᴺ" }
+      ]
+    },
+    {
+      "id": "buc-uppercase",
+      "label": "平话字 (BUC) — 大写",
+      "defaultOpen": false,
+      "keys": [
+        { "value": "Á" }, { "value": "Â" }, { "value": "A̍" }, { "value": "Ā" },
+        { "value": "É" }, { "value": "Ê" }, { "value": "E̍" }, { "value": "Ē" },
+        { "value": "Í" }, { "value": "Î" }, { "value": "I̍" }, { "value": "Ī" },
+        { "value": "Ó" }, { "value": "Ô" }, { "value": "O̍" }, { "value": "Ō" },
+        { "value": "Ú" }, { "value": "Û" }, { "value": "U̍" }, { "value": "Ū" },
+        { "value": "A̤" }, { "value": "Á̤" }, { "value": "Â̤" }, { "value": "A̤̍" }, { "value": "Ā̤" },
+        { "value": "E̤" }, { "value": "É̤" }, { "value": "Ê̤" }, { "value": "E̤̍" }, { "value": "Ē̤" },
+        { "value": "O̤" }, { "value": "Ó̤" }, { "value": "Ô̤" }, { "value": "O̤̍" }, { "value": "Ō̤" },
+        { "value": "Ṳ" }, { "value": "Ṳ́" }, { "value": "Ṳ̂" }, { "value": "Ṳ̍" }, { "value": "Ṳ̄" },
+        { "value": "Ń" }, { "value": "N̂" }, { "value": "N̍" }, { "value": "N̄" }
+      ]
+    }
+  ]
+}

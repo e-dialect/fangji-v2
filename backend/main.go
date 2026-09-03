@@ -51,6 +51,9 @@ func main() {
 		app.Dao().ModelQueryTimeout = time.Duration(queryTimeout) * time.Second
 		return nil
 	})
+	if err := registerKeyboardPresets(app); err != nil {
+		log.Fatal(err)
+	}
 
 	importer := newImportService(app)
 	importer.register()
