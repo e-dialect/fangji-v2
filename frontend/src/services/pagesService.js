@@ -81,6 +81,7 @@ export async function listProjectQueueSummaries(userId) {
     firstPassPending: 0,
     secondPassPending: 0,
     activeMine: 0,
+    activePage: null,
     completed: 0,
     mismatchCount: 0,
     nextPage: null
@@ -102,6 +103,9 @@ export async function listProjectQueueSummaries(userId) {
     }
     if (PROOFREADER_ACTIVE_STATUSES.includes(page.status) && page.proofreader === userId) {
       stats.activeMine += 1
+      if (!stats.activePage || Number(page.page_number) < Number(stats.activePage.page_number)) {
+        stats.activePage = page
+      }
     }
     if (isPageClaimableBy(page, userId)) {
       if (!stats.nextPage || Number(page.page_number) < Number(stats.nextPage.page_number)) {

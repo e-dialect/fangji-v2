@@ -1,39 +1,44 @@
 <template>
-  <div class="editor-layout">
-    <!-- Left panel: project PDF -->
-    <div class="editor-panel">
-      <div class="editor-panel-header">
-        <span>📄 原文 · 第 {{ currentPdfPage }} 页</span>
-        <div class="flex gap-2">
+  <main class="editor-layout">
+    <section class="editor-panel" aria-labelledby="source-panel-title">
+      <header class="editor-panel-header editor-panel-header--source">
+        <div class="editor-context">
+          <span>原文定位</span>
+          <strong id="source-panel-title">PDF 第 {{ currentPdfPage }} 页</strong>
+        </div>
+        <div class="editor-toolbar" aria-label="PDF 页码导航">
           <button
             class="btn btn-secondary btn-sm"
             :disabled="currentPdfPage <= allowedPdfPages[0]"
             @click="switchPdfPage(-1)"
           >上一页</button>
+          <label class="pdf-page-control">
+            <span class="sr-only">PDF 页码</span>
+            <input
+              v-model.number="pdfPageInput"
+              type="number"
+              class="form-control pdf-page-input"
+              :min="allowedPdfPages[0]"
+              :max="allowedPdfPages[1]"
+              aria-label="PDF 页码"
+              @change="applyPdfPageInput"
+              @keydown.enter.prevent="applyPdfPageInput"
+            />
+          </label>
           <button
             class="btn btn-secondary btn-sm"
             :disabled="currentPdfPage >= allowedPdfPages[1]"
             @click="switchPdfPage(1)"
           >下一页</button>
-          <input
-            v-model.number="pdfPageInput"
-            type="number"
-            class="form-control pdf-page-input"
-            :min="allowedPdfPages[0]"
-            :max="allowedPdfPages[1]"
-            aria-label="PDF 页码"
-            @change="applyPdfPageInput"
-            @keydown.enter.prevent="applyPdfPageInput"
-          />
-          <RouterLink to="/tasks" class="btn btn-secondary btn-sm">← 返回项目大厅</RouterLink>
+          <RouterLink to="/tasks" class="btn btn-quiet btn-sm">返回大厅</RouterLink>
         </div>
-      </div>
-      <div class="editor-panel-body" style="padding:0">
-        <div v-if="loadingPage" class="text-muted">加载中...</div>
+      </header>
+      <div class="editor-panel-body editor-panel-body--pdf">
+        <div v-if="loadingPage" class="panel-loading" aria-live="polite">正在加载原文…</div>
         <div v-else-if="!page" class="alert alert-error">页面不存在</div>
-        <div v-else-if="pdfError" class="alert alert-error" style="margin:1rem">{{ pdfError }}</div>
+        <div v-else-if="pdfError" class="alert alert-error editor-inline-alert">{{ pdfError }}</div>
         <template v-else>
-          <div v-if="pdfPageWarning" class="alert alert-error" style="margin:1rem">{{ pdfPageWarning }}</div>
+          <div v-if="pdfPageWarning" class="alert alert-error editor-inline-alert">{{ pdfPageWarning }}</div>
           <PdfSinglePageViewer
             v-if="pdfUrl"
             :src="pdfUrl"
@@ -41,85 +46,160 @@
             :watermark-user-id="currentUserId"
           />
           <div v-else class="empty-state">
-            <div class="empty-state-icon">📕</div>
-            <div class="empty-state-text">暂无可预览的 PDF 文件</div>
+            <div class="empty-state-mark" aria-hidden="true">PDF</div>
+            <div class="empty-state-text">这个项目没有可预览的 PDF</div>
+            <p>你仍可根据已导入的结构化字段完成校对。</p>
           </div>
         </template>
       </div>
-    </div>
+    </section>
 
-    <!-- Right panel: editor + IPA keyboard -->
-    <div class="editor-panel">
-      <div class="editor-panel-header">
-        <span>✏️ 第 {{ page?.page_number || '—' }} 条</span>
-        <div class="flex gap-2">
+    <section class="editor-panel" aria-labelledby="task-panel-title">
+      <header class="editor-panel-header editor-panel-header--task">
+        <div class="editor-context">
+          <span>{{ projectName }} · {{ passLabel }}</span>
+          <strong id="task-panel-title">第 {{ page?.page_number || '—' }} 条</strong>
+        </div>
+        <div class="editor-toolbar" aria-label="校对任务导航">
+          <span class="task-position" aria-label="当前任务位置">
+            {{ taskPosition || 1 }} / {{ taskCount || 1 }}
+          </span>
           <button
             class="btn btn-secondary btn-sm"
             @click="gotoPrevTask"
             :disabled="!hasNeighborTasks || saving || loadingPage"
-          >上一条任务</button>
+          >上一条</button>
           <button
             class="btn btn-secondary btn-sm"
             @click="gotoNextTask"
             :disabled="!hasNeighborTasks || saving || loadingPage"
-          >下一条任务</button>
-          <button class="btn btn-success btn-sm" @click="submitProofread" :disabled="saving">
-            {{ saving ? '提交中...' : '✓ 提交校对' }}
-          </button>
+          >下一条</button>
+          <button
+            class="btn btn-success btn-sm"
+            @click="openSubmitReview"
+            :disabled="saving || loadingPage || !page"
+          >{{ saving ? '提交中…' : '检查并提交' }}</button>
         </div>
-      </div>
-      <div class="editor-panel-body">
-        <div v-if="loadingPage" class="text-muted">加载中...</div>
-        <div v-else-if="!page" class="text-muted">页面不存在</div>
+      </header>
+
+      <div class="editor-panel-body editor-panel-body--fields">
+        <div v-if="loadingPage" class="panel-loading" aria-live="polite">正在准备校对字段…</div>
+        <div v-else-if="!page" class="empty-state">
+          <div class="empty-state-text">页面不存在</div>
+          <RouterLink to="/tasks" class="btn btn-secondary mt-3">返回项目大厅</RouterLink>
+        </div>
         <template v-else>
-          <div v-if="saved" class="alert alert-success mb-3">{{ saved }}</div>
-          <div v-if="saveError" class="alert alert-error mb-3">{{ saveError }}</div>
-          <div class="editor-meta mb-3">
-            <span>{{ draftStatus || '修改后将自动保存本地草稿' }}</span>
-            <span>快捷键：Ctrl/⌘+S 保存草稿 · Ctrl/⌘+Enter 提交 · Alt+←/→ 切换任务</span>
+          <div v-if="saved" class="alert alert-success" role="status">{{ saved }}</div>
+          <div v-if="saveError" class="alert alert-error" role="alert">{{ saveError }}</div>
+
+          <div class="editor-meta" aria-live="polite">
+            <span class="draft-indicator" :class="{ 'draft-indicator--saved': draftStatus.includes('已保存') || draftStatus.includes('已恢复') }">
+              <i aria-hidden="true"></i>
+              {{ draftStatus || '修改后自动保存到本机' }}
+            </span>
+            <span class="shortcut-hint">⌘/Ctrl+S 草稿 · ⌘/Ctrl+Enter 提交 · Alt+←/→ 切换</span>
           </div>
 
-          <label class="form-label">校对表格（按CSV栏目）</label>
-          <div class="table-wrapper mb-3">
-            <table>
-              <tbody>
-                <tr>
-                  <th
-                    v-for="header in rowHeaders"
-                    :key="`h-${header}`"
-                    class="text-sm font-semibold"
-                    style="min-width:180px"
-                  >{{ header }}</th>
-                </tr>
-                <tr>
-                  <td
-                    v-for="header in rowHeaders"
-                    :key="`v-${header}`"
-                    style="vertical-align:top;min-width:180px"
-                  >
-                    <textarea
-                      :ref="(el) => setTextareaRef(header, el)"
-                      v-model="editedRow[header]"
-                      class="form-control"
-                      style="min-height:84px;font-family:'Noto Sans', serif;font-size:.95rem;line-height:1.6"
-                      @focus="activateField(header, $event)"
-                      @select="rememberSelection(header, $event)"
-                      @keyup="rememberSelection(header, $event)"
-                      @click="rememberSelection(header, $event)"
-                      @input="onTextChange"
-                      :placeholder="originalRow[header] || ''"
-                    ></textarea>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+          <div class="field-progress-summary">
+            <div>
+              <span>结构化校对</span>
+              <strong>{{ rowHeaders.length }} 个字段，已修改 {{ changedFields.length }} 个</strong>
+            </div>
+            <span class="pass-badge">{{ passLabel }}</span>
+          </div>
+
+          <div class="proofread-fields">
+            <article
+              v-for="(header, index) in rowHeaders"
+              :key="header"
+              class="proofread-field"
+              :class="{
+                'proofread-field--active': activeField === header,
+                'proofread-field--changed': isFieldChanged(header)
+              }"
+            >
+              <header class="proofread-field__header">
+                <div>
+                  <span>字段 {{ index + 1 }}</span>
+                  <h2>{{ header }}</h2>
+                </div>
+                <div class="proofread-field__actions">
+                  <span v-if="isFieldChanged(header)" class="field-change-label">已修改</span>
+                  <button
+                    type="button"
+                    class="btn btn-quiet btn-sm"
+                    :disabled="!isFieldChanged(header)"
+                    @click="restoreField(header)"
+                  >恢复原文</button>
+                </div>
+              </header>
+
+              <div class="source-value">
+                <span>导入原文</span>
+                <p>{{ originalRow[header] || '（空白）' }}</p>
+              </div>
+
+              <label class="sr-only" :for="`proofread-field-${index}`">{{ header }} 校对结果</label>
+              <textarea
+                :id="`proofread-field-${index}`"
+                :ref="(el) => setTextareaRef(header, el)"
+                v-model="editedRow[header]"
+                class="form-control proofread-textarea"
+                @focus="activateField(header, $event)"
+                @select="rememberSelection(header, $event)"
+                @keyup="rememberSelection(header, $event)"
+                @click="rememberSelection(header, $event)"
+                @input="onTextChange"
+                :placeholder="`输入${header}的校对结果`"
+              ></textarea>
+            </article>
           </div>
 
           <IpaKeyboard @insert="insertText" />
         </template>
       </div>
+    </section>
+
+    <div
+      v-if="reviewingSubmission"
+      class="modal-backdrop"
+      role="presentation"
+      @click.self="closeSubmitReview"
+    >
+      <section
+        class="confirmation-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="submit-review-title"
+        @keydown.esc="closeSubmitReview"
+      >
+        <div class="confirmation-dialog__mark" aria-hidden="true">校</div>
+        <div>
+          <div class="page-eyebrow">提交前确认</div>
+          <h2 id="submit-review-title">确认第 {{ page?.page_number }} 条{{ passLabel }}结果</h2>
+          <p v-if="changedFields.length">
+            你修改了 {{ changedFields.length }} 个字段：{{ changedFields.join('、') }}。
+          </p>
+          <p v-else>
+            本条没有修改字段，提交表示你确认导入内容全部正确。
+          </p>
+          <p class="text-sm text-muted">
+            提交后不能自行撤回；系统会自动流转并尝试领取本项目下一条。
+          </p>
+        </div>
+        <div class="confirmation-dialog__actions">
+          <button type="button" class="btn btn-secondary" @click="closeSubmitReview">继续检查</button>
+          <button
+            ref="submitConfirmButton"
+            type="button"
+            class="btn btn-success"
+            :disabled="saving"
+            @click="submitProofread"
+          >{{ saving ? '正在提交…' : `确认提交${passLabel}` }}</button>
+        </div>
+      </section>
     </div>
-  </div>
+  </main>
 </template>
 
 <script setup>
@@ -131,6 +211,7 @@ import { useProjectPdf } from '@/composables/useProjectPdf'
 import { useStructuredRow } from '@/composables/useStructuredRow'
 import { useTaskNeighbors } from '@/composables/useTaskNeighbors'
 import { PAGE_STATUS } from '@/constants/pageStatus'
+import { getChangedFields, proofreadPassLabel } from '@/lib/workspaceInsights'
 import {
   clearTaskDraft,
   loadTaskDraft,
@@ -159,11 +240,16 @@ const initialRowJson = ref('')
 const draftStatus = ref('')
 const draftReady = ref(false)
 const pdfPageInput = ref(1)
+const reviewingSubmission = ref(false)
+const submitConfirmButton = ref(null)
 const activeSelection = ref({ field: '', start: null, end: null })
 const textareaRefs = new Map()
 let draftTimer = null
 
 const currentUserId = computed(() => getCurrentUserId() || '')
+const projectName = computed(() => page.value?.expand?.project?.name || '当前项目')
+const passLabel = computed(() => proofreadPassLabel(page.value))
+const changedFields = computed(() => getChangedFields(rowHeaders.value, originalRow.value, editedRow.value))
 const hasUnsavedChanges = computed(() => {
   return Boolean(
     page.value &&
@@ -173,6 +259,7 @@ const hasUnsavedChanges = computed(() => {
     stringifyEditedRow() !== initialRowJson.value
   )
 })
+
 const {
   rowHeaders,
   originalRow,
@@ -205,6 +292,8 @@ watch(currentPdfPage, (value) => {
 const {
   prevTaskId,
   nextTaskId,
+  taskPosition,
+  taskCount,
   hasNeighborTasks,
   resetNeighbors,
   loadNeighbors
@@ -240,6 +329,7 @@ onBeforeUnmount(() => {
 
 async function loadPage() {
   clearDraftTimer()
+  reviewingSubmission.value = false
   draftReady.value = false
   loadingPage.value = true
   page.value = null
@@ -253,7 +343,7 @@ async function loadPage() {
   textareaRefs.clear()
 
   try {
-    page.value = await getPage(route.params.id, { expand: 'project_file' })
+    page.value = await getPage(route.params.id, { expand: 'project,project_file' })
     syncToBasePage()
     hydrateForProofread(page.value)
     initialRowJson.value = stringifyEditedRow()
@@ -325,9 +415,35 @@ function rememberSelection(header, event) {
   }
 }
 
+function isFieldChanged(header) {
+  return changedFields.value.includes(header)
+}
+
+async function restoreField(header) {
+  if (!isFieldChanged(header)) return
+  editedRow.value[header] = String(originalRow.value[header] ?? '')
+  activeField.value = header
+  onTextChange()
+  await nextTick()
+  textareaRefs.get(header)?.focus()
+}
+
+async function openSubmitReview() {
+  if (saving.value || loadingPage.value || !page.value) return
+  flushDraft()
+  reviewingSubmission.value = true
+  await nextTick()
+  submitConfirmButton.value?.focus()
+}
+
+function closeSubmitReview() {
+  if (saving.value) return
+  reviewingSubmission.value = false
+}
+
 function confirmDiscardChanges() {
   if (!hasUnsavedChanges.value) return true
-  return window.confirm('当前校对内容尚未提交，确定要离开吗？')
+  return window.confirm('当前校对内容尚未提交，确定要离开吗？本地草稿会保留。')
 }
 
 function handleBeforeUnload(event) {
@@ -340,7 +456,7 @@ function handleBeforeUnload(event) {
 function scheduleDraftSave() {
   if (!draftReady.value) return
   clearDraftTimer()
-  draftStatus.value = '草稿保存中...'
+  draftStatus.value = '草稿保存中…'
   draftTimer = window.setTimeout(() => flushDraft(), 500)
 }
 
@@ -401,6 +517,11 @@ function formatDraftTime(value) {
 
 function handleEditorShortcut(event) {
   if (event.defaultPrevented) return
+  if (event.key === 'Escape' && reviewingSubmission.value) {
+    event.preventDefault()
+    closeSubmitReview()
+    return
+  }
   const control = event.ctrlKey || event.metaKey
   if (control && event.key.toLowerCase() === 's') {
     event.preventDefault()
@@ -409,10 +530,11 @@ function handleEditorShortcut(event) {
   }
   if (control && event.key === 'Enter') {
     event.preventDefault()
-    if (!saving.value && !loadingPage.value) submitProofread()
+    if (reviewingSubmission.value) submitProofread()
+    else openSubmitReview()
     return
   }
-  if (!event.altKey || control) return
+  if (!event.altKey || control || reviewingSubmission.value) return
   if (event.key === 'ArrowLeft' && prevTaskId.value) {
     event.preventDefault()
     gotoPrevTask()
@@ -445,6 +567,7 @@ async function submitProofread() {
       rowJson,
       text
     })
+    reviewingSubmission.value = false
     initialRowJson.value = rowJson
     page.value.status = result.status
     clearTaskDraft(window.localStorage, {

@@ -1,75 +1,132 @@
 <template>
-  <div class="container page">
-    <div class="flex items-center justify-between mb-6">
-      <h2 class="font-bold" style="font-size:1.5rem">项目大厅</h2>
-      <button class="btn btn-secondary btn-sm" @click="loadProjects" :disabled="loading">
-        {{ loading ? '刷新中...' : '刷新' }}
+  <main class="container page workspace-page">
+    <header class="page-heading">
+      <div>
+        <div class="page-eyebrow">校对工作台</div>
+        <h1>从最需要你的项目开始</h1>
+        <p>进行中的任务排在最前；领取前会标明本次是一校还是二校。</p>
+      </div>
+      <button class="btn btn-secondary" @click="loadProjects" :disabled="loading">
+        <span aria-hidden="true">↻</span>
+        {{ loading ? '正在刷新' : '刷新项目' }}
       </button>
+    </header>
+
+    <div v-if="error" class="alert alert-error" role="alert">
+      <strong>项目暂时无法加载。</strong>
+      <span>{{ error }}</span>
     </div>
 
-    <div v-if="error" class="alert alert-error mb-3">{{ error }}</div>
-    <div v-if="loading" class="text-muted">加载中...</div>
-    <div v-else-if="projectQueues.length === 0" class="empty-state">
-      <div class="empty-state-icon">✅</div>
-      <div class="empty-state-text">暂无可校对项目</div>
-    </div>
-    <div v-else class="card">
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>项目</th>
-              <th>总条目</th>
-              <th>待处理</th>
-              <th>我的进行中</th>
-              <th>已完成</th>
-              <th>不一致次数</th>
-              <th>进度</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="queue in projectQueues" :key="queue.project.id">
-              <td>
-                <div class="font-semibold">{{ queue.project.name }}</div>
-                <div v-if="queue.project.description" class="text-sm text-muted" style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                  {{ queue.project.description }}
-                </div>
-              </td>
-              <td>{{ queue.total }}</td>
-              <td>{{ pendingCount(queue) }}</td>
-              <td>{{ queue.activeMine }}</td>
-              <td>{{ queue.completed }}</td>
-              <td>{{ queue.mismatchCount }}</td>
-              <td style="min-width:140px">
-                <div class="progress">
-                  <div class="progress-bar" :style="{ width: progressPct(queue) + '%' }"></div>
-                </div>
-                <span class="text-sm text-muted">{{ progressPct(queue) }}%</span>
-              </td>
-              <td>
-                <button
-                  class="btn btn-primary btn-sm"
-                  :disabled="claimingProject === queue.project.id || !canEnterProject(queue)"
-                  @click="enterProject(queue)"
-                >
-                  {{ buttonLabel(queue) }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+    <section class="workspace-summary" aria-label="我的校对概况">
+      <article class="workspace-stat workspace-stat--accent">
+        <span>正在处理</span>
+        <strong>{{ queueSummary.activeProjects }}</strong>
+        <small>个项目有我的未提交任务</small>
+      </article>
+      <article class="workspace-stat">
+        <span>现在可领取</span>
+        <strong>{{ queueSummary.availableProjects }}</strong>
+        <small>个项目有适合我的下一条</small>
+      </article>
+      <article class="workspace-stat">
+        <span>整体已完成</span>
+        <strong>{{ queueSummary.completedItems }}<em>/{{ queueSummary.totalItems }}</em></strong>
+        <small>条已通过双校或仲裁</small>
+      </article>
+    </section>
+
+    <section aria-labelledby="project-list-title">
+      <div class="section-heading">
+        <div>
+          <h2 id="project-list-title">项目队列</h2>
+          <p>系统会保留本地草稿；完成提交后自动领取同项目下一条。</p>
+        </div>
+        <span v-if="!loading" class="section-count">{{ projectQueues.length }} 个项目</span>
       </div>
-    </div>
-  </div>
+
+      <div v-if="loading" class="project-card-grid" aria-label="正在加载项目">
+        <div v-for="index in 3" :key="index" class="project-work-card skeleton-card" aria-hidden="true">
+          <span class="skeleton-line skeleton-line--short"></span>
+          <span class="skeleton-line"></span>
+          <span class="skeleton-line"></span>
+        </div>
+      </div>
+
+      <div v-else-if="projectQueues.length === 0" class="empty-state card">
+        <div class="empty-state-mark" aria-hidden="true">✓</div>
+        <div class="empty-state-text">当前没有需要你处理的项目</div>
+        <p>可能是所有条目已经完成，或二校正在等待另一位校对员。</p>
+      </div>
+
+      <div v-else class="project-card-grid">
+        <article
+          v-for="queue in projectQueues"
+          :key="queue.project.id"
+          class="project-work-card"
+          :class="`project-work-card--${queueAction(queue).tone}`"
+        >
+          <header class="project-work-card__header">
+            <div>
+              <span class="work-state" :class="`work-state--${queueAction(queue).tone}`">
+                {{ queueAction(queue).label }}
+              </span>
+              <h3>{{ queue.project.name }}</h3>
+            </div>
+            <span class="project-progress-number">{{ progressPct(queue) }}%</span>
+          </header>
+
+          <p class="project-description">
+            {{ queue.project.description || '该项目暂未填写简介。' }}
+          </p>
+
+          <div class="progress project-progress" role="progressbar" :aria-valuenow="progressPct(queue)" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar" :style="{ width: progressPct(queue) + '%' }"></div>
+          </div>
+
+          <dl class="queue-metrics">
+            <div>
+              <dt>一校待领</dt>
+              <dd>{{ queue.firstPassPending }}</dd>
+            </div>
+            <div>
+              <dt>二校待领</dt>
+              <dd>{{ queue.secondPassPending }}</dd>
+            </div>
+            <div>
+              <dt>我的进行中</dt>
+              <dd>{{ queue.activeMine }}</dd>
+            </div>
+            <div>
+              <dt>完成</dt>
+              <dd>{{ queue.completed }} / {{ queue.total }}</dd>
+            </div>
+          </dl>
+
+          <footer class="project-work-card__footer">
+            <span>{{ queueAction(queue).detail }}</span>
+            <button
+              class="btn"
+              :class="queueAction(queue).tone === 'active' ? 'btn-success' : 'btn-primary'"
+              :disabled="claimingProject === queue.project.id || !queueAction(queue).canEnter"
+              @click="enterProject(queue)"
+            >
+              {{ claimingProject === queue.project.id ? '正在打开…' : queueAction(queue).label }}
+              <span v-if="queueAction(queue).canEnter" aria-hidden="true">→</span>
+            </button>
+          </footer>
+        </article>
+      </div>
+    </section>
+  </main>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { currentUserId } from '@/services/authService'
 import { claimNextProjectPage, listProjectQueueSummaries } from '@/services/pagesService'
+import { getProofreaderQueueAction, summarizeProofreaderQueues } from '@/lib/workspaceInsights'
 import { formatClaimConflict, formatPbError } from '@/utils/pbErrors'
 
 const router = useRouter()
@@ -78,6 +135,7 @@ const loading = ref(true)
 const claimingProject = ref('')
 const error = ref('')
 const projectQueues = ref([])
+const queueSummary = computed(() => summarizeProofreaderQueues(projectQueues.value))
 
 onMounted(async () => {
   await loadProjects()
@@ -100,7 +158,7 @@ async function loadProjects() {
 
 async function enterProject(queue) {
   const projectId = queue?.project?.id
-  if (!projectId || claimingProject.value) return
+  if (!projectId || claimingProject.value || !queueAction(queue).canEnter) return
   claimingProject.value = projectId
   error.value = ''
   try {
@@ -121,23 +179,12 @@ async function enterProject(queue) {
   }
 }
 
-function canEnterProject(queue) {
-  return Boolean(queue?.activeMine || queue?.nextPage)
-}
-
-function buttonLabel(queue) {
-  if (claimingProject.value === queue.project.id) return '处理中...'
-  if (queue.activeMine) return '继续校对'
-  if (queue.nextPage) return '接取项目'
-  return '暂无可处理'
+function queueAction(queue) {
+  return getProofreaderQueueAction(queue)
 }
 
 function progressPct(queue) {
   if (!queue?.total) return 0
   return Math.round((queue.completed / queue.total) * 100)
-}
-
-function pendingCount(queue) {
-  return Number(queue?.firstPassPending || 0) + Number(queue?.secondPassPending || 0)
 }
 </script>
