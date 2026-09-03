@@ -28,6 +28,7 @@ const (
 	externalCredentialBodyLimit = 16 * 1024
 	externalAttemptLimit        = 10
 	externalAttemptWindow       = 5 * time.Minute
+	externalAttemptMaxClients   = 10000
 )
 
 var (
@@ -361,6 +362,23 @@ func (l *externalAttemptLimiter) Allow(key string) bool {
 	defer l.mu.Unlock()
 	now := l.now()
 	entry, exists := l.entries[key]
+	if !exists && len(l.entries) >= externalAttemptMaxClients {
+		var oldestKey string
+		var oldestReset time.Time
+		for candidateKey, candidate := range l.entries {
+			if !now.Before(candidate.resetAt) {
+				delete(l.entries, candidateKey)
+				continue
+			}
+			if oldestKey == "" || candidate.resetAt.Before(oldestReset) {
+				oldestKey = candidateKey
+				oldestReset = candidate.resetAt
+			}
+		}
+		if len(l.entries) >= externalAttemptMaxClients && oldestKey != "" {
+			delete(l.entries, oldestKey)
+		}
+	}
 	if !exists || !now.Before(entry.resetAt) {
 		l.entries[key] = externalAttempt{count: 1, resetAt: now.Add(l.window)}
 		return true
