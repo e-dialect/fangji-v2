@@ -148,15 +148,29 @@ func (s *importService) register() {
 	})
 }
 
-func (s *importService) requireAdmin(c echo.Context) (*models.Record, error) {
+func (s *importService) requireProjectManager(c echo.Context, projectID string) (*models.Record, *models.Record, error) {
 	auth, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
 	if auth == nil {
-		return nil, apis.NewUnauthorizedError("登录状态已失效，请重新登录。", nil)
+		return nil, nil, apis.NewUnauthorizedError("登录状态已失效，请重新登录。", nil)
 	}
-	if auth.GetString("role") != "admin" {
-		return nil, apis.NewForbiddenError("只有管理员可以上传项目文件。", nil)
+	project, err := s.findProject(projectID)
+	if err != nil {
+		return nil, nil, err
 	}
-	return auth, nil
+	if auth.GetString("role") == "platform_admin" || project.GetString("admin") == auth.Id {
+		return auth, project, nil
+	}
+	memberships, err := s.app.Dao().FindRecordsByFilter(
+		"project_memberships",
+		fmt.Sprintf(`project = %q && user = %q && role = "manager"`, projectID, auth.Id),
+		"",
+		1,
+		0,
+	)
+	if err == nil && len(memberships) > 0 {
+		return auth, project, nil
+	}
+	return nil, nil, apis.NewForbiddenError("只有项目所有者或管理员可以上传项目文件。", err)
 }
 
 func (s *importService) findProject(projectID string) (*models.Record, error) {
@@ -170,14 +184,10 @@ func (s *importService) findProject(projectID string) (*models.Record, error) {
 func (s *importService) uploadCSV(c echo.Context) error {
 	requestID := ensureRequestID(c)
 	inspectOnly := strings.EqualFold(strings.TrimSpace(c.FormValue("inspect_only")), "true")
-	auth, err := s.requireAdmin(c)
-	if err != nil {
-		logUploadRejected(requestID, "csv", c.PathParam("projectId"), "authorization", "CSV upload authorization failed", err)
-		return err
-	}
 	projectID := c.PathParam("projectId")
-	if _, err := s.findProject(projectID); err != nil {
-		logUploadRejected(requestID, "csv", projectID, "project_lookup", "CSV project lookup failed", err)
+	auth, _, err := s.requireProjectManager(c, projectID)
+	if err != nil {
+		logUploadRejected(requestID, "csv", projectID, "authorization", "CSV upload authorization failed", err)
 		return err
 	}
 	logUpload("info", "upload_received", map[string]any{
@@ -314,15 +324,15 @@ func (s *importService) uploadCSV(c echo.Context) error {
 
 func (s *importService) commitCSVImport(c echo.Context) error {
 	requestID := ensureRequestID(c)
-	if _, err := s.requireAdmin(c); err != nil {
-		logUploadRejected(requestID, "csv", "", "authorization", "CSV commit authorization failed", err)
-		return err
-	}
 	jobID := c.PathParam("jobId")
 	job, err := s.app.Dao().FindRecordById("import_jobs", jobID)
 	if err != nil {
 		logUploadRejected(requestID, "csv", "", "job_lookup", "CSV inspection job was not found", err)
 		return apis.NewNotFoundError("CSV 预检作业不存在或已被删除。", err)
+	}
+	if _, _, err := s.requireProjectManager(c, job.GetString("project")); err != nil {
+		logUploadRejected(requestID, "csv", job.GetString("project"), "authorization", "CSV commit authorization failed", err)
+		return err
 	}
 	if job.GetString("status") != "validated" {
 		return apis.NewBadRequestError("CSV 只有在后端预检通过后才能确认导入。", nil)
@@ -351,14 +361,10 @@ func (s *importService) commitCSVImport(c echo.Context) error {
 
 func (s *importService) uploadPDF(c echo.Context) error {
 	requestID := ensureRequestID(c)
-	_, err := s.requireAdmin(c)
-	if err != nil {
-		logUploadRejected(requestID, "pdf", c.PathParam("projectId"), "authorization", "PDF upload authorization failed", err)
-		return err
-	}
 	projectID := c.PathParam("projectId")
-	if _, err := s.findProject(projectID); err != nil {
-		logUploadRejected(requestID, "pdf", projectID, "project_lookup", "PDF project lookup failed", err)
+	_, _, err := s.requireProjectManager(c, projectID)
+	if err != nil {
+		logUploadRejected(requestID, "pdf", projectID, "authorization", "PDF upload authorization failed", err)
 		return err
 	}
 	logUpload("info", "upload_received", map[string]any{

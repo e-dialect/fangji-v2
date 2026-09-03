@@ -11,35 +11,35 @@
 //   (such as status transition concurrency checks).
 //
 // users (built-in _pb_users_auth_):
-//   - listRule:   @request.auth.id != "" && @request.auth.role = "admin"
-//   - viewRule:   @request.auth.id != "" && (@request.auth.id = id || @request.auth.role = "admin")
+//   - listRule:   @request.auth.id != "" && @request.auth.role = "platform_admin"
+//   - viewRule:   @request.auth.id != "" && (@request.auth.id = id || @request.auth.role = "platform_admin")
 //   - createRule: ""   (open registration)
 //   - updateRule: @request.auth.id = id
-//   - deleteRule: @request.auth.role = "admin"
+//   - deleteRule: @request.auth.role = "platform_admin"
 //
 // projects:
 //   - listRule:   @request.auth.id != ""
 //   - viewRule:   @request.auth.id != ""
-//   - createRule: @request.auth.role = "admin"
-//   - updateRule: @request.auth.role = "admin"
-//   - deleteRule: @request.auth.role = "admin"
+//   - createRule: @request.auth.role = "platform_admin"
+//   - updateRule: @request.auth.role = "platform_admin"
+//   - deleteRule: @request.auth.role = "platform_admin"
 //
 // project_files:
 //   - listRule:   @request.auth.id != ""
 //   - viewRule:   @request.auth.id != ""
-//   - createRule: @request.auth.role = "admin"
-//   - updateRule: @request.auth.role = "admin"
-//   - deleteRule: @request.auth.role = "admin"
+//   - createRule: @request.auth.role = "platform_admin"
+//   - updateRule: @request.auth.role = "platform_admin"
+//   - deleteRule: @request.auth.role = "platform_admin"
 //
 // pages:
 //   - listRule:   @request.auth.id != ""
 //   - viewRule:   @request.auth.id != ""
-//   - createRule: @request.auth.role = "admin"
+//   - createRule: @request.auth.role = "platform_admin"
 //   - updateRule:
 //       admin 全量可更新
 //       proofreader 可认领 pending，且可更新自己负责的 claimed/proofreading/rejected
 //       proofreader 可领取 pending 或 proofread（二校）页面，且可更新自己负责的页面
-//   - deleteRule: @request.auth.role = "admin"
+//   - deleteRule: @request.auth.role = "platform_admin"
 
 onAfterBootstrap((e) => {
   if (($os.getenv("FANGJI_SKIP_ADMIN_BOOTSTRAP") || "").trim() === "1") {
@@ -88,8 +88,8 @@ onAfterBootstrap((e) => {
 
     if (existing) {
       let changed = false
-      if (existing.getString("role") !== "admin") {
-        existing.set("role", "admin")
+      if (existing.getString("role") !== "platform_admin") {
+        existing.set("role", "platform_admin")
         changed = true
       }
       if (!existing.verified()) {
@@ -112,7 +112,7 @@ onAfterBootstrap((e) => {
     record.setPassword(password)
     record.setVerified(true)
     record.set("name", name)
-    record.set("role", "admin")
+    record.set("role", "platform_admin")
     dao.saveRecord(record)
     console.log("Created initial app admin:", email)
   }
@@ -168,18 +168,18 @@ onRecordAfterCreateRequest((e) => {
   console.log("New project_file uploaded:", e.record.getId())
 }, "project_files")
 
-// Hook: force public registration users to proofreader role.
+// Hook: force public registration users to the unprivileged global role.
 // This keeps role assignment fixed and prevents privilege escalation at signup.
 onRecordBeforeCreateRequest((e) => {
-  e.record.set("role", "proofreader")
+  e.record.set("role", "user")
 }, "users")
 
 // A signed-in user may update profile fields, but role assignment is an
 // administrator-only operation. Registration protection alone is not enough:
-// without this check a proofreader could PATCH their own role to admin.
+// Without this check a regular user could PATCH their own role to platform_admin.
 onRecordBeforeUpdateRequest((e) => {
   const authRecord = e.httpContext?.get && e.httpContext.get("authRecord")
-  if (authRecord?.getString && authRecord.getString("role") === "admin") {
+  if (authRecord?.getString && authRecord.getString("role") === "platform_admin") {
     return
   }
 
@@ -200,7 +200,7 @@ onRecordBeforeUpdateRequest((e) => {
 //   and a second proofreading pass cannot be claimed by the first proofreader.
 onRecordBeforeUpdateRequest((e) => {
   const authRecord = e.httpContext?.get && e.httpContext.get("authRecord")
-  if (authRecord?.getString && authRecord.getString("role") === "admin") {
+  if (authRecord?.getString && authRecord.getString("role") === "platform_admin") {
     return
   }
 

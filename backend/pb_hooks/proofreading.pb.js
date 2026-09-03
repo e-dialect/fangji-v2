@@ -5,10 +5,9 @@ const FANGJI_API = "/api/fangji"
 // Claiming is serialized in a database transaction. An existing active task in
 // the same project always wins; otherwise the first eligible queue item is used.
 routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
+  const { canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)
   const auth = c.get("authRecord")
-  if (!auth || auth.getString("role") !== "proofreader") {
-    throw new ForbiddenError("无权执行此操作")
-  }
+  if (!auth) throw new ForbiddenError("无权执行此操作")
   const summarize = (page) => ({
     id: page.getId(),
     project: page.getString("project"),
@@ -32,6 +31,7 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
     } catch {
       throw new NotFoundError("项目不存在")
     }
+    if (!proofCanProofread(txDao, projectId, auth)) throw new ForbiddenError("你不是该项目的校对员")
 
     const active = txDao.findRecordsByFilter(
       "pages",
@@ -75,8 +75,9 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
 // each selected pending page exactly once. This supports paginated admin views
 // while stale or cross-project selections are rejected in the transaction.
 routerAdd("POST", `${FANGJI_API}/projects/:projectId/pages/reorder`, (c) => {
+  const { canManage: proofCanManage } = require(`${__hooks}/lib/project_access.js`)
   const auth = c.get("authRecord")
-  if (!auth || auth.getString("role") !== "admin") throw new ForbiddenError("无权执行此操作")
+  if (!auth) throw new ForbiddenError("无权执行此操作")
   const projectId = c.pathParam("projectId")
   const body = new DynamicModel({ orderedIds: [] })
   c.bind(body)
@@ -87,7 +88,9 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/pages/reorder`, (c) => {
   if (new Set(orderedIds).size !== orderedIds.length) throw new BadRequestError("待校对条目不能重复")
 
   $app.dao().runInTransaction((txDao) => {
-    try { txDao.findRecordById("projects", projectId) } catch { throw new NotFoundError("项目不存在") }
+    let project = null
+    try { project = txDao.findRecordById("projects", projectId) } catch { throw new NotFoundError("项目不存在") }
+    if (!proofCanManage(txDao, project, auth)) throw new ForbiddenError("你没有管理该项目的权限")
     const pending = orderedIds.map((id) => {
       let page = null
       try { page = txDao.findRecordById("pages", id) } catch { throw new BadRequestError("待校对条目已变化，请刷新后重试") }
@@ -119,8 +122,9 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/pages/reorder`, (c) => {
 // Delete and project-wide resequencing are atomic. Only pages that are still
 // pending at transaction time may be deleted.
 routerAdd("POST", `${FANGJI_API}/projects/:projectId/pages/delete-pending`, (c) => {
+  const { canManage: proofCanManage } = require(`${__hooks}/lib/project_access.js`)
   const auth = c.get("authRecord")
-  if (!auth || auth.getString("role") !== "admin") throw new ForbiddenError("无权执行此操作")
+  if (!auth) throw new ForbiddenError("无权执行此操作")
   const projectId = c.pathParam("projectId")
   const body = new DynamicModel({ ids: [] })
   c.bind(body)
@@ -131,7 +135,9 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/pages/delete-pending`, (c) 
   if (new Set(ids).size !== ids.length) throw new BadRequestError("待删除条目不能重复")
 
   $app.dao().runInTransaction((txDao) => {
-    try { txDao.findRecordById("projects", projectId) } catch { throw new NotFoundError("项目不存在") }
+    let project = null
+    try { project = txDao.findRecordById("projects", projectId) } catch { throw new NotFoundError("项目不存在") }
+    if (!proofCanManage(txDao, project, auth)) throw new ForbiddenError("你没有管理该项目的权限")
     const targets = ids.map((id) => {
       let page = null
       try { page = txDao.findRecordById("pages", id) } catch { throw new BadRequestError("待删除条目不存在") }
@@ -166,10 +172,9 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/pages/delete-pending`, (c) 
 // The complete pass submission and comparison happens atomically on the
 // server. First-pass content is persisted only in the private attempts table.
 routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
+  const { canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)
   const auth = c.get("authRecord")
-  if (!auth || auth.getString("role") !== "proofreader") {
-    throw new ForbiddenError("无权执行此操作")
-  }
+  if (!auth) throw new ForbiddenError("无权执行此操作")
   const userId = auth.getId()
   const pageId = c.pathParam("pageId")
   const body = new DynamicModel({ rowJson: "", text: "" })
@@ -219,6 +224,9 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
       page = txDao.findRecordById("pages", pageId)
     } catch {
       throw new NotFoundError("条目不存在")
+    }
+    if (!proofCanProofread(txDao, page.getString("project"), auth)) {
+      throw new ForbiddenError("你不是该项目的校对员")
     }
 
     const status = page.getString("status")
@@ -346,10 +354,9 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
 }, $apis.requireRecordAuth("users"))
 
 routerAdd("GET", `${FANGJI_API}/pages/:pageId/arbitration`, (c) => {
+  const { canManage: proofCanManage } = require(`${__hooks}/lib/project_access.js`)
   const auth = c.get("authRecord")
-  if (!auth || auth.getString("role") !== "admin") {
-    throw new ForbiddenError("无权执行此操作")
-  }
+  if (!auth) throw new ForbiddenError("无权执行此操作")
   const summarizeAttempt = (dao, attempt) => {
     let displayName = attempt.getString("proofreader")
     try {
@@ -378,6 +385,8 @@ routerAdd("GET", `${FANGJI_API}/pages/:pageId/arbitration`, (c) => {
   } catch {
     throw new NotFoundError("条目不存在")
   }
+  const project = dao.findRecordById("projects", page.getString("project"))
+  if (!proofCanManage(dao, project, auth)) throw new ForbiddenError("你没有管理该项目的权限")
   if (page.getString("status") !== "arbitration") {
     throw new BadRequestError("该条目当前不需要仲裁")
   }
@@ -412,10 +421,9 @@ routerAdd("GET", `${FANGJI_API}/pages/:pageId/arbitration`, (c) => {
 }, $apis.requireRecordAuth("users"))
 
 routerAdd("POST", `${FANGJI_API}/pages/:pageId/arbitrate`, (c) => {
+  const { canManage: proofCanManage } = require(`${__hooks}/lib/project_access.js`)
   const auth = c.get("authRecord")
-  if (!auth || auth.getString("role") !== "admin") {
-    throw new ForbiddenError("无权执行此操作")
-  }
+  if (!auth) throw new ForbiddenError("无权执行此操作")
   const pageId = c.pathParam("pageId")
   const body = new DynamicModel({ rowJson: "", text: "", note: "" })
   c.bind(body)
@@ -456,6 +464,8 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/arbitrate`, (c) => {
     } catch {
       throw new NotFoundError("条目不存在")
     }
+    const project = txDao.findRecordById("projects", page.getString("project"))
+    if (!proofCanManage(txDao, project, auth)) throw new ForbiddenError("你没有管理该项目的权限")
     if (page.getString("status") !== "arbitration") {
       throw new BadRequestError("该条目当前不需要仲裁")
     }
@@ -512,9 +522,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/arbitrate`, (c) => {
 
 routerAdd("GET", `${FANGJI_API}/proofreader-stats`, (c) => {
   const auth = c.get("authRecord")
-  if (!auth || auth.getString("role") !== "proofreader") {
-    throw new ForbiddenError("无权执行此操作")
-  }
+  if (!auth) throw new ForbiddenError("无权执行此操作")
   const dao = $app.dao()
   const aggregated = arrayOf(new DynamicModel({
     user_id: "",
