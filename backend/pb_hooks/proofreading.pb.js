@@ -6,9 +6,16 @@ const FANGJI_API = "/api/fangji"
 // the same project always wins; otherwise the first eligible queue item is used.
 routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
   const { canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)
+  const {
+    leaseForPage: proofLeaseForPage,
+    queueStatusForPage: proofQueueStatusForPage,
+    leaseExpired: proofLeaseExpired,
+    issueLease: proofIssueLease,
+    clearLease: proofClearLease
+  } = require(`${__hooks}/lib/task_leases.js`)
   const auth = c.get("authRecord")
   if (!auth) throw new ForbiddenError("无权执行此操作")
-  const summarize = (page) => ({
+  const summarize = (page, issued) => ({
     id: page.getId(),
     project: page.getString("project"),
     project_file: page.getString("project_file"),
@@ -19,11 +26,13 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
     first_proofreader: page.getString("first_proofreader"),
     second_proofreader: page.getString("second_proofreader"),
     proofread_round: page.getInt("proofread_round") || 1,
-    mismatch_count: page.getInt("mismatch_count") || 0
+    mismatch_count: page.getInt("mismatch_count") || 0,
+    leaseToken: issued.token,
+    leaseExpiresAt: issued.expiresAt
   })
   const userId = auth.getId()
   const projectId = c.pathParam("projectId")
-  let claimed = null
+  let response = null
 
   $app.dao().runInTransaction((txDao) => {
     try {
@@ -41,34 +50,81 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
       0
     )
     if (active.length) {
-      claimed = active[0]
-      if (claimed.getString("status") === "claimed") {
-        claimed.set("status", "proofreading")
-        txDao.saveRecord(claimed)
-      }
+      const claimed = active[0]
+      const existingLease = proofLeaseForPage(txDao, claimed.getId())
+      const queueStatus = proofQueueStatusForPage(claimed, existingLease)
+      const issued = proofIssueLease(txDao, claimed, userId, queueStatus)
+      claimed.set("status", "proofreading")
+      claimed.set("proofreader", userId)
+      txDao.saveRecord(claimed)
+      response = summarize(claimed, issued)
       return
     }
 
     const candidates = txDao.findRecordsByFilter(
       "pages",
-      `project = "${projectId}" && (status = "pending" || status = "proofread")`,
+      `project = "${projectId}" && (status = "pending" || status = "proofread" || status = "claimed" || status = "proofreading")`,
       "page_number",
       100000,
       0
     )
     for (const page of candidates) {
-      if (page.getString("status") === "proofread" && page.getString("first_proofreader") === userId) {
+      const status = page.getString("status")
+      let queueStatus = status
+      if (status === "claimed" || status === "proofreading") {
+        const existingLease = proofLeaseForPage(txDao, page.getId())
+        if (existingLease && !proofLeaseExpired(existingLease)) continue
+        queueStatus = proofQueueStatusForPage(page, existingLease)
+        if (!existingLease) proofClearLease(txDao, page)
+      }
+      if (queueStatus === "proofread" && page.getString("first_proofreader") === userId) {
         continue
       }
+      const issued = proofIssueLease(txDao, page, userId, queueStatus)
       page.set("proofreader", userId)
       page.set("status", "proofreading")
       txDao.saveRecord(page)
-      claimed = page
+      response = summarize(page, issued)
       break
     }
   })
 
-  return c.json(200, claimed ? summarize(claimed) : null)
+  return c.json(200, response)
+}, $apis.requireRecordAuth("users"))
+
+routerAdd("POST", `${FANGJI_API}/pages/:pageId/lease/renew`, (c) => {
+  const { canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)
+  const { renewLease: proofRenewLease } = require(`${__hooks}/lib/task_leases.js`)
+  const auth = c.get("authRecord")
+  if (!auth) throw new ForbiddenError("无权执行此操作")
+  const pageId = c.pathParam("pageId")
+  const body = new DynamicModel({ leaseToken: "" })
+  c.bind(body)
+  let expiresAt = ""
+  $app.dao().runInTransaction((txDao) => {
+    let page = null
+    try { page = txDao.findRecordById("pages", pageId) } catch { throw new NotFoundError("条目不存在") }
+    if (!proofCanProofread(txDao, page.getString("project"), auth)) throw new ForbiddenError("你不是该项目的校对员")
+    expiresAt = proofRenewLease(txDao, page, auth.getId(), body.leaseToken)
+  })
+  return c.json(200, { pageId, leaseExpiresAt: expiresAt })
+}, $apis.requireRecordAuth("users"))
+
+routerAdd("POST", `${FANGJI_API}/pages/:pageId/release`, (c) => {
+  const { canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)
+  const { releaseLease: proofReleaseLease } = require(`${__hooks}/lib/task_leases.js`)
+  const auth = c.get("authRecord")
+  if (!auth) throw new ForbiddenError("无权执行此操作")
+  const pageId = c.pathParam("pageId")
+  const body = new DynamicModel({ leaseToken: "" })
+  c.bind(body)
+  $app.dao().runInTransaction((txDao) => {
+    let page = null
+    try { page = txDao.findRecordById("pages", pageId) } catch { throw new NotFoundError("条目不存在") }
+    if (!proofCanProofread(txDao, page.getString("project"), auth)) throw new ForbiddenError("你不是该项目的校对员")
+    proofReleaseLease(txDao, page, auth.getId(), body.leaseToken)
+  })
+  return c.noContent(204)
 }, $apis.requireRecordAuth("users"))
 
 // Reordering is a single server-side transaction. The request must contain
@@ -173,11 +229,12 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/pages/delete-pending`, (c) 
 // server. First-pass content is persisted only in the private attempts table.
 routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
   const { canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)
+  const { requireLease: proofRequireLease, clearLease: proofClearLease } = require(`${__hooks}/lib/task_leases.js`)
   const auth = c.get("authRecord")
   if (!auth) throw new ForbiddenError("无权执行此操作")
   const userId = auth.getId()
   const pageId = c.pathParam("pageId")
-  const body = new DynamicModel({ rowJson: "", text: "" })
+  const body = new DynamicModel({ rowJson: "", text: "", leaseToken: "" })
   c.bind(body)
   const parseRowObject = (raw) => {
     const value = String(raw || "")
@@ -233,6 +290,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
     if ((status !== "claimed" && status !== "proofreading") || page.getString("proofreader") !== userId) {
       throw new BadRequestError("该条目当前不属于你，请返回项目大厅刷新后重试")
     }
+    proofRequireLease(txDao, page, userId, body.leaseToken)
 
     const validatedRow = validateSubmittedRow(body.rowJson, page)
     const parsedRow = validatedRow.parsed
@@ -267,6 +325,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
       page.set("proofread_at", now)
       page.set("status", "proofread")
       page.set("proofreader", null)
+      proofClearLease(txDao, page)
       txDao.saveRecord(page)
 
       response = {
@@ -317,6 +376,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
     page.set("second_proofread_at", now)
     page.set("proofread_at", now)
     page.set("proofreader", null)
+    proofClearLease(txDao, page)
 
     if (isMatch) {
       page.set("proofread_row_json", rowJson)
