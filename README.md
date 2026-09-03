@@ -1,6 +1,6 @@
 # 方辑 Fangji v2
 
-方辑 v2 是一个面向方言材料整理的在线校对系统。项目使用 **Vue 3 + Vite + PocketBase** 构建，支持管理员创建项目、上传 PDF 原文、导入 CSV 条目，并由校对员按项目进行两轮独立校对。
+方辑 v2 是一个面向方言材料整理的在线校对系统。项目使用 **Vue 3 + Vite + PocketBase** 构建，支持按项目分配所有者、管理员和校对员，由获得白名单授权的用户创建项目、准备 PDF/CSV 材料并组织独立校对。
 
 当前版本采用“双人二校 + 管理员仲裁”流程：同一条目先由一位校对员完成第一次校对，再由另一位校对员完成第二次校对。两次结果完全一致时条目自动完成；若不一致，系统会永久保留双方结果并转入管理员仲裁。
 
@@ -19,13 +19,17 @@
 
 | 角色 | 入口 | 主要功能 |
 |------|------|----------|
-| 管理员 `admin` | `/admin` | 创建项目、上传 PDF、导入 CSV、查看进度、调整待校对条目顺序、删除待校对条目、导出结果 |
-| 校对员 `proofreader` | `/tasks` | 查看项目队列、接取项目下一条任务、校对结构化字段、使用 IPA/BUC 键盘、查看个人统计 |
+| 平台管理员 `platform_admin` | `/workspace` | 管理项目创建白名单与额度，并可维护全部项目 |
+| 项目所有者 / 管理员 | `/admin` | 配置成员与访问方式、准备 PDF/CSV、查看进度、仲裁和导出结果 |
+| 项目校对员 | `/tasks` | 查看自己的项目队列、接取任务、校对结构化字段、使用 IPA/BUC 键盘、查看个人统计 |
 
 核心能力：
 
-- 基于 PocketBase 的注册、登录、角色权限控制。
-- 管理员维护项目、PDF 文件和 CSV 条目。
+- 基于 PocketBase 的注册、登录、平台角色和项目级能力控制。
+- 项目创建默认采用白名单：平台管理员不限量，普通用户须获授权并可设置额度。
+- 项目支持指定成员、公开加入和口令加入；加入后成员身份持久保留。
+- 同一用户可在不同项目承担不同职责，同一项目内管理员和校对员互斥。
+- 项目所有者或管理员维护项目、PDF 文件和 CSV 条目。
 - CSV 每行对应一条校对任务，`PDF页码` 用于定位原文页。
 - 编辑器左右分栏显示 PDF 原文和纵向结构化字段卡；每个字段同时展示导入原文、当前结果和修改状态。
 - 内置莆仙方言 IPA 键盘，包含音标、数字上标、大词典拼音方案和平话字 BUC 字符。
@@ -265,15 +269,18 @@ docker compose logs -f frontend
 
 1. 启动 PocketBase。
 2. 确认迁移自动创建或更新以下 collections：
-   - `users`：内置 Auth 集合，扩展 `role` 字段，当前有效角色为 `admin`、`proofreader`。
-   - `projects`：校对项目。
+   - `users`：内置 Auth 集合，扩展 `role` 字段，当前有效全局角色为 `platform_admin`、`user`。
+   - `projects`：校对项目，`admin` 字段保存唯一所有者，并配置新成员访问方式。
+   - `project_memberships`：项目管理员或校对员关系；每个用户在同一项目只有一个角色。
+   - `project_creator_grants`：普通用户的项目创建授权、可选额度和审计时间。
+   - `project_access_secrets`：口令加入项目的盐值和摘要，不保存明文口令。
    - `project_files`：项目 PDF 文件。
    - `pages`：待校对条目、任务状态和最终结果。
    - `proofreading_attempts`：每轮一校、二校和仲裁结果；校对员只能读取自己的尝试。
 3. 创建业务用户：
    - Docker 部署时，设置 `APP_ADMIN_EMAIL` 和 `APP_ADMIN_PASSWORD` 后会自动创建业务管理员。
    - Docker 部署时，设置 `PB_ADMIN_EMAIL` 和 `PB_ADMIN_PASSWORD` 后会自动创建 PocketBase Admin UI 管理员。
-   - 公开注册入口创建的用户会被后端 hook 固定为 `proofreader`。
+   - 公开注册入口创建的用户会被后端 hook 固定为 `user`，默认没有项目权限。
 
 不要直接修改已经执行过的迁移文件。需要调整 schema、权限或数据修复时，请新增迁移文件。
 
@@ -282,16 +289,19 @@ docker compose logs -f frontend
 ### 1. 登录与路由
 
 - 未登录用户只能访问 `/login` 和 `/register`。
-- `admin` 登录后进入 `/admin`。
-- `proofreader` 登录后进入 `/tasks`。
-- 当前版本没有审核员工作台，旧迁移中的 `reviewer` 角色会在最新迁移中转为 `proofreader`。
+- 所有用户登录后进入 `/workspace`，入口按当前项目能力显示。
+- 平台管理员可进入“创建权限”，向普通用户授权、设置额度或撤销授权。
+- 获得项目管理能力的用户可进入 `/admin`；项目校对员可进入 `/tasks`。
+- 旧的全局 `admin` 会迁移为 `platform_admin`，旧的全局 `proofreader` 会迁移为 `user` 并保留为现有项目的校对成员。
 
-### 2. 管理员创建项目
+### 2. 创建与开放项目
 
-1. 使用 `admin` 账号登录。
-2. 在管理员控制台点击“创建新项目”。
-3. 填写项目名称和简介。
+1. 使用平台管理员账号，或由平台管理员给普通用户开放项目创建权限。
+2. 在工作台点击“创建项目”；普通用户达到额度后不会显示可用入口，服务端也会拒绝超额创建。
+3. 填写项目名称、简介和访问方式。新项目默认采用“指定成员”。
 4. 创建成功后进入项目详情页。
+
+创建者自动成为项目唯一所有者。所有者和项目管理员可在项目设置中添加成员，并在“公开加入”“指定成员”“口令加入”之间切换；切换方式或修改口令不会移除已有成员。删除项目或转移所有权会立即释放原所有者占用的创建额度。
 
 项目详情页会展示总页数、已校对数、校对完成数和完成进度。
 
@@ -350,7 +360,7 @@ PDF 用于校对员编辑时预览原文。文件只上传一次，后端会检�
 
 ### 7. 校对员接取项目
 
-1. 使用 `proofreader` 账号登录。
+1. 使用已被分配为该项目校对员的账号登录，或先加入公开/口令项目。
 2. 进入“项目大厅”。
 3. 查看各项目的可领取任务、我的进行中任务和完成进度。
 4. 点击“领取任务”或“继续校对”。界面只预告即将打开的条号，不显示其内部轮次。
@@ -545,6 +555,17 @@ node backend/tests/phase1_integration.mjs
 
 请只对测试数据库运行；脚本会创建并清理临时项目和用户。
 
+项目权限集成测试覆盖默认拒绝创建、有限/无限额度、并发额度边界、创建授权撤销、所有权转移、成员角色互斥、三种访问方式、成员持久性和跨项目越权拦截：
+
+```bash
+PB_URL=http://127.0.0.1:8090 \
+APP_ADMIN_EMAIL=admin@example.com \
+APP_ADMIN_PASSWORD=your-password \
+PB_ADMIN_EMAIL=pb-admin@example.com \
+PB_ADMIN_PASSWORD=your-password \
+node backend/tests/project_access_integration.mjs
+```
+
 ### 第二阶段前端测试
 
 ```bash
@@ -566,7 +587,7 @@ npm run build
 ```
 
 新增用例覆盖管理员搜索/状态组合筛选、分页边界，以及普通逗号、中文逗号和逆序范围输入。
-- 公开注册用户固定为 `proofreader`，避免注册时提权。
+- 公开注册用户固定为全局 `user`，避免注册时提权；项目职责通过独立成员关系分配。
 
 ### CSV / PDF 上传集成测试
 
@@ -626,9 +647,9 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml down -v
 docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up --build
 ```
 
-### 注册后不是管理员
+### 注册后不能创建或进入项目
 
-这是预期行为。公开注册用户会被后端 hook 固定为 `proofreader`。Docker 首次启动可通过 `APP_ADMIN_EMAIL`、`APP_ADMIN_PASSWORD` 创建业务管理员；如需使用 PocketBase Admin UI 修改 `users.role`，请按生产部署说明临时启用入口，完成后立即关闭。
+这是预期行为。公开注册用户会被后端 hook 固定为 `user`，既没有平台权限，也没有任何项目身份。Docker 首次启动可通过 `APP_ADMIN_EMAIL`、`APP_ADMIN_PASSWORD` 创建平台管理员；由平台管理员开放创建白名单，由项目所有者或管理员分配项目职责。不要通过 PocketBase Admin UI 直接写项目成员关系，以免绕过 ACL 同步。
 
 ### CSV 导入提示缺少 PDF页码
 
