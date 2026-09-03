@@ -74,9 +74,9 @@ test('workspace: summarizes page states for administrator attention', () => {
 
   assert.deepEqual(summary, {
     total: 7,
-    pendingFirst: 1,
+    unstarted: 1,
     active: 2,
-    pendingSecond: 1,
+    collecting: 1,
     arbitration: 1,
     approved: 2,
     incomplete: 5,

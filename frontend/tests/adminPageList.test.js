@@ -9,7 +9,7 @@ const pages = [
     pdf_page: 8,
     status: 'pending',
     ocr_text: '天光',
-    expand: { first_proofreader: { name: '林一' } }
+    expand: { proofreader: { name: '林一' } }
   },
   {
     id: 'two',
@@ -17,7 +17,7 @@ const pages = [
     pdf_page: 9,
     status: 'arbitration',
     ocr_text: '食饭',
-    expand: { second_proofreader: { email: 'proofreader@example.com' } }
+    expand: { proofreader: { email: 'proofreader@example.com' } }
   },
   {
     id: 'three',
