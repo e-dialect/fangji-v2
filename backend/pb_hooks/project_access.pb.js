@@ -62,6 +62,7 @@ routerAdd("GET", "/api/fangji/projects/:projectId", (c) => {
 
 routerAdd("POST", "/api/fangji/projects", (c) => {
   const { auth: fangjiAuth, creationCapability: fangjiCreationCapability, setProjectPassword: fangjiSetProjectPassword, projectJson: fangjiProjectJson, syncProjectAcl: fangjiSyncProjectAcl } = require(`${__hooks}/lib/project_access.js`)
+  const { enableDefaultKeyboard: fangjiEnableDefaultKeyboard } = require(`${__hooks}/lib/keyboards.js`)
   const auth = fangjiAuth(c)
   const body = new DynamicModel({ name: "", description: "", accessMode: "members_only", password: "" })
   c.bind(body)
@@ -85,6 +86,7 @@ routerAdd("POST", "/api/fangji/projects", (c) => {
     project.set("access_mode", accessMode)
     txDao.saveRecord(project)
     fangjiSyncProjectAcl(txDao, project.getId())
+    fangjiEnableDefaultKeyboard(txDao, project.getId())
     if (accessMode === "password") fangjiSetProjectPassword(txDao, project.getId(), body.password)
     result = fangjiProjectJson(txDao, project, auth)
   })
