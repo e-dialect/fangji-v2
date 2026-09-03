@@ -108,7 +108,7 @@
             </article>
           </div>
 
-          <IpaKeyboard @insert="insertText" />
+          <ProjectKeyboard :project-id="page.project" @insert="insertText" />
         </template>
   </DocumentReviewWorkspace>
 
@@ -157,7 +157,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import DocumentReviewWorkspace from '@/components/editor/DocumentReviewWorkspace.vue'
-import IpaKeyboard from '@/components/editor/IpaKeyboard.vue'
+import ProjectKeyboard from '@/components/editor/ProjectKeyboard.vue'
 import { useStructuredRow } from '@/composables/useStructuredRow'
 import { useTaskNeighbors } from '@/composables/useTaskNeighbors'
 import { PAGE_STATUS } from '@/constants/pageStatus'

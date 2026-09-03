@@ -71,6 +71,37 @@
         </div>
       </section>
 
+      <section class="card project-settings-section mb-6">
+        <div class="section-heading">
+          <div><h2>校对键盘</h2><p>校对员和仲裁员只能使用这里启用的键盘；未启用任何键盘时编辑器会隐藏入口。</p></div>
+          <span class="section-count">{{ enabledKeyboardIds.length }} 个已启用</span>
+        </div>
+        <div v-if="keyboardLibrary.length" class="keyboard-settings-list">
+          <div v-for="keyboard in keyboardLibrary" :key="keyboard.keyboardId" class="keyboard-settings-row">
+            <input
+              type="checkbox"
+              :checked="enabledKeyboardIds.includes(keyboard.keyboardId)"
+              :aria-label="`启用${keyboard.name}`"
+              @change="toggleKeyboard(keyboard.keyboardId, $event.target.checked)"
+            />
+            <span><strong>{{ keyboard.name }}</strong><small>{{ keyboard.description || '暂无说明' }} · {{ originLabel(keyboard.origin) }}</small></span>
+            <input
+              v-if="enabledKeyboardIds.includes(keyboard.keyboardId)"
+              v-model="defaultKeyboardId"
+              type="radio"
+              name="default-keyboard"
+              :value="keyboard.keyboardId"
+              aria-label="设为默认键盘"
+            />
+            <em v-if="defaultKeyboardId === keyboard.keyboardId">默认</em>
+          </div>
+        </div>
+        <div v-else class="text-muted">全局键盘库目前没有可用定义。</div>
+        <button class="btn btn-primary mt-3" :disabled="savingKeyboards" @click="saveKeyboardSettings">
+          {{ savingKeyboards ? '保存中…' : '保存键盘设置' }}
+        </button>
+      </section>
+
       <section v-if="project.capabilities.isOwner || project.capabilities.isPlatformAdmin" class="card project-settings-section danger-zone">
         <div class="section-heading"><div><h2>所有权与删除</h2><p>转移所有权后，你会保留为项目管理员；删除项目会释放创建额度。</p></div></div>
         <div class="danger-zone-actions">
@@ -101,6 +132,7 @@ import {
   transferProjectOwnership,
   updateProject
 } from '@/services/projectsService'
+import { configureProjectKeyboards, getProjectKeyboards, listKeyboardLibrary } from '@/services/keyboardsService'
 import { useAuthStore } from '@/stores/auth'
 import { getPbMessage } from '@/utils/pbErrors'
 
@@ -116,9 +148,13 @@ const saving = ref(false)
 const savingMember = ref(false)
 const transferring = ref(false)
 const deleting = ref(false)
+const savingKeyboards = ref(false)
 const error = ref('')
 const success = ref('')
 const nextOwnerId = ref('')
+const keyboardLibrary = ref([])
+const enabledKeyboardIds = ref([])
+const defaultKeyboardId = ref('')
 const settings = reactive({ name: '', description: '', accessMode: 'members_only', password: '' })
 const newMember = reactive({ userId: '', role: 'proofreader' })
 const accessModes = [
@@ -141,10 +177,17 @@ async function load() {
     settings.name = project.value.name
     settings.description = project.value.description || ''
     settings.accessMode = project.value.access_mode
-    ;[members.value, candidates.value] = await Promise.all([
+    const [nextMembers, nextCandidates, nextKeyboardLibrary, keyboardConfig] = await Promise.all([
       listProjectMembers(projectId),
-      listMemberCandidates(projectId)
+      listMemberCandidates(projectId),
+      listKeyboardLibrary(),
+      getProjectKeyboards(projectId)
     ])
+    members.value = nextMembers
+    candidates.value = nextCandidates
+    keyboardLibrary.value = nextKeyboardLibrary
+    enabledKeyboardIds.value = keyboardConfig.items.map((item) => item.keyboardId)
+    defaultKeyboardId.value = keyboardConfig.defaultKeyboardId || ''
   } catch (e) { error.value = getPbMessage(e, e.message || '项目配置加载失败。') }
   finally { loading.value = false }
 }
@@ -227,7 +270,35 @@ async function removeProject() {
   finally { deleting.value = false }
 }
 
+function toggleKeyboard(keyboardId, enabled) {
+  const next = enabledKeyboardIds.value.filter((id) => id !== keyboardId)
+  if (enabled) next.push(keyboardId)
+  enabledKeyboardIds.value = next
+  if (!next.includes(defaultKeyboardId.value)) defaultKeyboardId.value = next[0] || ''
+}
+
+async function saveKeyboardSettings() {
+  if (enabledKeyboardIds.value.length && !enabledKeyboardIds.value.includes(defaultKeyboardId.value)) {
+    error.value = '请从已启用键盘中选择默认键盘。'
+    return
+  }
+  savingKeyboards.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    const config = await configureProjectKeyboards(projectId, enabledKeyboardIds.value, defaultKeyboardId.value)
+    enabledKeyboardIds.value = config.items.map((item) => item.keyboardId)
+    defaultKeyboardId.value = config.defaultKeyboardId || ''
+    success.value = enabledKeyboardIds.value.length ? '项目键盘设置已保存。' : '已关闭本项目的键盘入口。'
+  } catch (e) { error.value = getPbMessage(e, '键盘设置保存失败。') }
+  finally { savingKeyboards.value = false }
+}
+
 function sourceLabel(source) {
   return ({ assigned: '管理员指定', public: '公开加入', password: '口令加入' })[source] || '管理员指定'
+}
+
+function originLabel(origin) {
+  return origin === 'preset' ? '仓库预置' : '自定义上传'
 }
 </script>

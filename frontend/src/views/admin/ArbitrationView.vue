@@ -130,7 +130,7 @@
         </div>
       </section>
 
-      <IpaKeyboard @insert="insertText" />
+      <ProjectKeyboard :project-id="projectId" @insert="insertText" />
 
       <section class="arbitration-submit-card">
         <div class="form-group">
@@ -184,7 +184,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import DocumentReviewWorkspace from '@/components/editor/DocumentReviewWorkspace.vue'
-import IpaKeyboard from '@/components/editor/IpaKeyboard.vue'
+import ProjectKeyboard from '@/components/editor/ProjectKeyboard.vue'
 import { composeRowText, safeParseRowJson } from '@/composables/useStructuredRow'
 import { getDifferingHeadersForRows, getUnresolvedHeaders } from '@/lib/workspaceInsights'
 import { currentUserId as getCurrentUserId } from '@/services/authService'

@@ -170,6 +170,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .toggle-field { display: inline-flex; align-items: center; gap: .45rem; }
 .toggle-field input { accent-color: var(--primary); }
 .grant-limit-input { max-width: 150px; }
+.keyboard-settings-list { display: grid; gap: .65rem; }
+.keyboard-settings-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: .8rem; padding: .85rem; border: 1px solid var(--gray-200); border-radius: var(--radius); }
+.keyboard-settings-row span { display: grid; gap: .2rem; }
+.keyboard-settings-row small { color: var(--gray-500); line-height: 1.5; }
+.keyboard-settings-row em { color: var(--primary); font-size: .75rem; font-style: normal; font-weight: 700; }
 .danger-zone { border-color: #fecaca; }
 .danger-zone-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 
@@ -259,6 +264,8 @@ tr:hover td { background: var(--gray-50); }
 .ipa-keyboard-heading p { margin-top: .2rem; color: var(--gray-500); font-size: .73rem; }
 .ipa-keyboard-heading > span { flex: 0 0 auto; color: var(--gray-400); font-size: .72rem; }
 .ipa-keyboard-title { font-size: .78rem; font-weight: 700; color: var(--ink); letter-spacing: .04em; }
+.keyboard-switcher { min-width: min(15rem, 45%); }
+.keyboard-switcher .form-control { padding: .45rem .65rem; font-size: .78rem; }
 .ipa-section { margin-bottom: .35rem; border: 1px solid var(--gray-100); border-radius: 6px; background: var(--gray-50); }
 .ipa-section:last-child { margin-bottom: 0; }
 .ipa-section-label { display: flex; justify-content: space-between; padding: .45rem .55rem; color: var(--gray-600); font-size: .75rem; cursor: pointer; list-style-position: inside; }
@@ -555,6 +562,8 @@ tr:hover td { background: var(--gray-50); }
   .capability-grid { grid-template-columns: 1fr; }
   .access-mode-grid { grid-template-columns: 1fr; }
   .member-add-form { grid-template-columns: 1fr; }
+  .keyboard-settings-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .keyboard-settings-row em { grid-column: 2; }
   .danger-zone-actions { align-items: stretch; flex-direction: column; }
   .page-heading { align-items: flex-start; flex-direction: column; gap: 1rem; }
   .workspace-summary { grid-template-columns: 1fr; }
