@@ -122,3 +122,10 @@ export function getDifferingHeaders(headers, firstRow, secondRow) {
     return textValue(firstRow?.[header]) !== textValue(secondRow?.[header])
   })
 }
+
+export function getUnresolvedHeaders(differingHeaders, resolvedHeaders) {
+  const resolved = resolvedHeaders instanceof Set
+    ? resolvedHeaders
+    : new Set(asList(resolvedHeaders))
+  return asList(differingHeaders).filter((header) => !resolved.has(header))
+}

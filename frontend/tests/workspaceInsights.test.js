@@ -5,6 +5,7 @@ import {
   getChangedFields,
   getDifferingHeaders,
   getProofreaderQueueAction,
+  getUnresolvedHeaders,
   sortProjectInsights,
   summarizePages,
   summarizeProofreaderQueues
@@ -105,4 +106,12 @@ test('workspace: identifies only fields that differ between arbitration attempts
     ),
     ['音标']
   )
+})
+
+test('workspace: keeps arbitration blocked until every differing field is explicitly resolved', () => {
+  assert.deepEqual(
+    getUnresolvedHeaders(['音标', '释义'], new Set(['音标'])),
+    ['释义']
+  )
+  assert.deepEqual(getUnresolvedHeaders(['音标'], ['音标']), [])
 })

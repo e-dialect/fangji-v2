@@ -1,41 +1,60 @@
 <template>
-  <div class="container page">
-    <div class="flex items-center gap-3 mb-6">
-      <RouterLink to="/admin" class="btn btn-secondary btn-sm">← 返回</RouterLink>
-      <h2 class="font-bold" style="font-size:1.5rem">{{ project?.name || '项目详情' }}</h2>
-    </div>
+  <main class="container page workspace-page">
+    <header class="page-heading project-detail-heading">
+      <div>
+        <RouterLink to="/admin" class="back-link">← 返回项目总览</RouterLink>
+        <div class="page-eyebrow">项目工作区</div>
+        <h1>{{ project?.name || '项目详情' }}</h1>
+        <p v-if="project?.description">{{ project.description }}</p>
+      </div>
+      <nav v-if="project" class="project-section-nav" aria-label="项目页面分区">
+        <a href="#project-files">文件准备</a>
+        <a href="#project-export">导出结果</a>
+        <a href="#project-entries">条目管理</a>
+      </nav>
+    </header>
 
     <div v-if="loadingProject" class="text-muted">加载中...</div>
     <div v-else-if="projectError" class="alert alert-error">{{ projectError }}</div>
     <template v-else>
       <!-- Project summary -->
-      <div class="card mb-6">
-        <div class="card-title">项目概览</div>
-        <p v-if="project.description" class="text-muted text-sm mb-4">{{ project.description }}</p>
-        <div class="grid-3">
-          <div class="stat-card">
-            <div class="stat-value">{{ pageStats.total }}</div>
-            <div class="stat-label">总页数</div>
+      <section class="card project-overview mb-6" aria-labelledby="project-overview-title">
+        <div class="project-overview__lead">
+          <div>
+            <div class="page-eyebrow">实时管线</div>
+            <h2 id="project-overview-title">{{ approvedPct }}% 已完成</h2>
+            <p>{{ pageStats.approved }} / {{ pageStats.total }} 条已形成最终结果</p>
           </div>
-          <div class="stat-card">
-            <div class="stat-value">{{ pageStats.proofread }}</div>
-            <div class="stat-label">已校对</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value">{{ pageStats.approved }}</div>
-            <div class="stat-label">校对完成</div>
+          <div class="project-completion-ring" :style="{ '--completion': approvedPct }" aria-hidden="true">
+            <span>{{ approvedPct }}%</span>
           </div>
         </div>
-        <div v-if="pageStats.total > 0" class="mt-4">
-          <div class="progress">
-            <div class="progress-bar" :style="{ width: approvedPct + '%' }"></div>
-          </div>
-          <span class="text-sm text-muted mt-1">完成进度: {{ approvedPct }}%</span>
+        <div class="project-status-actions">
+          <button type="button" :class="{ 'is-selected': selectedStatus === PAGE_STATUS.PENDING }" @click="filterByStatus(PAGE_STATUS.PENDING)">
+            <span>待一校</span><strong>{{ pageStats.pendingFirst }}</strong><small>尚未开始</small>
+          </button>
+          <button type="button" :class="{ 'is-selected': selectedStatus === ACTIVE_STATUS_FILTER }" @click="filterActivePages">
+            <span>处理中</span><strong>{{ pageStats.active }}</strong><small>校对员已领取</small>
+          </button>
+          <button type="button" :class="{ 'is-selected': selectedStatus === PAGE_STATUS.PROOFREAD }" @click="filterByStatus(PAGE_STATUS.PROOFREAD)">
+            <span>待二校</span><strong>{{ pageStats.pendingSecond }}</strong><small>等待另一人</small>
+          </button>
+          <button
+            type="button"
+            class="project-status-action--urgent"
+            :class="{ 'is-empty': pageStats.arbitration === 0, 'is-selected': selectedStatus === PAGE_STATUS.ARBITRATION }"
+            @click="filterByStatus(PAGE_STATUS.ARBITRATION)"
+          >
+            <span>待仲裁</span><strong>{{ pageStats.arbitration }}</strong><small>{{ pageStats.arbitration ? '需要管理员处理' : '当前无异常' }}</small>
+          </button>
+          <button type="button" :class="{ 'is-selected': selectedStatus === PAGE_STATUS.APPROVED }" @click="filterByStatus(PAGE_STATUS.APPROVED)">
+            <span>已完成</span><strong>{{ pageStats.approved }}</strong><small>可导出结果</small>
+          </button>
         </div>
-      </div>
+      </section>
 
       <!-- Upload section -->
-      <div class="card mb-6">
+      <section id="project-files" class="card project-section mb-6">
         <div class="card-title">上传文件</div>
 
         <div class="grid-2">
@@ -152,10 +171,10 @@
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
       <!-- Export section -->
-      <div class="card mb-6">
+      <section id="project-export" class="card project-section mb-6">
         <div class="card-title">导出结果</div>
         <p class="text-sm text-muted mb-3">
           导出当前项目的最终校对结果 CSV。只有两次校对一致后的条目会使用最终校对内容，其余条目回退到原始内容。
@@ -167,12 +186,16 @@
           <span v-if="exportError" class="alert alert-error" style="margin:0">{{ exportError }}</span>
           <span v-if="exportSuccess" class="alert alert-success" style="margin:0">{{ exportSuccess }}</span>
         </div>
-      </div>
+      </section>
 
       <!-- Pages list -->
-      <div class="card">
-        <div class="card-title">
-          文本条目列表（共 {{ pages.length }} 条<span v-if="hasActiveListFilter">，筛选出 {{ filteredPages.length }} 条</span>）
+      <section id="project-entries" ref="entriesSection" class="card project-section">
+        <div class="section-heading admin-entry-heading">
+          <div>
+            <h2>条目管理</h2>
+            <p>共 {{ pages.length }} 条<span v-if="hasActiveListFilter">，当前条件显示 {{ filteredPages.length }} 条</span>。</p>
+          </div>
+          <button v-if="hasActiveListFilter" type="button" class="btn btn-quiet btn-sm" @click="resetListFilters">查看全部条目</button>
         </div>
         <div v-if="mutationSuccess" class="alert alert-success" role="status">{{ mutationSuccess }}</div>
         <div v-if="mutationError" class="alert alert-error" role="alert">{{ mutationError }}</div>
@@ -190,6 +213,7 @@
             <span>状态</span>
             <select v-model="selectedStatus" class="form-control">
               <option value="">全部状态</option>
+              <option :value="ACTIVE_STATUS_FILTER">处理中（已认领/校对中）</option>
               <option v-for="option in statusOptions" :key="option.value" :value="option.value">
                 {{ option.label }}
               </option>
@@ -219,18 +243,19 @@
           <button type="button" class="btn btn-secondary btn-sm ml-2" @click="loadPages">重新加载</button>
         </div>
         <div v-else-if="pages.length === 0" class="empty-state">
-          <div class="empty-state-icon">📄</div>
+          <div class="empty-state-mark" aria-hidden="true">条</div>
           <div class="empty-state-text">暂无条目，请上传 CSV 文件</div>
         </div>
         <div v-else-if="filteredPages.length === 0" class="empty-state">
-          <div class="empty-state-icon">🔎</div>
+          <div class="empty-state-mark" aria-hidden="true">筛</div>
           <div class="empty-state-text">没有符合当前条件的条目</div>
           <button type="button" class="btn btn-secondary mt-3" @click="resetListFilters">清除筛选</button>
         </div>
         <div v-else>
-          <div class="admin-table-actions mb-3">
-            <div class="text-sm text-muted">
-              已选择 {{ selectedPendingIds.length }} 条待校对条目；范围按完整列表条号选择
+          <div class="admin-table-actions mb-3" :class="{ 'admin-table-actions--selected': selectedPendingIds.length > 0 }">
+            <div class="selection-summary">
+              <strong>{{ selectedPendingIds.length }}</strong>
+              <span>条待校对条目已选择<br><small>范围始终按完整列表条号计算</small></span>
             </div>
             <div class="admin-bulk-actions">
               <input
@@ -343,20 +368,20 @@
             </button>
           </nav>
         </div>
-      </div>
+      </section>
     </template>
-  </div>
+  </main>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, RouterLink } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { filterAdminPages, paginateItems, parseRangeInput } from '@/lib/adminPageList'
+import { summarizePages } from '@/lib/workspaceInsights'
 import { safeParseRowJson } from '@/composables/useStructuredRow'
 import {
   PAGE_STATUS,
   PAGE_STATUS_LABELS,
-  PROOFREAD_PROGRESS_STATUSES,
   statusBadgeClass,
   statusLabel
 } from '@/constants/pageStatus'
@@ -374,7 +399,10 @@ import { getProject } from '@/services/projectsService'
 import { getPbMessage, getPbStatus } from '@/utils/pbErrors'
 
 const route = useRoute()
+const router = useRouter()
 const projectId = Array.isArray(route.params.id) ? route.params.id[0] : route.params.id
+const ACTIVE_STATUS_FILTER = 'active'
+const initialStatus = Array.isArray(route.query.status) ? route.query.status[0] : route.query.status
 
 const project = ref(null)
 const projectError = ref('')
@@ -382,7 +410,7 @@ const pages = ref([])
 const pagesError = ref('')
 const loadingProject = ref(true)
 const loadingPages = ref(true)
-const pageStats = ref({ total: 0, proofread: 0, approved: 0 })
+const pageStats = computed(() => summarizePages(pages.value))
 
 const pdfInput = ref(null)
 const csvInput = ref(null)
@@ -404,10 +432,15 @@ const csvImportErrors = ref([])
 const exportingCsv = ref(false)
 const exportError = ref('')
 const exportSuccess = ref('')
+const entriesSection = ref(null)
 const selectedPendingIds = ref([])
 const rangeSelectInput = ref('')
 const searchQuery = ref('')
-const selectedStatus = ref('')
+const selectedStatus = ref(
+  initialStatus === ACTIVE_STATUS_FILTER || PAGE_STATUS_LABELS[initialStatus]
+    ? String(initialStatus)
+    : ''
+)
 const currentListPage = ref(1)
 const listPageSize = ref(25)
 let pdfPollGeneration = 0
@@ -415,16 +448,17 @@ let csvPollGeneration = 0
 
 const statusOptions = Object.entries(PAGE_STATUS_LABELS).map(([value, label]) => ({ value, label }))
 
-const approvedPct = computed(() => {
-  if (!pageStats.value.total) return 0
-  return Math.round((pageStats.value.approved / pageStats.value.total) * 100)
-})
+const approvedPct = computed(() => pageStats.value.completionPct)
 
 const pendingPages = computed(() => pages.value.filter((p) => p.status === PAGE_STATUS.PENDING))
-const filteredPages = computed(() => filterAdminPages(pages.value, {
-  query: searchQuery.value,
-  status: selectedStatus.value
-}))
+const filteredPages = computed(() => {
+  const filtered = filterAdminPages(pages.value, {
+    query: searchQuery.value,
+    status: selectedStatus.value === ACTIVE_STATUS_FILTER ? '' : selectedStatus.value
+  })
+  if (selectedStatus.value !== ACTIVE_STATUS_FILTER) return filtered
+  return filtered.filter((page) => [PAGE_STATUS.CLAIMED, PAGE_STATUS.PROOFREADING].includes(page.status))
+})
 const listPagination = computed(() => paginateItems(
   filteredPages.value,
   currentListPage.value,
@@ -490,6 +524,10 @@ onMounted(async () => {
   }
   loadingProject.value = false
   await loadPages()
+  if (selectedStatus.value) {
+    await nextTick()
+    scrollToEntries()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -514,9 +552,6 @@ async function loadPages() {
     } while (page <= result.totalPages)
     pages.value = allPages
     selectedPendingIds.value = selectedPendingIds.value.filter((id) => allPages.some((p) => p.id === id && p.status === PAGE_STATUS.PENDING))
-    pageStats.value.total = allPages.length
-    pageStats.value.proofread = allPages.filter(p => PROOFREAD_PROGRESS_STATUSES.includes(p.status)).length
-    pageStats.value.approved = allPages.filter(p => p.status === PAGE_STATUS.APPROVED).length
   } catch (e) {
     pagesError.value = getPbMessage(e, '条目列表加载失败，请稍后重试。')
   } finally {
@@ -528,6 +563,33 @@ function resetListFilters() {
   searchQuery.value = ''
   selectedStatus.value = ''
   currentListPage.value = 1
+  syncStatusQuery('')
+}
+
+function filterActivePages() {
+  filterByStatus(ACTIVE_STATUS_FILTER)
+}
+
+async function filterByStatus(status) {
+  selectedStatus.value = selectedStatus.value === status ? '' : status
+  currentListPage.value = 1
+  syncStatusQuery(selectedStatus.value)
+  await nextTick()
+  scrollToEntries()
+}
+
+function syncStatusQuery(status) {
+  const query = { ...route.query }
+  if (status) query.status = status
+  else delete query.status
+  router.replace({ query })
+}
+
+function scrollToEntries() {
+  entriesSection.value?.scrollIntoView({
+    behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    block: 'start'
+  })
 }
 
 function clearMutationFeedback() {
