@@ -406,6 +406,9 @@ func TestHinghwaIdentityProviderSecurityBoundaries(t *testing.T) {
 	if _, err := newHinghwaIdentityProvider("https://identity.example.test?token=secret"); err == nil {
 		t.Fatal("URL query credentials must be rejected")
 	}
+	if _, err := newHinghwaIdentityProvider("https://Sensitive%zz@identity.example.test"); err == nil || strings.Contains(err.Error(), "Sensitive") {
+		t.Fatalf("malformed URL errors must be redacted, got %v", err)
+	}
 
 	var redirected atomic.Bool
 	redirectServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,7 +32,7 @@ func newHinghwaIdentityProvider(baseURL string) (*hinghwaIdentityProvider, error
 func newHinghwaIdentityProviderWithClient(baseURL string, client *http.Client, timeout time.Duration) (*hinghwaIdentityProvider, error) {
 	base, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil {
-		return nil, fmt.Errorf("parse Hinghwa identity base URL: %w", err)
+		return nil, errors.New("Hinghwa identity base URL is invalid")
 	}
 	if base.Scheme != "https" || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 		return nil, fmt.Errorf("Hinghwa identity base URL must be an HTTPS origin or path without credentials, query, or fragment")

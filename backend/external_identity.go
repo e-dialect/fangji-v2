@@ -276,11 +276,7 @@ func (s *externalIdentityService) bindIdentity(userID, provider, subject string)
 			return err
 		}
 
-		_, err = txDao.FindFirstRecordByFilter(
-			"external_identity_mappings",
-			"user = {:user} && provider = {:provider}",
-			dbx.Params{"user": userID, "provider": provider},
-		)
+		_, err = findUserProviderMapping(txDao, userID, provider)
 		if err == nil {
 			return errProviderBound
 		}
@@ -302,6 +298,17 @@ func (s *externalIdentityService) bindIdentity(userID, provider, subject string)
 		created = true
 		return nil
 	})
+	if err != nil {
+		if mapping, lookupErr := findIdentityMapping(s.app.Dao(), provider, subject); lookupErr == nil {
+			if mapping.GetString("user") == userID {
+				return false, nil
+			}
+			return false, errIdentityOwned
+		}
+		if _, lookupErr := findUserProviderMapping(s.app.Dao(), userID, provider); lookupErr == nil {
+			return false, errProviderBound
+		}
+	}
 	return created, err
 }
 
@@ -327,6 +334,14 @@ func findIdentityMapping(dao *daos.Dao, provider, subject string) (*models.Recor
 		"external_identity_mappings",
 		"provider = {:provider} && subject = {:subject}",
 		dbx.Params{"provider": provider, "subject": subject},
+	)
+}
+
+func findUserProviderMapping(dao *daos.Dao, userID, provider string) (*models.Record, error) {
+	return dao.FindFirstRecordByFilter(
+		"external_identity_mappings",
+		"user = {:user} && provider = {:provider}",
+		dbx.Params{"user": userID, "provider": provider},
 	)
 }
 
