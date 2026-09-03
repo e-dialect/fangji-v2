@@ -166,6 +166,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .settings-form { max-width: 840px; }
 .project-settings-section h2 { font-size: 1.15rem; }
 .member-add-form { display: grid; grid-template-columns: minmax(240px, 1fr) 180px auto; gap: .65rem; align-items: center; }
+.volunteer-account-form { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: .85rem; align-items: start; }
+.volunteer-account-form__wide { grid-column: span 3; }
+.volunteer-account-form__action { align-self: end; padding-bottom: .15rem; }
+.credential-download-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; align-items: start; padding: 1rem; border: 1px solid #86c9a1; border-radius: var(--radius); background: #f0fdf4; }
+.credential-download-panel p { margin: .25rem 0 0; color: var(--gray-500); }
+.credential-account-preview { grid-column: 1 / -1; }
 .member-role-select { min-width: 140px; }
 .toggle-field { display: inline-flex; align-items: center; gap: .45rem; }
 .toggle-field input { accent-color: var(--primary); }
@@ -565,6 +571,10 @@ tr:hover td { background: var(--gray-50); }
   .capability-grid { grid-template-columns: 1fr; }
   .access-mode-grid { grid-template-columns: 1fr; }
   .member-add-form { grid-template-columns: 1fr; }
+  .volunteer-account-form { grid-template-columns: 1fr 1fr; }
+  .volunteer-account-form__wide { grid-column: 1 / -1; }
+  .credential-download-panel { grid-template-columns: 1fr; }
+  .credential-account-preview { grid-column: 1; }
   .keyboard-settings-row { grid-template-columns: auto minmax(0, 1fr) auto; }
   .keyboard-settings-row em { grid-column: 2; }
   .danger-zone-actions { align-items: stretch; flex-direction: column; }
@@ -575,6 +585,11 @@ tr:hover td { background: var(--gray-50); }
   .queue-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .queue-metrics div:nth-child(2) { border-right: 0; }
   .queue-metrics div:nth-child(-n+2) { border-bottom: 1px solid var(--gray-100); }
+}
+
+@media (max-width: 560px) {
+  .volunteer-account-form { grid-template-columns: 1fr; }
+  .volunteer-account-form__wide { grid-column: 1; }
 }
 
 @media (max-width: 640px) {

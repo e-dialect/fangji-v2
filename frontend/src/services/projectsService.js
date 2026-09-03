@@ -79,6 +79,14 @@ export async function removeProjectMember(projectId, userId) {
   })
 }
 
+export async function generateProjectVolunteers(projectId, options) {
+  return pb.send(`/api/fangji/projects/${encodeURIComponent(projectId)}/volunteers/generate`, {
+    method: 'POST',
+    body: options,
+    requestKey: null
+  })
+}
+
 export async function getAccessContext() {
   return pb.send('/api/fangji/access-context', { requestKey: null })
 }

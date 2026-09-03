@@ -39,6 +39,37 @@
 
       <section class="card project-settings-section mb-6">
         <div class="section-heading">
+          <div><h2>批量志愿者账号</h2><p>一次生成并加入本项目，所有账号首次登录都必须修改密码。</p></div>
+          <span class="section-count">单批最多 200 个</span>
+        </div>
+        <form class="volunteer-account-form" @submit.prevent="generateVolunteers">
+          <label class="form-group"><span class="form-label">账号数量</span><input v-model.number="volunteerForm.count" type="number" class="form-control" min="1" max="200" required /></label>
+          <label class="form-group"><span class="form-label">用户名规则</span><input v-model.trim="volunteerForm.usernamePattern" class="form-control" maxlength="150" required /><small class="text-muted">用 <code>{n}</code> 表示补零后的编号，例如 <code>px-{n}</code>。</small></label>
+          <label class="form-group"><span class="form-label">起始编号</span><input v-model.number="volunteerForm.startNumber" type="number" class="form-control" min="0" required /></label>
+          <label class="form-group"><span class="form-label">编号位数</span><input v-model.number="volunteerForm.digits" type="number" class="form-control" min="1" max="12" required /><small class="text-muted">例如 3 位会生成 001、002。</small></label>
+          <label class="form-group volunteer-account-form__wide"><span class="form-label">昵称规则</span><input v-model.trim="volunteerForm.nicknamePattern" class="form-control" maxlength="255" required /><small class="text-muted">同样使用 <code>{n}</code>，例如“莆仙志愿者 {n}”。</small></label>
+          <div class="volunteer-account-form__action">
+            <button class="btn btn-primary" :disabled="generatingVolunteers">{{ generatingVolunteers ? '正在生成…' : '预检并生成账号' }}</button>
+          </div>
+        </form>
+        <div v-if="generatedBatch" class="credential-download-panel mt-4">
+          <div>
+            <strong>已生成 {{ generatedBatch.count }} 个账号</strong>
+            <p>初始密码不会写入数据库或日志。请现在下载并妥善分发；刷新或离开本页后无法再次取得本批密码。</p>
+          </div>
+          <button class="btn btn-success" @click="downloadGeneratedCredentials">再次下载凭据 CSV</button>
+          <div class="table-wrapper credential-account-preview">
+            <table>
+              <thead><tr><th>昵称</th><th>用户名</th></tr></thead>
+              <tbody><tr v-for="account in generatedBatch.accounts.slice(0, 10)" :key="account.id"><td>{{ account.nickname }}</td><td><code>{{ account.username }}</code></td></tr></tbody>
+            </table>
+          </div>
+          <small v-if="generatedBatch.accounts.length > 10" class="text-muted">这里只预览前 10 个账号，完整内容见 CSV。</small>
+        </div>
+      </section>
+
+      <section class="card project-settings-section mb-6">
+        <div class="section-heading">
           <div><h2>项目成员</h2><p>同一成员在本项目内只能是管理员或校对员之一。</p></div>
           <span class="section-count">{{ members.length }} 人</span>
         </div>
@@ -129,6 +160,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   deleteProject,
+  generateProjectVolunteers,
   getProject,
   listMemberCandidates,
   listProjectMembers,
@@ -154,14 +186,17 @@ const savingMember = ref(false)
 const transferring = ref(false)
 const deleting = ref(false)
 const savingKeyboards = ref(false)
+const generatingVolunteers = ref(false)
 const error = ref('')
 const success = ref('')
 const nextOwnerId = ref('')
 const keyboardLibrary = ref([])
 const enabledKeyboardIds = ref([])
 const defaultKeyboardId = ref('')
+const generatedBatch = ref(null)
 const settings = reactive({ name: '', description: '', accessMode: 'members_only', password: '', requiredProofreads: 2 })
 const newMember = reactive({ userId: '', role: 'proofreader' })
+const volunteerForm = reactive({ count: 10, usernamePattern: 'volunteer-{n}', startNumber: 1, digits: 3, nicknamePattern: '志愿者 {n}' })
 const accessModes = [
   { value: 'members_only', label: '指定成员', description: '只有所有者或项目管理员添加的用户可以进入。' },
   { value: 'public', label: '公开加入', description: '任意已登录用户可以直接成为校对员。' },
@@ -250,6 +285,39 @@ async function removeMember(member) {
 async function reloadMembers() {
   members.value = await listProjectMembers(projectId)
   await auth.loadAccessContext({ force: true })
+}
+
+async function generateVolunteers() {
+  generatingVolunteers.value = true
+  error.value = ''
+  success.value = ''
+  try {
+    const batch = await generateProjectVolunteers(projectId, {
+      ...volunteerForm,
+      loginUrl: `${window.location.origin}/login`
+    })
+    generatedBatch.value = batch
+    await reloadMembers()
+    success.value = `已生成并加入 ${batch.count} 个志愿者账号。凭据只保留在当前页面。`
+    downloadGeneratedCredentials()
+  } catch (e) {
+    error.value = getPbMessage(e, '志愿者账号生成失败，未创建任何账号。')
+  } finally {
+    generatingVolunteers.value = false
+  }
+}
+
+function downloadGeneratedCredentials() {
+  const batch = generatedBatch.value
+  if (!batch?.csv) return
+  const url = URL.createObjectURL(new Blob([batch.csv], { type: 'text/csv;charset=utf-8' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = batch.fileName || '志愿者账号.csv'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
 }
 
 async function transferOwner() {
