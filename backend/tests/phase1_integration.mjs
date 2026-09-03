@@ -131,7 +131,7 @@ try {
   const firstSubmit = await request(`/api/fangji/pages/${page.id}/submit`, {
     method: 'POST',
     token: firstUser.token,
-    body: { rowJson: JSON.stringify(firstRow), text: '天光 清晨' }
+    body: { rowJson: JSON.stringify(firstRow), text: '天光 清晨', leaseToken: firstClaim.leaseToken }
   })
   assert.equal(firstSubmit.status, 'proofread')
 
@@ -157,7 +157,7 @@ try {
   const secondSubmit = await request(`/api/fangji/pages/${page.id}/submit`, {
     method: 'POST',
     token: secondUser.token,
-    body: { rowJson: JSON.stringify(secondRow), text: '天光 早晨' }
+    body: { rowJson: JSON.stringify(secondRow), text: '天光 早晨', leaseToken: secondClaim.leaseToken }
   })
   assert.equal(secondSubmit.status, 'arbitration')
 
@@ -201,7 +201,7 @@ try {
       status: 'pending'
     }
   })
-  await request(`/api/fangji/projects/${projectId}/claim`, {
+  const matchingFirstClaim = await request(`/api/fangji/projects/${projectId}/claim`, {
     method: 'POST',
     token: firstUser.token
   })
@@ -209,7 +209,7 @@ try {
   await request(`/api/fangji/pages/${matchingPage.id}/submit`, {
     method: 'POST',
     token: firstUser.token,
-    body: { rowJson: JSON.stringify(matchingRow), text: '食饭 吃饭' }
+    body: { rowJson: JSON.stringify(matchingRow), text: '食饭 吃饭', leaseToken: matchingFirstClaim.leaseToken }
   })
   const sameUserCannotSecond = await request(`/api/fangji/projects/${projectId}/claim`, {
     method: 'POST',
@@ -217,7 +217,7 @@ try {
   })
   assert.equal(sameUserCannotSecond, null)
 
-  await request(`/api/fangji/projects/${projectId}/claim`, {
+  const matchingSecondClaim = await request(`/api/fangji/projects/${projectId}/claim`, {
     method: 'POST',
     token: secondUser.token
   })
@@ -226,7 +226,8 @@ try {
     token: secondUser.token,
     body: {
       rowJson: JSON.stringify({ 词条: '  食饭', 释义: '吃饭  ' }),
-      text: '食饭 吃饭'
+      text: '食饭 吃饭',
+      leaseToken: matchingSecondClaim.leaseToken
     }
   })
   assert.equal(matchingSubmit.status, 'approved')

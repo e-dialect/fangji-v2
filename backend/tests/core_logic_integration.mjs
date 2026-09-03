@@ -97,26 +97,26 @@ try {
       status: 'pending'
     }
   })
-  await request(`/api/fangji/projects/${projectId}/claim`, {
+  const firstClaim = await request(`/api/fangji/projects/${projectId}/claim`, {
     method: 'POST',
     token: userAuth.token
   })
   await request(`/api/fangji/pages/${page.id}/submit`, {
     method: 'POST',
     token: userAuth.token,
-    body: { rowJson: JSON.stringify({ 词条: '天光' }), text: 'ignored' },
+    body: { rowJson: JSON.stringify({ 词条: '天光' }), text: 'ignored', leaseToken: firstClaim.leaseToken },
     expected: 400
   })
   await request(`/api/fangji/pages/${page.id}/submit`, {
     method: 'POST',
     token: userAuth.token,
-    body: { rowJson: JSON.stringify({ 词条: '天光', 释义: { value: '早晨' } }), text: 'ignored' },
+    body: { rowJson: JSON.stringify({ 词条: '天光', 释义: { value: '早晨' } }), text: 'ignored', leaseToken: firstClaim.leaseToken },
     expected: 400
   })
   await request(`/api/fangji/pages/${page.id}/submit`, {
     method: 'POST',
     token: userAuth.token,
-    body: { rowJson: JSON.stringify({ 词条: '', 释义: '  ' }), text: 'ignored' },
+    body: { rowJson: JSON.stringify({ 词条: '', 释义: '  ' }), text: 'ignored', leaseToken: firstClaim.leaseToken },
     expected: 400
   })
   await request(`/api/fangji/pages/${page.id}/submit`, {
@@ -124,7 +124,8 @@ try {
     token: userAuth.token,
     body: {
       rowJson: JSON.stringify({ 词条: '天光', 释义: '清晨' }),
-      text: '客户端伪造文本'
+      text: '客户端伪造文本',
+      leaseToken: firstClaim.leaseToken
     }
   })
   const attempts = await request(
@@ -162,7 +163,7 @@ try {
   await request(`/api/fangji/pages/${page.id}/submit`, {
     method: 'POST',
     token: secondUserAuth.token,
-    body: { rowJson: JSON.stringify({ 词条: '天光' }), text: 'ignored' },
+    body: { rowJson: JSON.stringify({ 词条: '天光' }), text: 'ignored', leaseToken: secondClaim.leaseToken },
     expected: 400
   })
   await request(`/api/fangji/pages/${page.id}/submit`, {
@@ -170,7 +171,8 @@ try {
     token: secondUserAuth.token,
     body: {
       rowJson: JSON.stringify({ 释义: '清晨', 词条: '天光' }),
-      text: '第二位客户端伪造文本'
+      text: '第二位客户端伪造文本',
+      leaseToken: secondClaim.leaseToken
     }
   })
   const approved = await request(`/api/collections/pages/records/${page.id}`, {
