@@ -26,24 +26,24 @@ test('workspace: summarizes proofreader queues around actionable work', () => {
   })
 })
 
-test('workspace: explains whether a proofreader will continue, start first pass, or start second pass', () => {
+test('workspace: keeps queue actions neutral about the proofreading pass', () => {
   assert.deepEqual(getProofreaderQueueAction({
     activeMine: 1,
     activePage: { page_number: 12, first_proofreader: 'someone-else' }
   }), {
     canEnter: true,
     label: '继续校对',
-    detail: '继续二校 · 第 12 条',
+    detail: '继续第 12 条',
     tone: 'active'
   })
 
   assert.equal(getProofreaderQueueAction({
     nextPage: { page_number: 3, status: PAGE_STATUS.PENDING }
-  }).label, '领取一校')
+  }).label, '领取任务')
 
   assert.equal(getProofreaderQueueAction({
     nextPage: { page_number: 9, status: PAGE_STATUS.PROOFREAD }
-  }).label, '领取二校')
+  }).label, '领取任务')
 
   assert.equal(getProofreaderQueueAction({ total: 4, completed: 4 }).label, '项目已完成')
   assert.equal(getProofreaderQueueAction({ total: 4, completed: 2 }).label, '等待新任务')

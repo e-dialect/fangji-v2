@@ -57,7 +57,7 @@
     <section class="editor-panel" aria-labelledby="task-panel-title">
       <header class="editor-panel-header editor-panel-header--task">
         <div class="editor-context">
-          <span>{{ projectName }} · {{ passLabel }}</span>
+          <span>{{ projectName }} · 独立校对</span>
           <strong id="task-panel-title">第 {{ page?.page_number || '—' }} 条</strong>
         </div>
         <div class="editor-toolbar" aria-label="校对任务导航">
@@ -105,7 +105,7 @@
               <span>结构化校对</span>
               <strong>{{ rowHeaders.length }} 个字段，已修改 {{ changedFields.length }} 个</strong>
             </div>
-            <span class="pass-badge">{{ passLabel }}</span>
+            <span class="pass-badge">独立校对</span>
           </div>
 
           <div class="proofread-fields">
@@ -176,7 +176,7 @@
         <div class="confirmation-dialog__mark" aria-hidden="true">校</div>
         <div>
           <div class="page-eyebrow">提交前确认</div>
-          <h2 id="submit-review-title">确认第 {{ page?.page_number }} 条{{ passLabel }}结果</h2>
+          <h2 id="submit-review-title">确认第 {{ page?.page_number }} 条校对结果</h2>
           <p v-if="changedFields.length">
             你修改了 {{ changedFields.length }} 个字段：{{ changedFields.join('、') }}。
           </p>
@@ -195,7 +195,7 @@
             class="btn btn-success"
             :disabled="saving"
             @click="submitProofread"
-          >{{ saving ? '正在提交…' : `确认提交${passLabel}` }}</button>
+          >{{ saving ? '正在提交…' : '确认提交' }}</button>
         </div>
       </section>
     </div>
@@ -211,7 +211,7 @@ import { useProjectPdf } from '@/composables/useProjectPdf'
 import { useStructuredRow } from '@/composables/useStructuredRow'
 import { useTaskNeighbors } from '@/composables/useTaskNeighbors'
 import { PAGE_STATUS } from '@/constants/pageStatus'
-import { getChangedFields, proofreadPassLabel } from '@/lib/workspaceInsights'
+import { getChangedFields } from '@/lib/workspaceInsights'
 import {
   clearTaskDraft,
   loadTaskDraft,
@@ -248,7 +248,6 @@ let draftTimer = null
 
 const currentUserId = computed(() => getCurrentUserId() || '')
 const projectName = computed(() => page.value?.expand?.project?.name || '当前项目')
-const passLabel = computed(() => proofreadPassLabel(page.value))
 const changedFields = computed(() => getChangedFields(rowHeaders.value, originalRow.value, editedRow.value))
 const hasUnsavedChanges = computed(() => {
   return Boolean(

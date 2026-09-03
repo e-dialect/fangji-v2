@@ -78,8 +78,7 @@ export async function listProjectQueueSummaries(userId) {
   const statsByProject = Object.fromEntries(projects.map((project) => [project.id, {
     project,
     total: 0,
-    firstPassPending: 0,
-    secondPassPending: 0,
+    claimable: 0,
     activeMine: 0,
     activePage: null,
     completed: 0,
@@ -96,11 +95,6 @@ export async function listProjectQueueSummaries(userId) {
       stats.completed += 1
       continue
     }
-    if (page.status === PAGE_STATUS.PENDING) {
-      stats.firstPassPending += 1
-    } else if (page.status === PAGE_STATUS.PROOFREAD) {
-      stats.secondPassPending += 1
-    }
     if (PROOFREADER_ACTIVE_STATUSES.includes(page.status) && page.proofreader === userId) {
       stats.activeMine += 1
       if (!stats.activePage || Number(page.page_number) < Number(stats.activePage.page_number)) {
@@ -108,6 +102,7 @@ export async function listProjectQueueSummaries(userId) {
       }
     }
     if (isPageClaimableBy(page, userId)) {
+      stats.claimable += 1
       if (!stats.nextPage || Number(page.page_number) < Number(stats.nextPage.page_number)) {
         stats.nextPage = page
       }
@@ -118,9 +113,7 @@ export async function listProjectQueueSummaries(userId) {
     .filter((stats) => stats.total > 0 || stats.project)
     .sort((a, b) => {
       if (b.activeMine !== a.activeMine) return b.activeMine - a.activeMine
-      const aClaimable = a.firstPassPending + a.secondPassPending
-      const bClaimable = b.firstPassPending + b.secondPassPending
-      if (bClaimable !== aClaimable) return bClaimable - aClaimable
+      if (b.claimable !== a.claimable) return b.claimable - a.claimable
       return String(a.project.name || '').localeCompare(String(b.project.name || ''), 'zh-Hans-CN')
     })
 }

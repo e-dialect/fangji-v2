@@ -4,7 +4,7 @@
       <div>
         <div class="page-eyebrow">校对工作台</div>
         <h1>从最需要你的项目开始</h1>
-        <p>进行中的任务排在最前；领取前会标明本次是一校还是二校。</p>
+        <p>进行中的任务排在最前；每次只需独立判断当前材料。</p>
       </div>
       <button class="btn btn-secondary" @click="loadProjects" :disabled="loading">
         <span aria-hidden="true">↻</span>
@@ -31,7 +31,7 @@
       <article class="workspace-stat">
         <span>整体已完成</span>
         <strong>{{ queueSummary.completedItems }}<em>/{{ queueSummary.totalItems }}</em></strong>
-        <small>条已通过双校或仲裁</small>
+        <small>条已完成校对流程</small>
       </article>
     </section>
 
@@ -55,7 +55,7 @@
       <div v-else-if="projectQueues.length === 0" class="empty-state card">
         <div class="empty-state-mark" aria-hidden="true">✓</div>
         <div class="empty-state-text">当前没有需要你处理的项目</div>
-        <p>可能是所有条目已经完成，或二校正在等待另一位校对员。</p>
+        <p>可能是所有条目已经完成，或暂时没有适合你的独立校对任务。</p>
       </div>
 
       <div v-else class="project-card-grid">
@@ -85,12 +85,8 @@
 
           <dl class="queue-metrics">
             <div>
-              <dt>一校待领</dt>
-              <dd>{{ queue.firstPassPending }}</dd>
-            </div>
-            <div>
-              <dt>二校待领</dt>
-              <dd>{{ queue.secondPassPending }}</dd>
+              <dt>可领取</dt>
+              <dd>{{ queue.claimable }}</dd>
             </div>
             <div>
               <dt>我的进行中</dt>

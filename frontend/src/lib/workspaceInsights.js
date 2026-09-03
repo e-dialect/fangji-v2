@@ -28,26 +28,21 @@ export function summarizeProofreaderQueues(queues) {
   })
 }
 
-export function proofreadPassLabel(page) {
-  return page?.status === PAGE_STATUS.PROOFREAD || page?.first_proofreader ? '二校' : '一校'
-}
-
 export function getProofreaderQueueAction(queue) {
   if (asNumber(queue?.activeMine) > 0 && queue?.activePage) {
     return {
       canEnter: true,
       label: '继续校对',
-      detail: `继续${proofreadPassLabel(queue.activePage)} · 第 ${asNumber(queue.activePage.page_number) || '—'} 条`,
+      detail: `继续第 ${asNumber(queue.activePage.page_number) || '—'} 条`,
       tone: 'active'
     }
   }
 
   if (queue?.nextPage) {
-    const pass = proofreadPassLabel(queue.nextPage)
     return {
       canEnter: true,
-      label: `领取${pass}`,
-      detail: `下一条为${pass} · 第 ${asNumber(queue.nextPage.page_number) || '—'} 条`,
+      label: '领取任务',
+      detail: `下一条为第 ${asNumber(queue.nextPage.page_number) || '—'} 条`,
       tone: 'available'
     }
   }
@@ -58,7 +53,7 @@ export function getProofreaderQueueAction(queue) {
     return {
       canEnter: false,
       label: '项目已完成',
-      detail: '全部条目已完成双校或仲裁',
+      detail: '全部条目已完成校对流程',
       tone: 'complete'
     }
   }

@@ -265,7 +265,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
         id: pageId,
         status: "proofread",
         outcome: "waiting",
-        message: "一校已提交，正在等待另一位校对员独立二校。"
+        message: "校对结果已提交，系统将继续处理该条目。"
       }
       return
     }
@@ -282,7 +282,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
       0
     )
     if (!firstAttempts.length) {
-      throw new BadRequestError("未找到该轮一校记录，请联系管理员处理")
+      throw new BadRequestError("未找到该轮所需的校对记录，请联系管理员处理")
     }
 
     const first = firstAttempts[0]
@@ -319,7 +319,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
         id: pageId,
         status: "approved",
         outcome: "matched",
-        message: "两次校对一致，该条目已完成。"
+        message: "校对结果已提交，该条目已完成。"
       }
       return
     }
@@ -334,7 +334,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
       id: pageId,
       status: "arbitration",
       outcome: "mismatched",
-      message: "两次校对不一致，已保留双方结果并转交管理员仲裁。"
+      message: "校对结果已提交，该条目将由管理员继续处理。"
     }
     })
   } catch (error) {

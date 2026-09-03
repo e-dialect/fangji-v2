@@ -40,7 +40,7 @@
         </div>
         <div class="stat-card">
           <div class="stat-value">{{ accuracyLabel }}</div>
-          <div class="stat-label">双校一致率</div>
+          <div class="stat-label">结果一致率</div>
         </div>
         <div class="stat-card">
           <div class="stat-value">{{ stats.correctCount }}</div>
@@ -51,7 +51,7 @@
       <div class="card mt-6">
         <div class="card-title">排行说明</div>
         <div class="profile-note">
-          一致率按已完成比对的校对尝试计算；等待另一人二校的尝试暂不进入分母。不一致记录会永久保留并计入统计。
+          一致率按已完成系统比对的校对尝试计算；仍在等待其他独立结果的提交暂不进入分母。不一致记录会永久保留并计入统计。
         </div>
       </div>
     </template>
