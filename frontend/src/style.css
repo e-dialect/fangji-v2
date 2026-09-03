@@ -266,6 +266,9 @@ tr:hover td { background: var(--gray-50); }
 .ipa-keyboard-title { font-size: .78rem; font-weight: 700; color: var(--ink); letter-spacing: .04em; }
 .keyboard-switcher { min-width: min(15rem, 45%); }
 .keyboard-switcher .form-control { padding: .45rem .65rem; font-size: .78rem; }
+.lease-indicator { color: var(--gray-500); font-size: .73rem; font-weight: 600; }
+.lease-indicator--lost { color: var(--danger); }
+.lease-lost-alert { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .ipa-section { margin-bottom: .35rem; border: 1px solid var(--gray-100); border-radius: 6px; background: var(--gray-50); }
 .ipa-section:last-child { margin-bottom: 0; }
 .ipa-section-label { display: flex; justify-content: space-between; padding: .45rem .55rem; color: var(--gray-600); font-size: .75rem; cursor: pointer; list-style-position: inside; }

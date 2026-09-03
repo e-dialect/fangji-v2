@@ -29,9 +29,15 @@
             :disabled="!hasNeighborTasks || saving || loadingPage"
           >下一条</button>
           <button
+            v-if="page && !leaseLost"
+            class="btn btn-quiet btn-sm"
+            :disabled="saving || releasing || !leaseToken"
+            @click="releaseCurrentTask"
+          >{{ releasing ? '释放中…' : '释放任务' }}</button>
+          <button
             class="btn btn-success btn-sm"
             @click="openSubmitReview"
-            :disabled="saving || loadingPage || !page"
+            :disabled="saving || loadingPage || !page || leaseLost || !leaseToken"
           >{{ saving ? '提交中…' : '检查并提交' }}</button>
         </div>
       </header>
@@ -43,13 +49,20 @@
         </div>
         <template v-else>
           <div v-if="saved" class="alert alert-success" role="status">{{ saved }}</div>
-          <div v-if="saveError" class="alert alert-error" role="alert">{{ saveError }}</div>
+          <div v-if="leaseLost" class="alert alert-error lease-lost-alert" role="alert">
+            <span>{{ saveError || '任务租约已失效，本地草稿仍然保留。' }}</span>
+            <button class="btn btn-secondary btn-sm" :disabled="reclaiming" @click="reclaimTask">
+              {{ reclaiming ? '重新领取中…' : '重新领取任务' }}
+            </button>
+          </div>
+          <div v-else-if="saveError" class="alert alert-error" role="alert">{{ saveError }}</div>
 
           <div class="editor-meta" aria-live="polite">
             <span class="draft-indicator" :class="{ 'draft-indicator--saved': draftStatus.includes('已保存') || draftStatus.includes('已恢复') }">
               <i aria-hidden="true"></i>
               {{ draftStatus || '修改后自动保存到本机' }}
             </span>
+            <span v-if="leaseStatus" class="lease-indicator" :class="{ 'lease-indicator--lost': leaseLost }">{{ leaseStatus }}</span>
             <span class="shortcut-hint">⌘/Ctrl+S 草稿 · ⌘/Ctrl+Enter 提交 · Alt+←/→ 切换</span>
           </div>
 
@@ -145,7 +158,7 @@
             ref="submitConfirmButton"
             type="button"
             class="btn btn-success"
-            :disabled="saving"
+            :disabled="saving || leaseLost || !leaseToken"
             @click="submitProofread"
           >{{ saving ? '正在提交…' : '确认提交' }}</button>
         </div>
@@ -169,11 +182,14 @@ import {
   setTaskFlash,
   takeTaskFlash
 } from '@/lib/taskDraft'
+import { clearTaskLease, loadTaskLease, saveTaskLease } from '@/lib/taskLease'
 import { currentUserId as getCurrentUserId } from '@/services/authService'
 import {
   claimNextProjectPage,
   getPage,
   listProofreaderNeighborTasks,
+  releaseTaskLease,
+  renewTaskLease,
   submitTwoPassProofread
 } from '@/services/pagesService'
 import { formatClaimConflict, getPbMessage } from '@/utils/pbErrors'
@@ -184,6 +200,8 @@ const router = useRouter()
 const page = ref(null)
 const loadingPage = ref(true)
 const saving = ref(false)
+const releasing = ref(false)
+const reclaiming = ref(false)
 const saved = ref('')
 const saveError = ref('')
 const initialRowJson = ref('')
@@ -192,17 +210,29 @@ const draftReady = ref(false)
 const reviewingSubmission = ref(false)
 const submitConfirmButton = ref(null)
 const activeSelection = ref({ field: '', start: null, end: null })
+const leaseToken = ref('')
+const leaseExpiresAt = ref('')
+const leaseLost = ref(false)
+const renewingLease = ref(false)
+const leaseNavigationAllowed = ref(false)
 const textareaRefs = new Map()
 let draftTimer = null
+let leaseRenewTimer = null
 
 const currentUserId = computed(() => getCurrentUserId() || '')
 const projectName = computed(() => page.value?.expand?.project?.name || '当前项目')
 const changedFields = computed(() => getChangedFields(rowHeaders.value, originalRow.value, editedRow.value))
+const leaseStatus = computed(() => {
+  if (leaseLost.value) return '租约已失效 · 草稿已保留'
+  if (!leaseExpiresAt.value) return ''
+  const date = new Date(leaseExpiresAt.value)
+  if (Number.isNaN(date.getTime())) return '任务租约已启用'
+  return `任务保留至 ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
+})
 const hasUnsavedChanges = computed(() => {
   return Boolean(
     page.value &&
     !loadingPage.value &&
-    !saving.value &&
     initialRowJson.value &&
     stringifyEditedRow() !== initialRowJson.value
   )
@@ -240,27 +270,35 @@ watch(() => route.params.id, async () => {
 }, { immediate: true })
 
 onBeforeRouteLeave(() => {
+  if (leaseNavigationAllowed.value) return true
   if (!confirmDiscardChanges()) return false
 })
 
 onBeforeRouteUpdate((to, from) => {
+  if (leaseNavigationAllowed.value) return true
   if (to.params.id !== from.params.id && !confirmDiscardChanges()) return false
 })
 
 onMounted(() => {
   window.addEventListener('beforeunload', handleBeforeUnload)
   window.addEventListener('keydown', handleEditorShortcut)
+  window.addEventListener('focus', handleLeaseActivation)
+  document.addEventListener('visibilitychange', handleLeaseActivation)
 })
 
 onBeforeUnmount(() => {
   flushDraft()
   clearDraftTimer()
+  stopLeaseRenewal()
   window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('keydown', handleEditorShortcut)
+  window.removeEventListener('focus', handleLeaseActivation)
+  document.removeEventListener('visibilitychange', handleLeaseActivation)
 })
 
 async function loadPage() {
   clearDraftTimer()
+  stopLeaseRenewal()
   reviewingSubmission.value = false
   draftReady.value = false
   loadingPage.value = true
@@ -271,6 +309,10 @@ async function loadPage() {
   initialRowJson.value = ''
   draftStatus.value = ''
   activeSelection.value = { field: '', start: null, end: null }
+  leaseToken.value = ''
+  leaseExpiresAt.value = ''
+  leaseLost.value = false
+  leaseNavigationAllowed.value = false
   textareaRefs.clear()
 
   try {
@@ -278,6 +320,7 @@ async function loadPage() {
     hydrateForProofread(page.value)
     initialRowJson.value = stringifyEditedRow()
     restoreDraft()
+    await restoreOrAcquireLease()
     await loadNeighbors()
     const flash = takeTaskFlash(window.sessionStorage)
     if (flash) saved.value = flash
@@ -358,7 +401,7 @@ async function restoreField(header) {
 }
 
 async function openSubmitReview() {
-  if (saving.value || loadingPage.value || !page.value) return
+  if (saving.value || loadingPage.value || !page.value || leaseLost.value || !leaseToken.value) return
   flushDraft()
   reviewingSubmission.value = true
   await nextTick()
@@ -474,7 +517,7 @@ function handleEditorShortcut(event) {
 }
 
 async function submitProofread() {
-  if (saving.value || !page.value) return
+  if (saving.value || !page.value || leaseLost.value || !leaseToken.value) return
   saving.value = true
   saved.value = ''
   saveError.value = ''
@@ -485,7 +528,8 @@ async function submitProofread() {
   try {
     const result = await submitTwoPassProofread(page.value.id, userId, {
       rowJson,
-      text
+      text,
+      leaseToken: leaseToken.value
     })
     reviewingSubmission.value = false
     initialRowJson.value = rowJson
@@ -494,6 +538,7 @@ async function submitProofread() {
       userId,
       pageId: page.value.id
     })
+    clearStoredLease()
     draftStatus.value = ''
     saved.value = result.message || (
       result.status === PAGE_STATUS.APPROVED
@@ -506,6 +551,7 @@ async function submitProofread() {
     try {
       const nextPage = await claimNextProjectPage(projectId, userId)
       if (nextPage?.id) {
+        saveClaimedLease(nextPage)
         setTaskFlash(window.sessionStorage, saved.value)
         await router.push(`/tasks/${nextPage.id}/edit`)
         return
@@ -518,9 +564,141 @@ async function submitProofread() {
 
     await loadNeighbors()
   } catch (e) {
-    saveError.value = getPbMessage(e, '提交失败，请重试')
+    const message = getPbMessage(e, '提交失败，请重试')
+    if (isLeaseFailure(message)) markLeaseLost(message)
+    else saveError.value = message
   } finally {
     saving.value = false
+  }
+}
+
+function saveClaimedLease(claimedPage) {
+  if (!claimedPage?.id || !claimedPage.leaseToken) return false
+  saveTaskLease(window.sessionStorage, {
+    userId: currentUserId.value,
+    pageId: claimedPage.id,
+    token: claimedPage.leaseToken,
+    expiresAt: claimedPage.leaseExpiresAt
+  })
+  if (claimedPage.id === page.value?.id) {
+    leaseToken.value = claimedPage.leaseToken
+    leaseExpiresAt.value = claimedPage.leaseExpiresAt || ''
+    leaseLost.value = false
+    saveError.value = ''
+    startLeaseRenewal()
+  }
+  return true
+}
+
+function clearStoredLease() {
+  if (page.value?.id && currentUserId.value) {
+    clearTaskLease(window.sessionStorage, { userId: currentUserId.value, pageId: page.value.id })
+  }
+  leaseToken.value = ''
+  leaseExpiresAt.value = ''
+  stopLeaseRenewal()
+}
+
+async function restoreOrAcquireLease() {
+  const stored = loadTaskLease(window.sessionStorage, {
+    userId: currentUserId.value,
+    pageId: page.value?.id
+  })
+  if (stored) {
+    leaseToken.value = stored.token
+    leaseExpiresAt.value = stored.expiresAt
+    await renewCurrentLease({ force: true })
+    if (!leaseLost.value) startLeaseRenewal()
+    return
+  }
+  await reclaimTask()
+}
+
+function startLeaseRenewal() {
+  stopLeaseRenewal()
+  leaseRenewTimer = window.setInterval(() => renewCurrentLease(), 2 * 60 * 1000)
+}
+
+function stopLeaseRenewal() {
+  if (!leaseRenewTimer) return
+  window.clearInterval(leaseRenewTimer)
+  leaseRenewTimer = null
+}
+
+function handleLeaseActivation() {
+  if (document.visibilityState === 'visible') renewCurrentLease()
+}
+
+async function renewCurrentLease({ force = false } = {}) {
+  if (renewingLease.value || leaseLost.value || !page.value?.id || !leaseToken.value) return
+  if (!force && (document.visibilityState !== 'visible' || !document.hasFocus())) return
+  renewingLease.value = true
+  try {
+    const result = await renewTaskLease(page.value.id, leaseToken.value)
+    leaseExpiresAt.value = result.leaseExpiresAt || ''
+    saveTaskLease(window.sessionStorage, {
+      userId: currentUserId.value,
+      pageId: page.value.id,
+      token: leaseToken.value,
+      expiresAt: leaseExpiresAt.value
+    })
+  } catch (e) {
+    markLeaseLost(getPbMessage(e, '任务租约续期失败，本地草稿仍然保留，请重新领取任务。'))
+  } finally {
+    renewingLease.value = false
+  }
+}
+
+function markLeaseLost(message) {
+  flushDraft()
+  clearStoredLease()
+  leaseLost.value = true
+  saveError.value = message
+  reviewingSubmission.value = false
+}
+
+function isLeaseFailure(message) {
+  return /租约|重新领取|不属于你|被重新领取/.test(String(message || ''))
+}
+
+async function reclaimTask() {
+  if (reclaiming.value || !page.value?.project || !currentUserId.value) return
+  reclaiming.value = true
+  flushDraft()
+  try {
+    const claimedPage = await claimNextProjectPage(page.value.project, currentUserId.value)
+    if (!claimedPage?.id || !saveClaimedLease(claimedPage)) {
+      markLeaseLost('当前项目暂无可重新领取的任务，本地草稿仍然保留。')
+      return
+    }
+    if (claimedPage.id !== page.value.id) {
+      setTaskFlash(window.sessionStorage, '原任务已被重新领取；本地草稿仍保留，已为你打开另一条任务。')
+      leaseNavigationAllowed.value = true
+      await router.push(`/tasks/${claimedPage.id}/edit`)
+    }
+  } catch (e) {
+    markLeaseLost(getPbMessage(e, '重新领取失败，本地草稿仍然保留。'))
+  } finally {
+    reclaiming.value = false
+  }
+}
+
+async function releaseCurrentTask() {
+  if (releasing.value || !page.value?.id || !leaseToken.value) return
+  if (!window.confirm('释放后其他校对员可以领取此任务；当前本地草稿会保留。确定释放吗？')) return
+  releasing.value = true
+  flushDraft()
+  try {
+    await releaseTaskLease(page.value.id, leaseToken.value)
+    clearStoredLease()
+    leaseNavigationAllowed.value = true
+    await router.push('/tasks')
+  } catch (e) {
+    const message = getPbMessage(e, '释放任务失败，请稍后重试。')
+    if (isLeaseFailure(message)) markLeaseLost(message)
+    else saveError.value = message
+  } finally {
+    releasing.value = false
   }
 }
 </script>

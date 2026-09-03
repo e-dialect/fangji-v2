@@ -70,6 +70,7 @@ export async function listProjectQueueSummaries(userId) {
         'pdf_page',
         'proofreader',
         'first_proofreader',
+        'lease_expires_at',
         'mismatch_count'
       ].join(',')
     })
@@ -210,11 +211,27 @@ export async function claimNextProjectPage(projectId, userId) {
   })
 }
 
-export async function submitTwoPassProofread(pageId, userId, { rowJson, text }) {
+export async function renewTaskLease(pageId, leaseToken) {
+  return pb.send(`/api/fangji/pages/${encodeURIComponent(pageId)}/lease/renew`, {
+    method: 'POST',
+    body: { leaseToken },
+    requestKey: null
+  })
+}
+
+export async function releaseTaskLease(pageId, leaseToken) {
+  return pb.send(`/api/fangji/pages/${encodeURIComponent(pageId)}/release`, {
+    method: 'POST',
+    body: { leaseToken },
+    requestKey: null
+  })
+}
+
+export async function submitTwoPassProofread(pageId, userId, { rowJson, text, leaseToken }) {
   if (!pageId || !userId) throw new Error('缺少任务或校对员身份')
   return pb.send(`/api/fangji/pages/${encodeURIComponent(pageId)}/submit`, {
     method: 'POST',
-    body: { rowJson, text },
+    body: { rowJson, text, leaseToken },
     requestKey: null
   })
 }
@@ -222,5 +239,9 @@ export async function submitTwoPassProofread(pageId, userId, { rowJson, text }) 
 export function isPageClaimableBy(page, userId) {
   if (!page || !userId) return false
   if (page.status === PAGE_STATUS.PENDING) return true
-  return page.status === PAGE_STATUS.PROOFREAD && page.first_proofreader !== userId
+  if (page.status === PAGE_STATUS.PROOFREAD) return page.first_proofreader !== userId
+  if (!PROOFREADER_ACTIVE_STATUSES.includes(page.status) || page.proofreader === userId) return false
+  const expiresAt = new Date(page.lease_expires_at || '').getTime()
+  if (Number.isFinite(expiresAt) && expiresAt > Date.now()) return false
+  return !page.first_proofreader || page.first_proofreader !== userId
 }

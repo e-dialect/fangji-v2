@@ -124,6 +124,7 @@ import { currentUserId } from '@/services/authService'
 import { claimNextProjectPage, listProjectQueueSummaries } from '@/services/pagesService'
 import { getProofreaderQueueAction, summarizeProofreaderQueues } from '@/lib/workspaceInsights'
 import { formatClaimConflict, formatPbError } from '@/utils/pbErrors'
+import { saveTaskLease } from '@/lib/taskLease'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -166,6 +167,12 @@ async function enterProject(queue) {
       await loadProjects()
       return
     }
+    saveTaskLease(window.sessionStorage, {
+      userId,
+      pageId: page.id,
+      token: page.leaseToken,
+      expiresAt: page.leaseExpiresAt
+    })
     await router.push(`/tasks/${page.id}/edit`)
   } catch (e) {
     error.value = `进入项目失败：${formatClaimConflict(e, '该项目的下一条任务可能已被其他校对员接取，请刷新后重试')}`
