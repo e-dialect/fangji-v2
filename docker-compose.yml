@@ -13,6 +13,7 @@ services:
       - PB_ADMIN_PASSWORD=${PB_ADMIN_PASSWORD:-}
       - PB_ALLOWED_ORIGINS=${PB_ALLOWED_ORIGINS:-}
       - TRUSTED_PROXY_CIDRS=${TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
+      - HINGHWA_IDENTITY_BASE_URL=${HINGHWA_IDENTITY_BASE_URL:-}
     volumes:
       # Persist PocketBase data on the host for easy backup and migration.
       - ./pb_data:/pb/pb_data

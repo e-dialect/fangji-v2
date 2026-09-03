@@ -10,6 +10,7 @@ services:
       - PB_ADMIN_EMAIL=${PB_ADMIN_EMAIL:-}
       - PB_ADMIN_PASSWORD=${PB_ADMIN_PASSWORD:-}
       - PB_ALLOWED_ORIGINS=${PB_ALLOWED_ORIGINS:-}
+      - HINGHWA_IDENTITY_BASE_URL=${HINGHWA_IDENTITY_BASE_URL:-}
     volumes:
       - ./pb_data:/pb/pb_data
     restart: unless-stopped

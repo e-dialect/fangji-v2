@@ -26,6 +26,7 @@
 核心能力：
 
 - 基于 PocketBase 的注册、登录、平台角色和项目级能力控制。
+- 可选接入“兴化语记”统一身份；外部身份只按稳定 subject 映射本地用户，不自动合并邮箱或姓名。
 - 项目创建默认采用白名单：平台管理员不限量，普通用户须获授权并可设置额度。
 - 项目支持指定成员、公开加入和口令加入；加入后成员身份持久保留。
 - 同一用户可在不同项目承担不同职责，同一项目内管理员和校对员互斥。
@@ -277,6 +278,7 @@ docker compose logs -f frontend
    - `projects`：校对项目，`admin` 字段保存唯一所有者，并配置新成员访问方式及 `required_proofreads`。
    - `project_memberships`：项目管理员或校对员关系；每个用户在同一项目只有一个角色。
    - `project_creator_grants`：普通用户的项目创建授权、可选额度和审计时间。
+   - `external_identity_mappings`：外部 provider subject 与本地用户的一对一服务端映射，客户端不能直接读写。
    - `project_access_secrets`：口令加入项目的盐值和摘要，不保存明文口令。
    - `keyboards`：经启动校验和同步的全局版本化键盘定义，保留预置/上传来源字段。
    - `project_keyboards`：项目启用键盘、显示顺序与默认键盘。
@@ -302,6 +304,12 @@ docker compose logs -f frontend
 - 平台管理员可进入“创建权限”，向普通用户授权、设置额度或撤销授权。
 - 获得项目管理能力的用户可进入 `/admin`；项目校对员可进入 `/tasks`。
 - 旧的全局 `admin` 会迁移为 `platform_admin`，旧的全局 `proofreader` 会迁移为 `user` 并保留为现有项目的校对成员。
+
+#### 外部统一身份
+
+在 `.env` 设置 `HINGHWA_IDENTITY_BASE_URL=https://identity.example.com` 后，登录页会显示“兴化语记”入口，方辑后端向该地址的 `/login` 发送 `username`、`password`。首次验证成功时系统创建一个没有项目权限的本地 `user` 并保存 provider subject 映射；已登录用户也可在个人主页显式绑定。系统不会按邮箱或姓名自动合并账号，也不会同步外部资料、密码或项目权限。
+
+远端返回的 HS256 token 只在单次后端请求内读取后立即丢弃，不写数据库、日志或浏览器响应，也不需要共享远端签名密钥。适配器强制 HTTPS、5 秒超时、禁止重定向、限制响应为 64 KiB，并按来源地址执行登录限流；日志只记录 provider 与脱敏后的结果类别。`HINGHWA_IDENTITY_BASE_URL` 为空时该入口不会显示。
 
 ### 2. 创建与开放项目
 
@@ -502,6 +510,8 @@ fangji-v2/
     ├── Dockerfile
     ├── main.go                     # 自定义 PocketBase 启动入口
     ├── import_service.go           # PDF 校验和持久化 CSV 导入队列
+    ├── external_identity.go        # 外部身份 provider、映射、登录和绑定
+    ├── hinghwa_identity.go         # 兴化语记 /login 安全适配器
     ├── docker-entrypoint.sh
     ├── pb_hooks/                   # PocketBase hooks
     ├── keyboards/                  # 版本化内置键盘 JSON 与格式说明
@@ -614,6 +624,15 @@ PB_SUPER_EMAIL=pb-admin@example.com \
 PB_SUPER_PASSWORD=your-password \
 node backend/tests/volunteer_accounts_integration.mjs
 ```
+
+外部身份测试完全使用本机 mock HTTPS provider，不访问真实统一身份服务；覆盖成功、失败、超时、禁止重定向、畸形/超大响应、重复映射、绑定冲突、无资料同步和默认无项目权限：
+
+```bash
+cd backend
+go test ./...
+```
+
+部署环境只在获得一次性测试账号时进行人工联调，CI 不依赖外部服务。适配行为依据上游 Django [`/login` 接口](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/user/views.py)及其[令牌实现](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/utils/token.py)；方辑只使用响应中的稳定用户 ID，不消费远端 token。
 
 项目权限集成测试覆盖默认拒绝创建、有限/无限额度、并发额度边界、创建授权撤销、所有权转移、成员角色互斥、三种访问方式、成员持久性、账号与可信来源双重口令限速，以及跨项目越权拦截：
 
