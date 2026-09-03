@@ -58,6 +58,9 @@ func main() {
 	importer := newImportService(app)
 	importer.register()
 
+	externalIdentities := newExternalIdentityService(app)
+	externalIdentities.register()
+
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
 	}
