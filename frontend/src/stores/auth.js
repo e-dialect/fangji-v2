@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import pb from '@/lib/pocketbase'
-import { clearAuth, loginWithPassword, registerProofreader } from '@/services/authService'
+import { clearAuth, loginWithExternalProvider, loginWithPassword, registerProofreader } from '@/services/authService'
 import { getAccessContext } from '@/services/projectsService'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -52,6 +52,14 @@ export const useAuthStore = defineStore('auth', () => {
     return authData
   }
 
+  async function loginExternal(provider, identity, password) {
+    const authData = await loginWithExternalProvider(provider, identity, password)
+    user.value = authData.record
+    token.value = authData.token
+    await loadAccessContext({ force: true })
+    return authData
+  }
+
   async function register(email, password, passwordConfirm, name) {
     const record = await registerProofreader({
       email,
@@ -84,6 +92,7 @@ export const useAuthStore = defineStore('auth', () => {
     mustChangePassword,
     loadAccessContext,
     login,
+    loginExternal,
     register,
     logout
   }

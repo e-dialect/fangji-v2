@@ -13,6 +13,32 @@ export async function loginWithPassword(identity, password) {
   return pb.collection('users').authWithPassword(identity, password)
 }
 
+export async function listExternalProviders() {
+  const response = await pb.send('/api/fangji/auth/providers', {
+    method: 'GET',
+    requestKey: null
+  })
+  return Array.isArray(response?.providers) ? response.providers : []
+}
+
+export async function loginWithExternalProvider(provider, identity, password) {
+  const authData = await pb.send(`/api/fangji/auth/external/${encodeURIComponent(provider)}/login`, {
+    method: 'POST',
+    body: { identity, password },
+    requestKey: null
+  })
+  pb.authStore.save(authData.token, authData.record)
+  return authData
+}
+
+export async function bindExternalIdentity(provider, identity, password) {
+  return pb.send(`/api/fangji/auth/external/${encodeURIComponent(provider)}/bind`, {
+    method: 'POST',
+    body: { identity, password },
+    requestKey: null
+  })
+}
+
 export async function refreshStoredAuth() {
   if (!pb.authStore.isValid) return null
   try {

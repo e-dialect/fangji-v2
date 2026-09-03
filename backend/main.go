@@ -58,7 +58,15 @@ func main() {
 	importer := newImportService(app)
 	importer.register()
 
-	externalIdentities := newExternalIdentityService(app)
+	identityProviders := make([]externalIdentityProvider, 0, 1)
+	if hinghwaBaseURL := os.Getenv("HINGHWA_IDENTITY_BASE_URL"); hinghwaBaseURL != "" {
+		hinghwaProvider, err := newHinghwaIdentityProvider(hinghwaBaseURL)
+		if err != nil {
+			log.Fatal(err)
+		}
+		identityProviders = append(identityProviders, hinghwaProvider)
+	}
+	externalIdentities := newExternalIdentityService(app, identityProviders...)
 	externalIdentities.register()
 
 	if err := app.Start(); err != nil {

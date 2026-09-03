@@ -48,6 +48,45 @@
         </div>
       </section>
 
+      <section v-if="providers.length" class="card mt-6">
+        <div class="card-title">统一身份绑定</div>
+        <p class="profile-note mb-4">绑定后可以使用外部账号登录方辑。方辑不会同步外部账号的姓名、邮箱或密码。</p>
+        <div class="identity-list">
+          <div v-for="provider in providers" :key="provider.id" class="identity-card">
+            <div class="identity-heading">
+              <strong>{{ provider.name }}</strong>
+              <span class="identity-state" :class="{ bound: provider.bound }">{{ provider.bound ? '已绑定' : '未绑定' }}</span>
+            </div>
+            <template v-if="!provider.bound">
+              <div class="identity-fields">
+                <input
+                  v-model.trim="credentials[provider.id].identity"
+                  class="form-control"
+                  type="text"
+                  :placeholder="`${provider.name}账号`"
+                  autocomplete="username"
+                  :disabled="bindingProvider === provider.id"
+                />
+                <input
+                  v-model="credentials[provider.id].password"
+                  class="form-control"
+                  type="password"
+                  placeholder="密码"
+                  autocomplete="current-password"
+                  :disabled="bindingProvider === provider.id"
+                />
+                <button
+                  class="btn btn-primary"
+                  :disabled="bindingProvider === provider.id || !canBind(provider.id)"
+                  @click="bindProvider(provider)"
+                >{{ bindingProvider === provider.id ? '验证中...' : '验证并绑定' }}</button>
+              </div>
+              <div v-if="bindingError[provider.id]" class="alert alert-error mt-3">{{ bindingError[provider.id] }}</div>
+            </template>
+          </div>
+        </div>
+      </section>
+
       <div class="card mt-6">
         <div class="card-title">排行说明</div>
         <div class="profile-note">
@@ -59,15 +98,19 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
-import { currentUserId } from '@/services/authService'
+import { bindExternalIdentity, currentUserId, listExternalProviders } from '@/services/authService'
 import { getProofreaderProfileStats } from '@/services/proofreaderStatsService'
 import { formatPbError } from '@/utils/pbErrors'
 
 const auth = useAuthStore()
 const loading = ref(true)
 const error = ref('')
+const providers = ref([])
+const credentials = reactive({})
+const bindingProvider = ref('')
+const bindingError = reactive({})
 const stats = ref({
   projectCount: 0,
   proofreadCount: 0,
@@ -77,12 +120,46 @@ const stats = ref({
   proofreadRank: null
 })
 
-const displayName = computed(() => auth.user?.name || auth.user?.email || '校对员')
+const displayName = computed(() => auth.user?.name || auth.user?.email || auth.user?.username || '校对员')
 const accuracyLabel = computed(() => `${stats.value.accuracy}%`)
 
 onMounted(async () => {
-  await loadStats()
+  await Promise.all([loadStats(), loadProviders()])
 })
+
+async function loadProviders() {
+  try {
+    providers.value = await listExternalProviders()
+    for (const provider of providers.value) {
+      credentials[provider.id] ||= { identity: '', password: '' }
+      bindingError[provider.id] = ''
+    }
+  } catch {
+    providers.value = []
+  }
+}
+
+function canBind(providerId) {
+  const entry = credentials[providerId]
+  return Boolean(entry?.identity?.trim() && entry?.password)
+}
+
+async function bindProvider(provider) {
+  if (!canBind(provider.id) || bindingProvider.value) return
+  bindingProvider.value = provider.id
+  bindingError[provider.id] = ''
+  try {
+    const entry = credentials[provider.id]
+    await bindExternalIdentity(provider.id, entry.identity.trim(), entry.password)
+    entry.identity = ''
+    entry.password = ''
+    provider.bound = true
+  } catch (e) {
+    bindingError[provider.id] = e?.response?.message || '绑定失败，请检查外部账号和密码'
+  } finally {
+    bindingProvider.value = ''
+  }
+}
 
 async function loadStats() {
   loading.value = true
@@ -154,9 +231,52 @@ function rankLabel(rank) {
   line-height: 1.7;
 }
 
+.identity-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.identity-card {
+  padding: 1rem;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
+  background: var(--gray-50);
+}
+
+.identity-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.identity-state {
+  padding: .2rem .55rem;
+  border-radius: 999px;
+  color: var(--gray-600);
+  background: var(--gray-200);
+  font-size: .78rem;
+}
+
+.identity-state.bound {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.identity-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: .75rem;
+  margin-top: 1rem;
+}
+
 @media (max-width: 900px) {
   .profile-hero,
   .profile-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .identity-fields {
     grid-template-columns: 1fr;
   }
 }
