@@ -38,7 +38,7 @@
 //   - updateRule:
 //       admin 全量可更新
 //       proofreader 可认领 pending，且可更新自己负责的 claimed/proofreading/rejected
-//       proofreader 可领取 pending 或 proofread（二校）页面，且可更新自己负责的页面
+//       proofreader 可领取 pending 或 proofread 页面，且可更新自己负责的页面
 //   - deleteRule: @request.auth.role = "platform_admin"
 
 onAfterBootstrap((e) => {
@@ -197,7 +197,7 @@ onRecordBeforeUpdateRequest((e) => {
 // Hook: enforce valid status transitions on pages to prevent race conditions.
 //
 // - pending/proofread → claimed: only allowed while the page is still claimable
-//   and a second proofreading pass cannot be claimed by the first proofreader.
+//   and the same person has not already submitted in the current round.
 onRecordBeforeUpdateRequest((e) => {
   const authRecord = e.httpContext?.get && e.httpContext.get("authRecord")
   if (authRecord?.getString && authRecord.getString("role") === "platform_admin") {
@@ -239,8 +239,16 @@ onRecordBeforeUpdateRequest((e) => {
   if (authRecord && newProofreader !== authId) {
     throw new BadRequestError("认领任务失败：校对员身份不匹配")
   }
-  if (oldStatus === "proofread" && current.getString("first_proofreader") === newProofreader) {
-    throw new BadRequestError("该条目需要由其他校对员处理")
+  if (oldStatus === "proofread") {
+    const round = current.getInt("proofread_round") || 1
+    const submitted = $app.dao().findRecordsByFilter(
+      "proofreading_attempts",
+      `page = "${recordId}" && round = ${round} && kind = "proofread" && proofreader = "${newProofreader}"`,
+      "",
+      1,
+      0
+    )
+    if (submitted.length) throw new BadRequestError("你已经提交过该条目的独立校对")
   }
 
   const claimOnlyFields = [
@@ -266,7 +274,9 @@ onRecordBeforeUpdateRequest((e) => {
     "mismatch_count",
     "last_mismatch_at",
     "proofread_at",
-    "reviewed_at"
+    "reviewed_at",
+    "proofread_count",
+    "lease_expires_at"
   ]
   for (const field of claimOnlyFields) {
     if (String(e.record.get(field) ?? "") !== String(current.get(field) ?? "")) {

@@ -8,12 +8,12 @@ function leaseForPage(dao, pageId) {
 function queueStatusForPage(page, lease) {
   const saved = lease?.getString("queue_status")
   if (saved === "pending" || saved === "proofread") return saved
-  return page.getString("first_proofreader") ? "proofread" : "pending"
+  return page.getInt("proofread_count") > 0 ? "proofread" : "pending"
 }
 
 function leaseExpired(lease, nowMs = Date.now()) {
   if (!lease) return true
-  const expiresAt = new Date(String(lease.get("expires_at") || "")).getTime()
+  const expiresAt = lease.getDateTime("expires_at").time().unixMilli()
   return !Number.isFinite(expiresAt) || expiresAt <= nowMs
 }
 

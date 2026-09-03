@@ -84,6 +84,7 @@ routerAdd("POST", "/api/fangji/projects", (c) => {
     project.set("description", description)
     project.set("admin", auth.getId())
     project.set("access_mode", accessMode)
+    project.set("required_proofreads", 2)
     txDao.saveRecord(project)
     fangjiSyncProjectAcl(txDao, project.getId())
     fangjiEnableDefaultKeyboard(txDao, project.getId())
@@ -95,9 +96,10 @@ routerAdd("POST", "/api/fangji/projects", (c) => {
 
 routerAdd("PATCH", "/api/fangji/projects/:projectId", (c) => {
   const { auth: fangjiAuth, assertId: fangjiAssertId, requireManager: fangjiRequireManager, projectSecret: fangjiProjectSecret, deleteProjectSecret: fangjiDeleteProjectSecret, setProjectPassword: fangjiSetProjectPassword, projectJson: fangjiProjectJson } = require(`${__hooks}/lib/project_access.js`)
+  const { reconcileProjectQuorum: fangjiReconcileProjectQuorum } = require(`${__hooks}/lib/proofreading_workflow.js`)
   const auth = fangjiAuth(c)
   const projectId = fangjiAssertId(c.pathParam("projectId"), "项目")
-  const body = new DynamicModel({ name: "", description: "", accessMode: "", password: "" })
+  const body = new DynamicModel({ name: "", description: "", accessMode: "", password: "", requiredProofreads: 0 })
   c.bind(body)
   let result = null
   $app.dao().runInTransaction((txDao) => {
@@ -105,6 +107,8 @@ routerAdd("PATCH", "/api/fangji/projects/:projectId", (c) => {
     const name = String(body.name || "").trim()
     const description = String(body.description || "").trim()
     const accessMode = String(body.accessMode || "").trim()
+    const requiredProofreads = Number(body.requiredProofreads || 0)
+    let quorumChanged = false
     if (name) {
       if (name.length > 500) throw new BadRequestError("项目名称不能超过 500 个字符")
       project.set("name", name)
@@ -127,7 +131,15 @@ routerAdd("PATCH", "/api/fangji/projects/:projectId", (c) => {
       }
       fangjiSetProjectPassword(txDao, projectId, body.password)
     }
+    if (requiredProofreads) {
+      if (!Number.isInteger(requiredProofreads) || requiredProofreads < 2 || requiredProofreads > 1000) {
+        throw new BadRequestError("校对人数必须为 2 到 1000 的整数")
+      }
+      quorumChanged = project.getInt("required_proofreads") !== requiredProofreads
+      project.set("required_proofreads", requiredProofreads)
+    }
     txDao.saveRecord(project)
+    if (quorumChanged) fangjiReconcileProjectQuorum(txDao, projectId)
     result = fangjiProjectJson(txDao, project, auth)
   })
   return c.json(200, result)

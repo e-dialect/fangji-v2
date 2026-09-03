@@ -13,6 +13,11 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
     issueLease: proofIssueLease,
     clearLease: proofClearLease
   } = require(`${__hooks}/lib/task_leases.js`)
+  const {
+    proofreadAttempts: proofAttempts,
+    requiredProofreads: proofRequiredProofreads,
+    evaluatePage: proofEvaluatePage
+  } = require(`${__hooks}/lib/proofreading_workflow.js`)
   const auth = c.get("authRecord")
   if (!auth) throw new ForbiddenError("无权执行此操作")
   const summarize = (page, issued) => ({
@@ -23,10 +28,6 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
     pdf_page: page.getInt("pdf_page"),
     status: page.getString("status"),
     proofreader: page.getString("proofreader"),
-    first_proofreader: page.getString("first_proofreader"),
-    second_proofreader: page.getString("second_proofreader"),
-    proofread_round: page.getInt("proofread_round") || 1,
-    mismatch_count: page.getInt("mismatch_count") || 0,
     leaseToken: issued.token,
     leaseExpiresAt: issued.expiresAt
   })
@@ -77,9 +78,13 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
         queueStatus = proofQueueStatusForPage(page, existingLease)
         if (!existingLease) proofClearLease(txDao, page)
       }
-      if (queueStatus === "proofread" && page.getString("first_proofreader") === userId) {
+      const attempts = proofAttempts(txDao, page)
+      if (attempts.some((attempt) => attempt.getString("proofreader") === userId)) continue
+      if (attempts.length >= proofRequiredProofreads(txDao, projectId)) {
+        proofEvaluatePage(txDao, page)
         continue
       }
+      queueStatus = attempts.length ? "proofread" : "pending"
       const issued = proofIssueLease(txDao, page, userId, queueStatus)
       page.set("proofreader", userId)
       page.set("status", "proofreading")
@@ -90,6 +95,57 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
   })
 
   return c.json(200, response)
+}, $apis.requireRecordAuth("users"))
+
+routerAdd("GET", `${FANGJI_API}/proofreading-queues`, (c) => {
+  const { capabilities: proofCapabilities } = require(`${__hooks}/lib/project_access.js`)
+  const { leaseForPage: proofLeaseForPage, leaseExpired: proofLeaseExpired } = require(`${__hooks}/lib/task_leases.js`)
+  const { proofreadAttempts: proofAttempts } = require(`${__hooks}/lib/proofreading_workflow.js`)
+  const auth = c.get("authRecord")
+  if (!auth) throw new ForbiddenError("无权执行此操作")
+  const dao = $app.dao()
+  const result = []
+  for (const project of dao.findRecordsByFilter("projects", 'id != ""', "name", 1000000, 0)) {
+    if (!proofCapabilities(dao, project, auth).canProofread) continue
+    const queue = {
+      project: {
+        id: project.getId(),
+        name: project.getString("name"),
+        description: project.getString("description")
+      },
+      total: 0,
+      claimable: 0,
+      activeMine: 0,
+      activePage: null,
+      completed: 0,
+      nextPage: null
+    }
+    const required = Math.max(2, project.getInt("required_proofreads") || 2)
+    const pages = dao.findRecordsByFilter("pages", `project = "${project.getId()}" && status != "importing"`, "page_number", 100000, 0)
+    for (const page of pages) {
+      queue.total += 1
+      if (page.getString("status") === "approved") {
+        queue.completed += 1
+        continue
+      }
+      const summary = { id: page.getId(), page_number: page.getInt("page_number"), pdf_page: page.getInt("pdf_page") }
+      const active = ["claimed", "proofreading"].includes(page.getString("status"))
+      if (active && page.getString("proofreader") === auth.getId()) {
+        queue.activeMine += 1
+        if (!queue.activePage) queue.activePage = summary
+        continue
+      }
+      const attempts = proofAttempts(dao, page)
+      if (attempts.some((attempt) => attempt.getString("proofreader") === auth.getId())) continue
+      let claimable = page.getString("status") === "pending" || page.getString("status") === "proofread"
+      if (active) claimable = proofLeaseExpired(proofLeaseForPage(dao, page.getId()))
+      if (!claimable || attempts.length >= required) continue
+      queue.claimable += 1
+      if (!queue.nextPage) queue.nextPage = summary
+    }
+    result.push(queue)
+  }
+  return c.json(200, result)
 }, $apis.requireRecordAuth("users"))
 
 routerAdd("POST", `${FANGJI_API}/pages/:pageId/lease/renew`, (c) => {
@@ -113,6 +169,11 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/lease/renew`, (c) => {
 routerAdd("POST", `${FANGJI_API}/pages/:pageId/release`, (c) => {
   const { canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)
   const { releaseLease: proofReleaseLease } = require(`${__hooks}/lib/task_leases.js`)
+  const {
+    proofreadAttempts: proofAttempts,
+    requiredProofreads: proofRequiredProofreads,
+    evaluatePage: proofEvaluatePage
+  } = require(`${__hooks}/lib/proofreading_workflow.js`)
   const auth = c.get("authRecord")
   if (!auth) throw new ForbiddenError("无权执行此操作")
   const pageId = c.pathParam("pageId")
@@ -123,6 +184,9 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/release`, (c) => {
     try { page = txDao.findRecordById("pages", pageId) } catch { throw new NotFoundError("条目不存在") }
     if (!proofCanProofread(txDao, page.getString("project"), auth)) throw new ForbiddenError("你不是该项目的校对员")
     proofReleaseLease(txDao, page, auth.getId(), body.leaseToken)
+    if (proofAttempts(txDao, page).length >= proofRequiredProofreads(txDao, page.getString("project"))) {
+      proofEvaluatePage(txDao, page)
+    }
   })
   return c.noContent(204)
 }, $apis.requireRecordAuth("users"))
@@ -229,7 +293,11 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/pages/delete-pending`, (c) 
 // server. First-pass content is persisted only in the private attempts table.
 routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
   const { canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)
-  const { requireLease: proofRequireLease, clearLease: proofClearLease } = require(`${__hooks}/lib/task_leases.js`)
+  const { requireLease: proofRequireLease } = require(`${__hooks}/lib/task_leases.js`)
+  const {
+    proofreadAttempts: proofAttempts,
+    evaluatePage: proofEvaluatePage
+  } = require(`${__hooks}/lib/proofreading_workflow.js`)
   const auth = c.get("authRecord")
   if (!auth) throw new ForbiddenError("无权执行此操作")
   const userId = auth.getId()
@@ -265,11 +333,6 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
     if (!expectedKeys.some((key) => parsed[key].trim() !== "")) throw new BadRequestError("校对内容不能全部为空")
     return { parsed, keys: sourceKeys }
   }
-  const canonicalizeRow = (parsed) => {
-    const result = {}
-    Object.keys(parsed).sort().forEach((key) => { result[key] = parsed[key].trim() })
-    return JSON.stringify(result)
-  }
   const composeRowText = (keys, parsed) => keys.map((key) => parsed[key].trim()).filter(Boolean).join(" ")
   const now = new Date().toISOString()
   let response = null
@@ -294,115 +357,47 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
 
     const validatedRow = validateSubmittedRow(body.rowJson, page)
     const parsedRow = validatedRow.parsed
-    const normalizedCurrent = canonicalizeRow(parsedRow)
     const rowJson = JSON.stringify(parsedRow)
     const text = composeRowText(validatedRow.keys, parsedRow)
 
     const attemptsCollection = txDao.findCollectionByNameOrId("proofreading_attempts")
     const round = page.getInt("proofread_round") || 1
-    const firstProofreader = page.getString("first_proofreader")
+    const attempts = proofAttempts(txDao, page)
+    if (attempts.some((attempt) => attempt.getString("proofreader") === userId)) {
+      throw new BadRequestError("你已经提交过该条目的独立校对")
+    }
 
-    if (!firstProofreader) {
-      const first = new Record(attemptsCollection)
-      first.set("page", pageId)
-      first.set("project", page.getString("project"))
-      first.set("proofreader", userId)
-      first.set("round", round)
-      first.set("pass_no", 1)
-      first.set("kind", "first")
-      first.set("row_json", rowJson)
-      first.set("text", text)
-      first.set("outcome", "waiting")
-      first.set("submitted_at", now)
-      txDao.saveRecord(first)
+    const attempt = new Record(attemptsCollection)
+    attempt.set("page", pageId)
+    attempt.set("project", page.getString("project"))
+    attempt.set("proofreader", userId)
+    attempt.set("round", round)
+    attempt.set("pass_no", attempts.length + 1)
+    attempt.set("kind", "proofread")
+    attempt.set("row_json", rowJson)
+    attempt.set("text", text)
+    attempt.set("outcome", "waiting")
+    attempt.set("submitted_at", now)
+    txDao.saveRecord(attempt)
 
+    if (attempts.length === 0) {
       page.set("first_proofreader", userId)
       page.set("first_proofread_at", now)
-      page.set("second_proofreader", null)
-      page.set("second_proofread_at", null)
-      page.set("proofread_row_json", "")
-      page.set("proofread_text", "")
-      page.set("proofread_at", now)
-      page.set("status", "proofread")
-      page.set("proofreader", null)
-      proofClearLease(txDao, page)
-      txDao.saveRecord(page)
-
-      response = {
-        id: pageId,
-        status: "proofread",
-        outcome: "waiting",
-        message: "校对结果已提交，系统将继续处理该条目。"
-      }
-      return
+    } else if (attempts.length === 1) {
+      page.set("second_proofreader", userId)
+      page.set("second_proofread_at", now)
     }
-
-    if (firstProofreader === userId) {
-      throw new BadRequestError("该条目需要由其他校对员处理")
-    }
-
-    const firstAttempts = txDao.findRecordsByFilter(
-      "proofreading_attempts",
-      `page = "${pageId}" && round = ${round} && pass_no = 1`,
-      "",
-      1,
-      0
-    )
-    if (!firstAttempts.length) {
-      throw new BadRequestError("未找到该轮所需的校对记录，请联系管理员处理")
-    }
-
-    const first = firstAttempts[0]
-    const normalizedFirst = canonicalizeRow(parseRowObject(first.getString("row_json")))
-    const isMatch = normalizedFirst === normalizedCurrent
-
-    const second = new Record(attemptsCollection)
-    second.set("page", pageId)
-    second.set("project", page.getString("project"))
-    second.set("proofreader", userId)
-    second.set("round", round)
-    second.set("pass_no", 2)
-    second.set("kind", "second")
-    second.set("row_json", rowJson)
-    second.set("text", text)
-    second.set("outcome", isMatch ? "matched" : "mismatched")
-    second.set("submitted_at", now)
-    txDao.saveRecord(second)
-
-    first.set("outcome", isMatch ? "matched" : "mismatched")
-    txDao.saveRecord(first)
-
-    page.set("second_proofreader", userId)
-    page.set("second_proofread_at", now)
     page.set("proofread_at", now)
-    page.set("proofreader", null)
-    proofClearLease(txDao, page)
-
-    if (isMatch) {
-      page.set("proofread_row_json", rowJson)
-      page.set("proofread_text", text)
-      page.set("status", "approved")
-      txDao.saveRecord(page)
-      response = {
-        id: pageId,
-        status: "approved",
-        outcome: "matched",
-        message: "校对结果已提交，该条目已完成。"
-      }
-      return
-    }
-
-    page.set("proofread_row_json", "")
-    page.set("proofread_text", "")
-    page.set("mismatch_count", page.getInt("mismatch_count") + 1)
-    page.set("last_mismatch_at", now)
-    page.set("status", "arbitration")
-    txDao.saveRecord(page)
+    const evaluation = proofEvaluatePage(txDao, page)
     response = {
       id: pageId,
-      status: "arbitration",
-      outcome: "mismatched",
-      message: "校对结果已提交，该条目将由管理员继续处理。"
+      status: evaluation.status,
+      outcome: evaluation.outcome,
+      message: evaluation.status === "approved"
+        ? "校对结果已提交，该条目已完成。"
+        : evaluation.status === "arbitration"
+          ? "校对结果已提交，该条目将由管理员继续处理。"
+          : "校对结果已提交。"
     }
     })
   } catch (error) {
@@ -456,7 +451,7 @@ routerAdd("GET", `${FANGJI_API}/pages/:pageId/arbitration`, (c) => {
     "proofreading_attempts",
     `page = "${pageId}" && round = ${round}`,
     "pass_no",
-    100,
+    1001,
     0
   )
 
@@ -538,7 +533,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/arbitrate`, (c) => {
     const round = page.getInt("proofread_round") || 1
     const existing = txDao.findRecordsByFilter(
       "proofreading_attempts",
-      `page = "${pageId}" && round = ${round} && pass_no = 3`,
+      `page = "${pageId}" && round = ${round} && kind = "arbitration"`,
       "",
       1,
       0
@@ -548,11 +543,18 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/arbitrate`, (c) => {
     }
 
     const attempt = new Record(txDao.findCollectionByNameOrId("proofreading_attempts"))
+    const proofreadAttempts = txDao.findRecordsByFilter(
+      "proofreading_attempts",
+      `page = "${pageId}" && round = ${round} && kind = "proofread"`,
+      "pass_no",
+      1000,
+      0
+    )
     attempt.set("page", pageId)
     attempt.set("project", page.getString("project"))
     attempt.set("proofreader", auth.getId())
     attempt.set("round", round)
-    attempt.set("pass_no", 3)
+    attempt.set("pass_no", proofreadAttempts.length + 1)
     attempt.set("kind", "arbitration")
     attempt.set("row_json", rowJson)
     attempt.set("text", text)
@@ -600,7 +602,7 @@ routerAdd("GET", `${FANGJI_API}/proofreader-stats`, (c) => {
       "SUM(CASE WHEN outcome = 'matched' THEN 1 ELSE 0 END) AS matched_count"
     )
     .from("proofreading_attempts")
-    .where($dbx.exp("proofreader != '' AND (kind = 'first' OR kind = 'second')"))
+    .where($dbx.exp("proofreader != '' AND kind = 'proofread'"))
     .groupBy("proofreader")
     .all(aggregated)
 

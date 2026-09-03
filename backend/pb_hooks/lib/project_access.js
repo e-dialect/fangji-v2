@@ -136,6 +136,7 @@ function projectJson(dao, projectRecord, authRecord) {
     owner: projectRecord.getString("admin"),
     admin: projectRecord.getString("admin"),
     access_mode: projectRecord.getString("access_mode") || "members_only",
+    required_proofreads: Math.max(2, projectRecord.getInt("required_proofreads") || 2),
     created: String(projectRecord.get("created") || ""),
     updated: String(projectRecord.get("updated") || ""),
     capabilities: capabilities(dao, projectRecord, authRecord)
