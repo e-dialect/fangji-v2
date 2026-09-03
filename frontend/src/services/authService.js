@@ -9,8 +9,8 @@ export function currentUserRole(fallbackUser = null) {
   return pb.authStore.model?.role || fallbackUser?.role || null
 }
 
-export async function loginWithPassword(email, password) {
-  return pb.collection('users').authWithPassword(email, password)
+export async function loginWithPassword(identity, password) {
+  return pb.collection('users').authWithPassword(identity, password)
 }
 
 export async function refreshStoredAuth() {
@@ -29,7 +29,7 @@ export async function registerProofreader({ email, password, passwordConfirm, na
     password,
     passwordConfirm,
     name,
-    role: 'proofreader'
+    role: 'user'
   }, { requestKey: null })
 }
 

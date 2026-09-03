@@ -8,13 +8,13 @@
 
       <form @submit.prevent="handleLogin">
         <div class="form-group">
-          <label class="form-label">邮箱</label>
+          <label class="form-label">用户名或邮箱</label>
           <input
             v-model.trim="email"
-            type="email"
+            type="text"
             class="form-control"
-            placeholder="请输入邮箱"
-            autocomplete="email"
+            placeholder="请输入用户名或邮箱"
+            autocomplete="username"
             :disabled="loading"
             required
           />
@@ -70,16 +70,10 @@ const error = ref('')
 
 const canSubmit = computed(() => email.value.trim() && password.value)
 
-function getRoleHome() {
-  if (auth.isAdmin) return '/admin'
-  if (auth.isProofreader) return '/tasks'
-  return '/'
-}
-
 async function redirectAfterLogin() {
   const target = typeof route.query.redirect === 'string' && route.query.redirect
     ? route.query.redirect
-    : getRoleHome()
+    : '/workspace'
 
   emit('close')
 

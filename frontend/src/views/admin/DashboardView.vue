@@ -10,7 +10,7 @@
         <button class="btn btn-secondary" :disabled="loading" @click="loadDashboard">
           <span aria-hidden="true">↻</span>{{ loading ? '正在刷新' : '刷新' }}
         </button>
-        <RouterLink to="/admin/projects/new" class="btn btn-primary">创建新项目</RouterLink>
+        <RouterLink v-if="auth.canCreateProjects" to="/admin/projects/new" class="btn btn-primary">创建新项目</RouterLink>
       </div>
     </header>
 
@@ -56,7 +56,8 @@
         <div class="empty-state-mark" aria-hidden="true">项</div>
         <div class="empty-state-text">还没有项目</div>
         <p>创建项目后，先上传原文 PDF，再用 CSV 导入待校对条目。</p>
-        <RouterLink to="/admin/projects/new" class="btn btn-primary mt-3">创建第一个项目</RouterLink>
+        <RouterLink v-if="auth.canCreateProjects" to="/admin/projects/new" class="btn btn-primary mt-3">创建第一个项目</RouterLink>
+        <RouterLink v-else to="/projects" class="btn btn-secondary mt-3">发现可加入项目</RouterLink>
       </div>
       <div v-else class="table-wrapper">
         <table class="admin-project-table">
@@ -133,6 +134,7 @@ import { PAGE_STATUS } from '@/constants/pageStatus'
 import { sortProjectInsights, summarizePages } from '@/lib/workspaceInsights'
 import { listAllPages } from '@/services/pagesService'
 import { listProjects } from '@/services/projectsService'
+import { useAuthStore } from '@/stores/auth'
 import { getPbMessage, getPbStatus } from '@/utils/pbErrors'
 
 const projects = ref([])
@@ -140,6 +142,7 @@ const allPages = ref([])
 const loading = ref(true)
 const error = ref('')
 const warning = ref('')
+const auth = useAuthStore()
 
 const overallSummary = computed(() => summarizePages(allPages.value))
 const projectInsights = computed(() => {
@@ -164,7 +167,8 @@ async function loadDashboard() {
   allPages.value = []
 
   try {
-    projects.value = await listProjects()
+    await auth.loadAccessContext({ force: true })
+    projects.value = await listProjects({ scope: 'managed' })
   } catch (e) {
     const status = getPbStatus(e)
     if (status === 401) {

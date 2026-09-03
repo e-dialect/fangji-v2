@@ -4,13 +4,9 @@ import pb from '@/lib/pocketbase'
 // 获取当前登录状态（直接读 PocketBase，避免时序问题）
 function getAuthState() {
   const isLoggedIn = pb.authStore.isValid
-  const role = pb.authStore.model?.role || null
 
   return {
-    isLoggedIn,
-    role,
-    isAdmin: role === 'admin',
-    isProofreader: role === 'proofreader'
+    isLoggedIn
   }
 }
 
@@ -19,12 +15,16 @@ function getHomePath() {
   const auth = getAuthState()
 
   if (!auth.isLoggedIn) return '/login'
-  if (auth.isAdmin) return '/admin'
-  if (auth.isProofreader) return '/tasks'
-  return '/login'
+  return '/workspace'
 }
 
 const routes = [
+  {
+    path: '/workspace',
+    name: 'WorkspaceHome',
+    component: () => import('@/views/WorkspaceHomeView.vue'),
+    meta: { requiresAuth: true }
+  },
   {
     path: '/',
     redirect: () => getHomePath()
@@ -44,7 +44,7 @@ const routes = [
   {
     path: '/admin',
     component: () => import('@/views/admin/AdminLayout.vue'),
-    meta: { requiresAuth: true, role: 'admin' },
+    meta: { requiresAuth: true },
     children: [
       {
         path: '',
@@ -67,6 +67,16 @@ const routes = [
         component: () => import('@/views/admin/ProjectDetailView.vue')
       },
       {
+        path: 'projects/:id/settings',
+        name: 'ProjectSettings',
+        component: () => import('@/views/admin/ProjectSettingsView.vue')
+      },
+      {
+        path: 'creator-grants',
+        name: 'CreatorGrants',
+        component: () => import('@/views/admin/CreatorGrantsView.vue')
+      },
+      {
         path: 'projects/:projectId/arbitration/:pageId',
         name: 'Arbitration',
         component: () => import('@/views/admin/ArbitrationView.vue')
@@ -76,7 +86,7 @@ const routes = [
   {
     path: '/tasks',
     component: () => import('@/views/proofreader/ProofreaderLayout.vue'),
-    meta: { requiresAuth: true, role: 'proofreader' },
+    meta: { requiresAuth: true },
     children: [
       {
         path: '',
@@ -94,6 +104,12 @@ const routes = [
         component: () => import('@/views/proofreader/ProofreadEditorView.vue')
       }
     ]
+  },
+  {
+    path: '/projects',
+    name: 'ProjectDiscovery',
+    component: () => import('@/views/ProjectDiscoveryView.vue'),
+    meta: { requiresAuth: true }
   },
   {
     path: '/:pathMatch(.*)*',
@@ -118,9 +134,6 @@ router.beforeEach((to) => {
     return `/login?redirect=${encodeURIComponent(to.fullPath)}`
   }
 
-  if (to.meta.role && auth.role !== to.meta.role) {
-    return getHomePath()
-  }
 })
 
 export default router

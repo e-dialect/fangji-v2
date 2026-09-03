@@ -60,7 +60,7 @@ export async function listPendingProofreadTasks(page, perPage) {
 
 export async function listProjectQueueSummaries(userId) {
   const [projects, pages] = await Promise.all([
-    listProjects({ sort: 'name' }),
+    listProjects({ scope: 'proofreading' }),
     listAllPages({
       fields: [
         'id',

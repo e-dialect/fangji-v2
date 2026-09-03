@@ -8,6 +8,7 @@
         <p v-if="project?.description">{{ project.description }}</p>
       </div>
       <nav v-if="project" class="project-section-nav" aria-label="项目页面分区">
+        <RouterLink :to="`/admin/projects/${projectId}/settings`">成员与设置</RouterLink>
         <a href="#project-files">文件准备</a>
         <a href="#project-export">导出结果</a>
         <a href="#project-entries">条目管理</a>
@@ -508,6 +509,11 @@ watch(() => listPagination.value.page, (page) => {
 onMounted(async () => {
   try {
     project.value = await getProject(projectId)
+    if (!project.value.capabilities?.canManage) {
+      projectError.value = '无权限管理该项目。'
+      loadingProject.value = false
+      return
+    }
   } catch (e) {
     const status = getPbStatus(e)
     if (status === 401) {

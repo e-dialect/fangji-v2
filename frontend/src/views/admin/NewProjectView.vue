@@ -17,10 +17,28 @@
     </div>
 
     <div class="card">
-      <form @submit.prevent="handleSubmit">
+      <div v-if="checkingPermission" class="text-muted">正在检查创建权限…</div>
+      <div v-else-if="!auth.canCreateProjects" class="alert alert-error">
+        你当前没有可用的项目创建额度。请联系平台管理员授权或调整额度。
+      </div>
+      <form v-else @submit.prevent="handleSubmit">
+        <div v-if="auth.accessContext?.projectLimit != null" class="alert mb-4">
+          当前拥有 {{ auth.accessContext.ownedProjectCount }} 个项目，还可创建 {{ auth.accessContext.remainingProjects }} 个。
+        </div>
         <div class="form-group">
           <label class="form-label">项目名称 <span style="color:var(--danger)">*</span></label>
           <input v-model="form.name" type="text" class="form-control" placeholder="如：《莆田方言词典》校对项目" required />
+        </div>
+        <fieldset class="access-mode-grid mb-4">
+          <legend class="form-label">访问方式</legend>
+          <label v-for="mode in accessModes" :key="mode.value" class="access-mode-option" :class="{ 'is-selected': form.accessMode === mode.value }">
+            <input v-model="form.accessMode" type="radio" :value="mode.value" />
+            <span><strong>{{ mode.label }}</strong><small>{{ mode.description }}</small></span>
+          </label>
+        </fieldset>
+        <div v-if="form.accessMode === 'password'" class="form-group">
+          <label class="form-label">项目口令</label>
+          <input v-model="form.password" type="password" class="form-control" minlength="8" maxlength="200" required autocomplete="new-password" placeholder="至少 8 个字符" />
         </div>
         <div class="form-group">
           <label class="form-label">项目简介</label>
@@ -42,33 +60,43 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
-import { currentUserId } from '@/services/authService'
 import { createProject } from '@/services/projectsService'
 import { getPbMessage } from '@/utils/pbErrors'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const auth = useAuthStore()
 const loading = ref(false)
+const checkingPermission = ref(true)
 const error = ref('')
 const success = ref(false)
 
-const form = ref({ name: '', description: '' })
+const form = ref({ name: '', description: '', accessMode: 'members_only', password: '' })
+const accessModes = [
+  { value: 'members_only', label: '指定成员', description: '默认选项，只有管理员指定的成员可以进入。' },
+  { value: 'public', label: '公开加入', description: '任意已登录用户可以加入并成为校对员。' },
+  { value: 'password', label: '口令加入', description: '输入正确项目口令后成为持久成员。' }
+]
+
+onMounted(async () => {
+  try { await auth.loadAccessContext({ force: true }) }
+  catch (e) { error.value = getPbMessage(e, '无法检查项目创建权限。') }
+  finally { checkingPermission.value = false }
+})
 
 async function handleSubmit() {
   loading.value = true
   error.value = ''
   try {
-    const adminId = currentUserId()
-    if (!adminId) {
-      throw new Error('登录状态已失效，请重新登录后再创建项目')
-    }
-
     const project = await createProject({
       name: form.value.name,
       description: form.value.description,
-      admin: adminId
+      accessMode: form.value.accessMode,
+      password: form.value.password
     })
+    await auth.loadAccessContext({ force: true })
     success.value = true
     setTimeout(() => router.push(`/admin/projects/${project.id}`), 1200)
   } catch (e) {
