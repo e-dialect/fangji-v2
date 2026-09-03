@@ -47,11 +47,11 @@ try {
       password,
       passwordConfirm: password,
       name: 'Core logic test',
-      role: 'admin'
+      role: 'platform_admin'
     }
   })
   userId = registered.id
-  assert.equal(registered.role, 'proofreader')
+  assert.equal(registered.role, 'user')
 
   const userAuth = await request('/api/collections/users/auth-with-password', {
     method: 'POST',
@@ -60,24 +60,29 @@ try {
   await request(`/api/collections/users/records/${userId}`, {
     method: 'PATCH',
     token: userAuth.token,
-    body: { role: 'admin' },
+    body: { role: 'platform_admin' },
     expected: 403
   })
   const unchanged = await request(`/api/collections/users/records/${userId}`, {
     token: userAuth.token
   })
-  assert.equal(unchanged.role, 'proofreader')
+  assert.equal(unchanged.role, 'user')
 
-  const project = await request('/api/collections/projects/records', {
+  const project = await request('/api/fangji/projects', {
     method: 'POST',
     token: adminAuth.token,
+    expected: 201,
     body: {
       name: `Core logic ${suffix}`,
-      description: 'temporary core logic integration project',
-      admin: adminAuth.record.id
+      description: 'temporary core logic integration project'
     }
   })
   projectId = project.id
+  await request(`/api/fangji/projects/${projectId}/members/${userId}`, {
+    method: 'PUT',
+    token: adminAuth.token,
+    body: { role: 'proofreader' }
+  })
   const page = await request('/api/collections/pages/records', {
     method: 'POST',
     token: adminAuth.token,
@@ -136,13 +141,18 @@ try {
       password,
       passwordConfirm: password,
       name: 'Core logic second proofreader',
-      role: 'proofreader'
+      role: 'platform_admin'
     }
   })
   secondUserId = secondUser.id
   const secondUserAuth = await request('/api/collections/users/auth-with-password', {
     method: 'POST',
     body: { identity: secondUserEmail, password }
+  })
+  await request(`/api/fangji/projects/${projectId}/members/${secondUserId}`, {
+    method: 'PUT',
+    token: adminAuth.token,
+    body: { role: 'proofreader' }
   })
   const secondClaim = await request(`/api/fangji/projects/${projectId}/claim`, {
     method: 'POST',
@@ -238,7 +248,7 @@ try {
   console.log('Core logic integration test passed.')
 } finally {
   if (projectId) {
-    await request(`/api/collections/projects/records/${projectId}`, {
+    await request(`/api/fangji/projects/${projectId}`, {
       method: 'DELETE',
       token: adminAuth.token,
       expected: 204

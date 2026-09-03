@@ -77,14 +77,13 @@ const token = auth.token
 
 const projectBody = JSON.stringify({
   name: `Upload integration ${Date.now()}`,
-  description: 'temporary upload integration project',
-  admin: auth.record.id
+  description: 'temporary upload integration project'
 })
-const project = await request('/api/collections/projects/records', {
+const project = await request('/api/fangji/projects', {
   method: 'POST',
   token,
   body: projectBody,
-  expected: 200
+  expected: 201
 })
 
 try {
@@ -456,7 +455,7 @@ try {
 
   console.log('Upload job integration test passed.')
 } finally {
-  await request(`/api/collections/projects/records/${project.id}`, {
+  await request(`/api/fangji/projects/${project.id}`, {
     method: 'DELETE',
     token,
     expected: 204

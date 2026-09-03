@@ -1,0 +1,287 @@
+import assert from 'node:assert/strict'
+
+const baseUrl = process.env.PB_URL || 'http://127.0.0.1:18091'
+const platformEmail = process.env.APP_ADMIN_EMAIL
+const platformPassword = process.env.APP_ADMIN_PASSWORD
+
+if (!platformEmail || !platformPassword) {
+  throw new Error('Set APP_ADMIN_EMAIL and APP_ADMIN_PASSWORD before running this integration test.')
+}
+
+async function rawRequest(path, { method = 'GET', token = '', body } = {}) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers: {
+      ...(token ? { Authorization: token } : {}),
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
+    },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  })
+  const text = await response.text()
+  let payload = null
+  if (text) {
+    try { payload = JSON.parse(text) } catch { payload = text }
+  }
+  return { status: response.status, payload, text }
+}
+
+async function request(path, { expected = 200, ...options } = {}) {
+  const response = await rawRequest(path, options)
+  assert.equal(
+    response.status,
+    expected,
+    `${options.method || 'GET'} ${path} returned ${response.status}: ${response.text}`
+  )
+  return response.payload
+}
+
+const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+const password = 'ProjectAccess123!'
+
+async function createUser(label) {
+  const email = `${label}-${suffix}@example.com`
+  const record = await request('/api/collections/users/records', {
+    method: 'POST',
+    expected: 200,
+    body: {
+      email,
+      password,
+      passwordConfirm: password,
+      name: label,
+      role: 'platform_admin'
+    }
+  })
+  assert.equal(record.role, 'user', 'public registration must not assign a privileged global role')
+  const auth = await request('/api/collections/users/auth-with-password', {
+    method: 'POST',
+    body: { identity: email, password }
+  })
+  return { id: record.id, email, token: auth.token }
+}
+
+const platformAuth = await request('/api/collections/users/auth-with-password', {
+  method: 'POST',
+  body: { identity: platformEmail, password: platformPassword }
+})
+const platform = { id: platformAuth.record.id, token: platformAuth.token }
+
+const creator = await createUser('creator')
+const manager = await createUser('manager')
+const proofreader = await createUser('proofreader')
+const outsider = await createUser('outsider')
+const passwordUser = await createUser('password-user')
+const concurrentCreator = await createUser('concurrent-creator')
+const projectIds = []
+
+try {
+  const platformContext = await request('/api/fangji/access-context', { token: platform.token })
+  assert.equal(platformContext.isPlatformAdmin, true)
+  assert.equal(platformContext.canCreateProjects, true)
+  assert.equal(platformContext.projectLimit, null)
+
+  await request('/api/fangji/projects', {
+    method: 'POST',
+    token: creator.token,
+    expected: 403,
+    body: { name: 'Must not exist' }
+  })
+  await request('/api/collections/projects/records', {
+    method: 'POST',
+    token: creator.token,
+    expected: 403,
+    body: { name: 'Direct create bypass', admin: creator.id, access_mode: 'public' }
+  })
+
+  await request(`/api/fangji/platform/creator-grants/${creator.id}`, {
+    method: 'PUT',
+    token: platform.token,
+    body: { enabled: true, projectLimit: 1 }
+  })
+  const grantedContext = await request('/api/fangji/access-context', { token: creator.token })
+  assert.equal(grantedContext.canCreateProjects, true)
+  assert.equal(grantedContext.projectLimit, 1)
+  assert.equal(grantedContext.remainingProjects, 1)
+
+  await request(`/api/fangji/platform/creator-grants/${passwordUser.id}`, {
+    method: 'PUT',
+    token: platform.token,
+    body: { enabled: true, projectLimit: null }
+  })
+  const unlimitedContext = await request('/api/fangji/access-context', { token: passwordUser.token })
+  assert.equal(unlimitedContext.canCreateProjects, true)
+  assert.equal(unlimitedContext.projectLimit, null)
+  assert.equal(unlimitedContext.remainingProjects, null)
+
+  const privateProject = await request('/api/fangji/projects', {
+    method: 'POST',
+    token: creator.token,
+    expected: 201,
+    body: { name: `Private ${suffix}`, description: 'members only by default' }
+  })
+  projectIds.push(privateProject.id)
+  assert.equal(privateProject.access_mode, 'members_only')
+  assert.equal(privateProject.owner, creator.id)
+  assert.equal(privateProject.capabilities.projectRole, 'owner')
+
+  await request('/api/fangji/projects', {
+    method: 'POST',
+    token: creator.token,
+    expected: 403,
+    body: { name: 'Over quota' }
+  })
+  await request(`/api/fangji/projects/${privateProject.id}`, {
+    token: outsider.token,
+    expected: 403
+  })
+  await request(`/api/collections/projects/records/${privateProject.id}`, {
+    token: outsider.token,
+    expected: 404
+  })
+
+  await request(`/api/fangji/projects/${privateProject.id}/members/${manager.id}`, {
+    method: 'PUT',
+    token: creator.token,
+    body: { role: 'manager' }
+  })
+  await request(`/api/fangji/projects/${privateProject.id}/members/${proofreader.id}`, {
+    method: 'PUT',
+    token: manager.token,
+    body: { role: 'proofreader' }
+  })
+  await request(`/api/fangji/projects/${privateProject.id}/members/${manager.id}`, {
+    method: 'PUT',
+    token: creator.token,
+    body: { role: 'proofreader' }
+  })
+  await request(`/api/fangji/projects/${privateProject.id}/members/${manager.id}`, {
+    method: 'PUT',
+    token: creator.token,
+    body: { role: 'manager' }
+  })
+  const members = await request(`/api/fangji/projects/${privateProject.id}/members`, { token: manager.token })
+  assert.equal(members.filter((item) => item.user === manager.id).length, 1)
+  assert.equal(members.find((item) => item.user === manager.id).role, 'manager')
+  assert.equal(members.find((item) => item.user === proofreader.id).role, 'proofreader')
+
+  const emptyClaim = await request(`/api/fangji/projects/${privateProject.id}/claim`, {
+    method: 'POST',
+    token: proofreader.token
+  })
+  assert.equal(emptyClaim, null)
+
+  const publicProject = await request('/api/fangji/projects', {
+    method: 'POST',
+    token: platform.token,
+    expected: 201,
+    body: { name: `Public ${suffix}`, accessMode: 'public' }
+  })
+  projectIds.push(publicProject.id)
+  const discoverable = await request('/api/fangji/projects?scope=discoverable', { token: outsider.token })
+  assert.ok(discoverable.some((item) => item.id === publicProject.id))
+  await request(`/api/fangji/projects/${publicProject.id}/claim`, {
+    method: 'POST',
+    token: proofreader.token,
+    expected: 403
+  })
+  const joinedPublic = await request(`/api/fangji/projects/${publicProject.id}/join`, {
+    method: 'POST',
+    token: outsider.token,
+    body: {}
+  })
+  assert.equal(joinedPublic.capabilities.projectRole, 'proofreader')
+
+  await request(`/api/fangji/projects/${publicProject.id}`, {
+    method: 'PATCH',
+    token: platform.token,
+    body: { accessMode: 'members_only', name: publicProject.name, description: '' }
+  })
+  const persistentMember = await request(`/api/fangji/projects/${publicProject.id}`, { token: outsider.token })
+  assert.equal(persistentMember.capabilities.projectRole, 'proofreader')
+
+  const projectPassword = 'JoinThisProject!'
+  await request(`/api/fangji/projects/${publicProject.id}`, {
+    method: 'PATCH',
+    token: platform.token,
+    body: { accessMode: 'password', password: projectPassword, name: publicProject.name, description: '' }
+  })
+  await request(`/api/fangji/projects/${publicProject.id}/join`, {
+    method: 'POST',
+    token: passwordUser.token,
+    expected: 403,
+    body: { password: 'wrong-password' }
+  })
+  const joinedWithPassword = await request(`/api/fangji/projects/${publicProject.id}/join`, {
+    method: 'POST',
+    token: passwordUser.token,
+    body: { password: projectPassword }
+  })
+  assert.equal(joinedWithPassword.capabilities.projectRole, 'proofreader')
+
+  await request(`/api/fangji/platform/creator-grants/${creator.id}`, {
+    method: 'PUT',
+    token: platform.token,
+    body: { enabled: false, projectLimit: 1 }
+  })
+  const revokedContext = await request('/api/fangji/access-context', { token: creator.token })
+  assert.equal(revokedContext.canCreateProjects, false)
+  assert.ok(revokedContext.managedProjectIds.includes(privateProject.id))
+
+  await request(`/api/fangji/projects/${privateProject.id}/owner`, {
+    method: 'PUT',
+    token: creator.token,
+    body: { userId: manager.id }
+  })
+  await request(`/api/fangji/platform/creator-grants/${creator.id}`, {
+    method: 'PUT',
+    token: platform.token,
+    body: { enabled: true, projectLimit: 1 }
+  })
+  const releasedQuota = await request('/api/fangji/access-context', { token: creator.token })
+  assert.equal(releasedQuota.ownedProjectCount, 0)
+  assert.equal(releasedQuota.remainingProjects, 1)
+  assert.ok(releasedQuota.managedProjectIds.includes(privateProject.id), 'former owner should remain a manager')
+
+  const replacement = await request('/api/fangji/projects', {
+    method: 'POST',
+    token: creator.token,
+    expected: 201,
+    body: { name: `Replacement ${suffix}` }
+  })
+  projectIds.push(replacement.id)
+
+  await request(`/api/fangji/platform/creator-grants/${concurrentCreator.id}`, {
+    method: 'PUT',
+    token: platform.token,
+    body: { enabled: true, projectLimit: 1 }
+  })
+  const concurrentResults = await Promise.all([
+    rawRequest('/api/fangji/projects', {
+      method: 'POST',
+      token: concurrentCreator.token,
+      body: { name: `Concurrent A ${suffix}` }
+    }),
+    rawRequest('/api/fangji/projects', {
+      method: 'POST',
+      token: concurrentCreator.token,
+      body: { name: `Concurrent B ${suffix}` }
+    })
+  ])
+  assert.deepEqual(concurrentResults.map((item) => item.status).sort(), [201, 403])
+  const concurrentProject = concurrentResults.find((item) => item.status === 201).payload
+  projectIds.push(concurrentProject.id)
+
+  const grants = await request('/api/fangji/platform/creator-grants', { token: platform.token })
+  assert.equal(grants.find((item) => item.user === creator.id).projectLimit, 1)
+
+  console.log('Project access integration test passed.')
+} finally {
+  for (const projectId of projectIds.reverse()) {
+    const response = await rawRequest(`/api/fangji/projects/${projectId}`, {
+      method: 'DELETE',
+      token: platform.token
+    })
+    if (response.status !== 204 && response.status !== 404) {
+      console.warn(`Failed to clean up project ${projectId}: ${response.status} ${response.text}`)
+    }
+  }
+}

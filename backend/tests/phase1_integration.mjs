@@ -59,7 +59,7 @@ async function createUser(label) {
       password,
       passwordConfirm: password,
       name: label,
-      role: 'proofreader'
+      role: 'user'
     }
   })
   createdUserIds.push(record.id)
@@ -79,20 +79,28 @@ try {
   const firstUser = await createUser('phase1-first')
   const secondUser = await createUser('phase1-second')
 
-  const project = await request('/api/collections/projects/records', {
+  const project = await request('/api/fangji/projects', {
     method: 'POST',
     token: admin.token,
+    expected: 201,
     body: {
       name: `Phase 1 integration ${suffix}`,
-      description: 'temporary integration test',
-      admin: admin.id
+      description: 'temporary integration test'
     }
   })
   projectId = project.id
 
+  for (const user of [firstUser, secondUser]) {
+    await request(`/api/fangji/projects/${projectId}/members/${user.id}`, {
+      method: 'PUT',
+      token: admin.token,
+      body: { role: 'proofreader' }
+    })
+  }
+
   const page = await request('/api/collections/pages/records', {
     method: 'POST',
-    token: admin.token,
+    token: superToken,
     body: {
       project: projectId,
       page_number: 1,
@@ -116,7 +124,7 @@ try {
     method: 'PATCH',
     token: firstUser.token,
     body: { status: 'approved' },
-    expected: 404
+    expected: 403
   })
 
   const firstRow = { 词条: '天光', 释义: '清晨' }
@@ -181,7 +189,7 @@ try {
 
   const matchingPage = await request('/api/collections/pages/records', {
     method: 'POST',
-    token: admin.token,
+    token: superToken,
     body: {
       project: projectId,
       page_number: 2,
