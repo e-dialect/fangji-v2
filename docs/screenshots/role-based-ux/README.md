@@ -5,12 +5,12 @@
 ## 校对员
 
 - [项目大厅](proofreader-hall.png)
-- [结构化校对编辑器](proofreader-editor.png)
+- [无轮次提示的结构化校对编辑器](proofreader-editor.png)
 - [移动端项目大厅](proofreader-mobile.png)
 
 ## 管理员
 
 - [异常优先控制台](admin-dashboard.png)
 - [项目状态与条目管理](admin-project.png)
-- [显式差异仲裁](admin-arbitration.png)
-- [移动端差异仲裁](arbitration-mobile.png)
+- [PDF 与动态结果并排仲裁](admin-arbitration.png)
+- [移动端 PDF 仲裁](arbitration-mobile.png)
