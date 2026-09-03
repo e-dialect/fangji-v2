@@ -32,13 +32,13 @@
         </div>
         <div class="project-status-actions">
           <button type="button" :class="{ 'is-selected': selectedStatus === PAGE_STATUS.PENDING }" @click="filterByStatus(PAGE_STATUS.PENDING)">
-            <span>待一校</span><strong>{{ pageStats.pendingFirst }}</strong><small>尚未开始</small>
+            <span>待开始</span><strong>{{ pageStats.unstarted }}</strong><small>尚无校对结果</small>
           </button>
           <button type="button" :class="{ 'is-selected': selectedStatus === ACTIVE_STATUS_FILTER }" @click="filterActivePages">
             <span>处理中</span><strong>{{ pageStats.active }}</strong><small>校对员已领取</small>
           </button>
           <button type="button" :class="{ 'is-selected': selectedStatus === PAGE_STATUS.PROOFREAD }" @click="filterByStatus(PAGE_STATUS.PROOFREAD)">
-            <span>待二校</span><strong>{{ pageStats.pendingSecond }}</strong><small>等待另一人</small>
+            <span>收集中</span><strong>{{ pageStats.collecting }}</strong><small>等待更多独立结果</small>
           </button>
           <button
             type="button"
@@ -178,7 +178,7 @@
       <section id="project-export" class="card project-section mb-6">
         <div class="card-title">导出结果</div>
         <p class="text-sm text-muted mb-3">
-          导出当前项目的最终校对结果 CSV。只有两次校对一致后的条目会使用最终校对内容，其余条目回退到原始内容。
+          导出当前项目的最终校对结果 CSV。只有达到项目人数要求且结果一致，或已完成仲裁的条目会使用最终校对内容；其余条目回退到原始内容。
         </p>
         <div class="flex gap-2 items-center">
           <button class="btn btn-primary" @click="exportCsv" :disabled="exportingCsv">
@@ -207,7 +207,7 @@
               v-model="searchQuery"
               type="search"
               class="form-control"
-              placeholder="条号、PDF页码、文本或校对员"
+              placeholder="条号、PDF页码、文本或当前校对员"
             />
           </label>
           <label class="admin-filter-field">
@@ -288,8 +288,8 @@
                 <th style="width:64px">选择</th>
                 <th>条号</th>
                 <th>状态</th>
-                <th>一校</th>
-                <th>二校</th>
+                <th>校对进度</th>
+                <th>当前校对员</th>
                 <th>不一致次数</th>
                 <th>OCR文本预览</th>
                 <th style="width:100px">操作</th>
@@ -309,8 +309,8 @@
                 </td>
                 <td>第 {{ formatItemNo(pg.page_number, displayedPageOffset + idx) }} 条</td>
                 <td><span :class="statusBadgeClass(pg.status)" class="badge">{{ statusLabel(pg.status) }}</span></td>
-                <td class="text-sm text-muted">{{ pg.expand?.first_proofreader?.name || pg.expand?.first_proofreader?.email || '—' }}</td>
-                <td class="text-sm text-muted">{{ pg.expand?.second_proofreader?.name || pg.expand?.second_proofreader?.email || '—' }}</td>
+                <td class="text-sm text-muted"><strong>{{ pg.proofread_count || 0 }} / {{ project?.required_proofreads || 2 }}</strong></td>
+                <td class="text-sm text-muted">{{ pg.expand?.proofreader?.name || pg.expand?.proofreader?.email || '—' }}</td>
                 <td class="text-sm text-muted">{{ pg.mismatch_count || 0 }}</td>
                 <td class="text-sm text-muted" style="max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                   {{ pg.ocr_text?.slice(0, 80) || '—' }}
@@ -551,7 +551,7 @@ async function loadPages() {
     let result
     do {
       result = await getPagedProjectPages(projectId, page, perPage, {
-        expand: 'proofreader,first_proofreader,second_proofreader'
+        expand: 'proofreader'
       })
       allPages.push(...result.items)
       page += 1

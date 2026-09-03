@@ -1,15 +1,12 @@
 function searchableText(page) {
-  const firstProofreader = page?.expand?.first_proofreader
-  const secondProofreader = page?.expand?.second_proofreader
+  const proofreader = page?.expand?.proofreader
   return [
     page?.page_number,
     page?.pdf_page,
     page?.ocr_text,
     page?.proofread_text,
-    firstProofreader?.name,
-    firstProofreader?.email,
-    secondProofreader?.name,
-    secondProofreader?.email
+    proofreader?.name,
+    proofreader?.email
   ].map((value) => String(value ?? '').toLocaleLowerCase('zh-CN')).join('\n')
 }
 

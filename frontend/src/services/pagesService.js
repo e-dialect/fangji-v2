@@ -4,7 +4,6 @@ import {
   PROOFREADER_ACTIVE_STATUSES,
   statusFilter
 } from '@/constants/pageStatus'
-import { listProjects } from '@/services/projectsService'
 
 function relationFilter(field, id) {
   return `${field}="${id}"`
@@ -58,60 +57,9 @@ export async function listPendingProofreadTasks(page, perPage) {
   })
 }
 
-export async function listProjectQueueSummaries(userId) {
-  const [projects, pages] = await Promise.all([
-    listProjects({ scope: 'proofreading' }),
-    listAllPages({
-      fields: [
-        'id',
-        'project',
-        'status',
-        'page_number',
-        'pdf_page',
-        'proofreader',
-        'first_proofreader',
-        'lease_expires_at',
-        'mismatch_count'
-      ].join(',')
-    })
-  ])
-
-  const statsByProject = Object.fromEntries(projects.map((project) => [project.id, {
-    project,
-    total: 0,
-    claimable: 0,
-    activeMine: 0,
-    activePage: null,
-    completed: 0,
-    mismatchCount: 0,
-    nextPage: null
-  }]))
-
-  for (const page of pages) {
-    const stats = statsByProject[page.project]
-    if (!stats) continue
-    stats.total += 1
-    stats.mismatchCount += Number(page.mismatch_count || 0)
-    if (page.status === PAGE_STATUS.APPROVED) {
-      stats.completed += 1
-      continue
-    }
-    if (PROOFREADER_ACTIVE_STATUSES.includes(page.status) && page.proofreader === userId) {
-      stats.activeMine += 1
-      if (!stats.activePage || Number(page.page_number) < Number(stats.activePage.page_number)) {
-        stats.activePage = page
-      }
-    }
-    if (isPageClaimableBy(page, userId)) {
-      stats.claimable += 1
-      if (!stats.nextPage || Number(page.page_number) < Number(stats.nextPage.page_number)) {
-        stats.nextPage = page
-      }
-    }
-  }
-
-  return Object.values(statsByProject)
-    .filter((stats) => stats.total > 0 || stats.project)
+export async function listProjectQueueSummaries() {
+  const queues = await pb.send('/api/fangji/proofreading-queues', { requestKey: null })
+  return (Array.isArray(queues) ? queues : [])
     .sort((a, b) => {
       if (b.activeMine !== a.activeMine) return b.activeMine - a.activeMine
       if (b.claimable !== a.claimable) return b.claimable - a.claimable
@@ -234,14 +182,4 @@ export async function submitTwoPassProofread(pageId, userId, { rowJson, text, le
     body: { rowJson, text, leaseToken },
     requestKey: null
   })
-}
-
-export function isPageClaimableBy(page, userId) {
-  if (!page || !userId) return false
-  if (page.status === PAGE_STATUS.PENDING) return true
-  if (page.status === PAGE_STATUS.PROOFREAD) return page.first_proofreader !== userId
-  if (!PROOFREADER_ACTIVE_STATUSES.includes(page.status) || page.proofreader === userId) return false
-  const expiresAt = new Date(page.lease_expires_at || '').getTime()
-  if (Number.isFinite(expiresAt) && expiresAt > Date.now()) return false
-  return !page.first_proofreader || page.first_proofreader !== userId
 }

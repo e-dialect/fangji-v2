@@ -26,7 +26,7 @@
       <article class="workspace-stat workspace-stat--accent">
         <span>整体完成率</span>
         <strong>{{ overallSummary.completionPct }}<em>%</em></strong>
-        <small>{{ overallSummary.approved }} 条完成双校或仲裁</small>
+        <small>{{ overallSummary.approved }} 条完成一致校对或仲裁</small>
       </article>
       <article class="workspace-stat">
         <span>校对处理中</span>
@@ -85,9 +85,9 @@
               </td>
               <td>
                 <dl class="project-pipeline">
-                  <div><dt>待一校</dt><dd>{{ item.summary.pendingFirst }}</dd></div>
+                  <div><dt>待开始</dt><dd>{{ item.summary.unstarted }}</dd></div>
                   <div><dt>处理中</dt><dd>{{ item.summary.active }}</dd></div>
-                  <div><dt>待二校</dt><dd>{{ item.summary.pendingSecond }}</dd></div>
+                  <div><dt>收集中</dt><dd>{{ item.summary.collecting }}</dd></div>
                   <div><dt>已完成</dt><dd>{{ item.summary.approved }}</dd></div>
                 </dl>
               </td>

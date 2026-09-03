@@ -144,7 +144,7 @@ async function loadProjects() {
   try {
     const userId = currentUserId(auth.user)
     if (!userId) throw new Error('登录状态已失效，请重新登录')
-    projectQueues.value = await listProjectQueueSummaries(userId)
+    projectQueues.value = await listProjectQueueSummaries()
   } catch (e) {
     error.value = formatPbError('加载项目大厅失败', e)
     projectQueues.value = []

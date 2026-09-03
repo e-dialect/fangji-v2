@@ -13,7 +13,7 @@ export const PAGE_STATUS_LABELS = Object.freeze({
   [PAGE_STATUS.PENDING]: '待校对',
   [PAGE_STATUS.CLAIMED]: '已认领',
   [PAGE_STATUS.PROOFREADING]: '校对中',
-  [PAGE_STATUS.PROOFREAD]: '待确认',
+  [PAGE_STATUS.PROOFREAD]: '收集中',
   [PAGE_STATUS.ARBITRATION]: '待仲裁',
   [PAGE_STATUS.REVIEWING]: '历史处理中',
   [PAGE_STATUS.APPROVED]: '校对完成',

@@ -75,9 +75,9 @@ export function getChangedFields(headers, originalRow, editedRow) {
 export function summarizePages(pages) {
   const summary = {
     total: 0,
-    pendingFirst: 0,
+    unstarted: 0,
     active: 0,
-    pendingSecond: 0,
+    collecting: 0,
     arbitration: 0,
     approved: 0,
     incomplete: 0,
@@ -86,9 +86,9 @@ export function summarizePages(pages) {
 
   for (const page of asList(pages)) {
     summary.total += 1
-    if (page?.status === PAGE_STATUS.PENDING) summary.pendingFirst += 1
+    if (page?.status === PAGE_STATUS.PENDING) summary.unstarted += 1
     if ([PAGE_STATUS.CLAIMED, PAGE_STATUS.PROOFREADING].includes(page?.status)) summary.active += 1
-    if (page?.status === PAGE_STATUS.PROOFREAD) summary.pendingSecond += 1
+    if (page?.status === PAGE_STATUS.PROOFREAD) summary.collecting += 1
     if (page?.status === PAGE_STATUS.ARBITRATION) summary.arbitration += 1
     if (page?.status === PAGE_STATUS.APPROVED) summary.approved += 1
   }

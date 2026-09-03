@@ -28,6 +28,11 @@
             <span class="form-label">{{ project.access_mode === 'password' ? '更新项目口令（留空则保持不变）' : '设置项目口令' }}</span>
             <input v-model="settings.password" type="password" class="form-control" minlength="8" maxlength="72" autocomplete="new-password" placeholder="至少 8 个字符，UTF-8 编码最多 72 字节" />
           </label>
+          <label class="form-group">
+            <span class="form-label">每条材料所需独立校对人数</span>
+            <input v-model.number="settings.requiredProofreads" type="number" class="form-control" min="2" max="1000" step="1" required />
+            <small class="text-muted">至少 2 人。收齐后全部结果完全一致才会自动完成，存在任意差异则进入仲裁。</small>
+          </label>
           <button class="btn btn-primary" :disabled="saving">{{ saving ? '保存中…' : '保存项目设置' }}</button>
         </form>
       </section>
@@ -155,7 +160,7 @@ const nextOwnerId = ref('')
 const keyboardLibrary = ref([])
 const enabledKeyboardIds = ref([])
 const defaultKeyboardId = ref('')
-const settings = reactive({ name: '', description: '', accessMode: 'members_only', password: '' })
+const settings = reactive({ name: '', description: '', accessMode: 'members_only', password: '', requiredProofreads: 2 })
 const newMember = reactive({ userId: '', role: 'proofreader' })
 const accessModes = [
   { value: 'members_only', label: '指定成员', description: '只有所有者或项目管理员添加的用户可以进入。' },
@@ -177,6 +182,7 @@ async function load() {
     settings.name = project.value.name
     settings.description = project.value.description || ''
     settings.accessMode = project.value.access_mode
+    settings.requiredProofreads = Number(project.value.required_proofreads || 2)
     const [nextMembers, nextCandidates, nextKeyboardLibrary, keyboardConfig] = await Promise.all([
       listProjectMembers(projectId),
       listMemberCandidates(projectId),
@@ -201,7 +207,8 @@ async function saveSettings() {
       name: settings.name,
       description: settings.description,
       accessMode: settings.accessMode,
-      password: settings.password
+      password: settings.password,
+      requiredProofreads: settings.requiredProofreads
     })
     settings.password = ''
     success.value = '项目设置已保存，现有成员保持不变。'
