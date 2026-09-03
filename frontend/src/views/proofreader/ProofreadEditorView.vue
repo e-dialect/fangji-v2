@@ -1,60 +1,14 @@
 <template>
-  <main class="editor-layout">
-    <section class="editor-panel" aria-labelledby="source-panel-title">
-      <header class="editor-panel-header editor-panel-header--source">
-        <div class="editor-context">
-          <span>原文定位</span>
-          <strong id="source-panel-title">PDF 第 {{ currentPdfPage }} 页</strong>
-        </div>
-        <div class="editor-toolbar" aria-label="PDF 页码导航">
-          <button
-            class="btn btn-secondary btn-sm"
-            :disabled="currentPdfPage <= allowedPdfPages[0]"
-            @click="switchPdfPage(-1)"
-          >上一页</button>
-          <label class="pdf-page-control">
-            <span class="sr-only">PDF 页码</span>
-            <input
-              v-model.number="pdfPageInput"
-              type="number"
-              class="form-control pdf-page-input"
-              :min="allowedPdfPages[0]"
-              :max="allowedPdfPages[1]"
-              aria-label="PDF 页码"
-              @change="applyPdfPageInput"
-              @keydown.enter.prevent="applyPdfPageInput"
-            />
-          </label>
-          <button
-            class="btn btn-secondary btn-sm"
-            :disabled="currentPdfPage >= allowedPdfPages[1]"
-            @click="switchPdfPage(1)"
-          >下一页</button>
-          <RouterLink to="/tasks" class="btn btn-quiet btn-sm">返回大厅</RouterLink>
-        </div>
-      </header>
-      <div class="editor-panel-body editor-panel-body--pdf">
-        <div v-if="loadingPage" class="panel-loading" aria-live="polite">正在加载原文…</div>
-        <div v-else-if="!page" class="alert alert-error">页面不存在</div>
-        <div v-else-if="pdfError" class="alert alert-error editor-inline-alert">{{ pdfError }}</div>
-        <template v-else>
-          <div v-if="pdfPageWarning" class="alert alert-error editor-inline-alert">{{ pdfPageWarning }}</div>
-          <PdfSinglePageViewer
-            v-if="pdfUrl"
-            :src="pdfUrl"
-            :page-number="currentPdfPage"
-            :watermark-user-id="currentUserId"
-          />
-          <div v-else class="empty-state">
-            <div class="empty-state-mark" aria-hidden="true">PDF</div>
-            <div class="empty-state-text">这个项目没有可预览的 PDF</div>
-            <p>你仍可根据已导入的结构化字段完成校对。</p>
-          </div>
-        </template>
-      </div>
-    </section>
-
-    <section class="editor-panel" aria-labelledby="task-panel-title">
+  <DocumentReviewWorkspace
+    :page="page"
+    :loading="loadingPage"
+    :watermark-user-id="currentUserId"
+    return-to="/tasks"
+    return-label="返回大厅"
+    content-labelled-by="task-panel-title"
+    empty-pdf-description="你仍可根据已导入的结构化字段完成校对。"
+  >
+    <template #panel-header>
       <header class="editor-panel-header editor-panel-header--task">
         <div class="editor-context">
           <span>{{ projectName }} · 独立校对</span>
@@ -81,8 +35,7 @@
           >{{ saving ? '提交中…' : '检查并提交' }}</button>
         </div>
       </header>
-
-      <div class="editor-panel-body editor-panel-body--fields">
+    </template>
         <div v-if="loadingPage" class="panel-loading" aria-live="polite">正在准备校对字段…</div>
         <div v-else-if="!page" class="empty-state">
           <div class="empty-state-text">页面不存在</div>
@@ -157,8 +110,7 @@
 
           <IpaKeyboard @insert="insertText" />
         </template>
-      </div>
-    </section>
+  </DocumentReviewWorkspace>
 
     <div
       v-if="reviewingSubmission"
@@ -199,15 +151,13 @@
         </div>
       </section>
     </div>
-  </main>
 </template>
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
+import DocumentReviewWorkspace from '@/components/editor/DocumentReviewWorkspace.vue'
 import IpaKeyboard from '@/components/editor/IpaKeyboard.vue'
-import PdfSinglePageViewer from '@/components/editor/PdfSinglePageViewer.vue'
-import { useProjectPdf } from '@/composables/useProjectPdf'
 import { useStructuredRow } from '@/composables/useStructuredRow'
 import { useTaskNeighbors } from '@/composables/useTaskNeighbors'
 import { PAGE_STATUS } from '@/constants/pageStatus'
@@ -239,7 +189,6 @@ const saveError = ref('')
 const initialRowJson = ref('')
 const draftStatus = ref('')
 const draftReady = ref(false)
-const pdfPageInput = ref(1)
 const reviewingSubmission = ref(false)
 const submitConfirmButton = ref(null)
 const activeSelection = ref({ field: '', start: null, end: null })
@@ -271,22 +220,6 @@ const {
   insertText: insertIntoActiveField,
   stringifyEditedRow
 } = useStructuredRow()
-
-const {
-  pdfError,
-  currentPdfPage,
-  pdfPageWarning,
-  allowedPdfPages,
-  pdfUrl,
-  resetPdf,
-  resolveProjectPdf,
-  switchPdfPage,
-  syncToBasePage
-} = useProjectPdf(page)
-
-watch(currentPdfPage, (value) => {
-  pdfPageInput.value = value
-})
 
 const {
   prevTaskId,
@@ -333,7 +266,6 @@ async function loadPage() {
   loadingPage.value = true
   page.value = null
   resetNeighbors()
-  resetPdf()
   saveError.value = ''
   saved.value = ''
   initialRowJson.value = ''
@@ -343,11 +275,9 @@ async function loadPage() {
 
   try {
     page.value = await getPage(route.params.id, { expand: 'project,project_file' })
-    syncToBasePage()
     hydrateForProofread(page.value)
     initialRowJson.value = stringifyEditedRow()
     restoreDraft()
-    await resolveProjectPdf()
     await loadNeighbors()
     const flash = takeTaskFlash(window.sessionStorage)
     if (flash) saved.value = flash
@@ -543,15 +473,6 @@ function handleEditorShortcut(event) {
   }
 }
 
-function applyPdfPageInput() {
-  const nextPage = Number(pdfPageInput.value)
-  currentPdfPage.value = Math.max(
-    allowedPdfPages.value[0],
-    Math.min(allowedPdfPages.value[1], Number.isInteger(nextPage) ? nextPage : allowedPdfPages.value[0])
-  )
-  pdfPageInput.value = currentPdfPage.value
-}
-
 async function submitProofread() {
   if (saving.value || !page.value) return
   saving.value = true
@@ -578,7 +499,7 @@ async function submitProofread() {
       result.status === PAGE_STATUS.APPROVED
         ? '该条目已完成。'
         : result.status === PAGE_STATUS.ARBITRATION
-          ? '两次结果不一致，已转交管理员仲裁。'
+          ? '该条目将由管理员继续处理。'
           : '校对已提交。'
     )
 
