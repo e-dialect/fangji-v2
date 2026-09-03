@@ -1,0 +1,27 @@
+/// <reference path="../pb_data/types.d.ts" />
+
+routerAdd("POST", "/api/fangji/auth/change-initial-password", (c) => {
+  const auth = c.get("authRecord")
+  if (!auth) throw new UnauthorizedError("登录状态已失效，请重新登录")
+  const body = new DynamicModel({ currentPassword: "", newPassword: "", newPasswordConfirm: "" })
+  c.bind(body)
+  const currentPassword = String(body.currentPassword || "")
+  const newPassword = String(body.newPassword || "")
+  const confirmation = String(body.newPasswordConfirm || "")
+  if (!auth.getBool("must_change_password")) throw new BadRequestError("该账号不需要执行首次改密")
+  if (!auth.validatePassword(currentPassword)) throw new BadRequestError("当前密码不正确")
+  if (newPassword.length < 10 || newPassword.length > 200) throw new BadRequestError("新密码必须为 10 到 200 个字符")
+  if (newPassword !== confirmation) throw new BadRequestError("两次输入的新密码不一致")
+  if (auth.validatePassword(newPassword)) throw new BadRequestError("新密码不能与初始密码相同")
+
+  $app.dao().runInTransaction((txDao) => {
+    const user = txDao.findRecordById("users", auth.getId())
+    if (!user.getBool("must_change_password")) throw new BadRequestError("该账号不需要执行首次改密")
+    if (!user.validatePassword(currentPassword)) throw new BadRequestError("当前密码不正确")
+    user.setPassword(newPassword)
+    user.set("must_change_password", false)
+    txDao.saveRecord(user)
+  })
+  c.response().header().set("Cache-Control", "no-store")
+  return c.json(200, { changed: true, message: "密码已更新，请使用新密码重新登录。" })
+}, $apis.requireRecordAuth("users"))

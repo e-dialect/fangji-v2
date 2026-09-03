@@ -33,6 +33,14 @@ export async function registerProofreader({ email, password, passwordConfirm, na
   }, { requestKey: null })
 }
 
+export async function changeInitialPassword({ currentPassword, newPassword, newPasswordConfirm }) {
+  return pb.send('/api/fangji/auth/change-initial-password', {
+    method: 'POST',
+    body: { currentPassword, newPassword, newPasswordConfirm },
+    requestKey: null
+  })
+}
+
 export function clearAuth() {
   pb.authStore.clear()
 }

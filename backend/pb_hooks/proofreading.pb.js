@@ -20,6 +20,7 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
   } = require(`${__hooks}/lib/proofreading_workflow.js`)
   const auth = c.get("authRecord")
   if (!auth) throw new ForbiddenError("无权执行此操作")
+  if (auth.getBool("must_change_password")) throw new ForbiddenError("首次登录请先修改密码")
   const summarize = (page, issued) => ({
     id: page.getId(),
     project: page.getString("project"),
@@ -354,6 +355,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/submit`, (c) => {
   } = require(`${__hooks}/lib/proofreading_workflow.js`)
   const auth = c.get("authRecord")
   if (!auth) throw new ForbiddenError("无权执行此操作")
+  if (auth.getBool("must_change_password")) throw new ForbiddenError("首次登录请先修改密码")
   const userId = auth.getId()
   const pageId = c.pathParam("pageId")
   const body = new DynamicModel({ rowJson: "", text: "", leaseToken: "" })

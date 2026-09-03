@@ -6,7 +6,8 @@ function getAuthState() {
   const isLoggedIn = pb.authStore.isValid
 
   return {
-    isLoggedIn
+    isLoggedIn,
+    mustChangePassword: Boolean(pb.authStore.model?.must_change_password)
   }
 }
 
@@ -15,6 +16,7 @@ function getHomePath() {
   const auth = getAuthState()
 
   if (!auth.isLoggedIn) return '/login'
+  if (auth.mustChangePassword) return '/change-password'
   return '/workspace'
 }
 
@@ -40,6 +42,12 @@ const routes = [
     name: 'Register',
     component: () => import('@/views/RegisterView.vue'),
     meta: { guest: true }
+  },
+  {
+    path: '/change-password',
+    name: 'ChangeInitialPassword',
+    component: () => import('@/views/ChangeInitialPasswordView.vue'),
+    meta: { requiresAuth: true, allowInitialPassword: true }
   },
   {
     path: '/admin',
@@ -132,6 +140,10 @@ router.beforeEach((to) => {
 
   if (to.meta.requiresAuth && !auth.isLoggedIn) {
     return `/login?redirect=${encodeURIComponent(to.fullPath)}`
+  }
+
+  if (auth.isLoggedIn && auth.mustChangePassword && !to.meta.allowInitialPassword) {
+    return '/change-password'
   }
 
 })

@@ -24,6 +24,7 @@ export const useAuthStore = defineStore('auth', () => {
   const canCreateProjects = computed(() => Boolean(accessContext.value?.canCreateProjects))
   const hasManagedProjects = computed(() => Boolean(accessContext.value?.managedProjectIds?.length))
   const hasProofreadingProjects = computed(() => Boolean(accessContext.value?.proofreadingProjectIds?.length))
+  const mustChangePassword = computed(() => Boolean(user.value?.must_change_password))
 
   async function loadAccessContext({ force = false } = {}) {
     if (!pb.authStore.isValid) {
@@ -80,6 +81,7 @@ export const useAuthStore = defineStore('auth', () => {
     canCreateProjects,
     hasManagedProjects,
     hasProofreadingProjects,
+    mustChangePassword,
     loadAccessContext,
     login,
     register,

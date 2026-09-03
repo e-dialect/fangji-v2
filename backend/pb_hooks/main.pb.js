@@ -172,6 +172,7 @@ onRecordAfterCreateRequest((e) => {
 // This keeps role assignment fixed and prevents privilege escalation at signup.
 onRecordBeforeCreateRequest((e) => {
   e.record.set("role", "user")
+  e.record.set("must_change_password", false)
 }, "users")
 
 // A signed-in user may update profile fields, but role assignment is an
@@ -191,6 +192,9 @@ onRecordBeforeUpdateRequest((e) => {
   }
   if (e.record.getString("role") !== current.getString("role")) {
     throw new ForbiddenError("不允许修改账户角色")
+  }
+  if (e.record.getBool("must_change_password") !== current.getBool("must_change_password")) {
+    throw new ForbiddenError("请通过首次改密流程更新密码状态")
   }
 }, "users")
 

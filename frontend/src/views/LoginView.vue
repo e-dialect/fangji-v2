@@ -33,6 +33,7 @@
           />
         </div>
 
+        <div v-if="success" class="alert alert-success">{{ success }}</div>
         <div v-if="error" class="alert alert-error">{{ error }}</div>
 
         <button
@@ -67,6 +68,7 @@ const email = ref('')
 const password = ref('')
 const loading = ref(false)
 const error = ref('')
+const success = computed(() => route.query.passwordChanged === '1' ? '密码已更新，请使用新密码登录。' : '')
 
 const canSubmit = computed(() => email.value.trim() && password.value)
 
@@ -99,7 +101,7 @@ async function handleLogin() {
     password.value = ''
     await redirectAfterLogin()
   } catch (e) {
-    error.value = e?.response?.message || '登录失败，请检查邮箱和密码'
+    error.value = e?.response?.message || '登录失败，请检查用户名、邮箱或密码'
   } finally {
     loading.value = false
   }
