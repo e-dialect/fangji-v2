@@ -18,6 +18,7 @@ import (
 	"github.com/pocketbase/pocketbase/models"
 	"github.com/pocketbase/pocketbase/models/schema"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tokens"
 )
 
 func newExternalIdentityTestService(t *testing.T) (*externalIdentityService, *tests.TestApp) {
@@ -252,6 +253,55 @@ func TestExternalLoginRouteRejectsBadProviderCredentials(t *testing.T) {
 	e.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestExternalProviderDiscoveryAndExplicitBindingRoutes(t *testing.T) {
+	_, app := newExternalIdentityTestService(t)
+	service := newExternalIdentityService(app, &mockExternalProvider{subject: "bind-subject"})
+	service.register()
+	e, err := apis.InitApi(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.OnBeforeServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
+		t.Fatal(err)
+	}
+	users, err := app.Dao().FindRecordsByFilter("users", `id != ""`, "created", 1, 0)
+	if err != nil || len(users) != 1 {
+		t.Fatalf("load test user: users=%d err=%v", len(users), err)
+	}
+	token, err := tokens.NewRecordAuthToken(app, users[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := func(method, path, authToken string, body string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		if authToken != "" {
+			req.Header.Set("Authorization", authToken)
+		}
+		e.ServeHTTP(recorder, req)
+		return recorder
+	}
+
+	guestProviders := request(http.MethodGet, "/api/fangji/auth/providers", "", "")
+	if guestProviders.Code != http.StatusOK || !strings.Contains(guestProviders.Body.String(), `"bound":false`) {
+		t.Fatalf("guest provider discovery: status=%d body=%s", guestProviders.Code, guestProviders.Body.String())
+	}
+	unauthorized := request(http.MethodPost, "/api/fangji/auth/external/mock/bind", "", `{"identity":"remote","password":"secret"}`)
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated bind status=%d body=%s", unauthorized.Code, unauthorized.Body.String())
+	}
+	bound := request(http.MethodPost, "/api/fangji/auth/external/mock/bind", token, `{"identity":"remote","password":"secret"}`)
+	if bound.Code != http.StatusOK || !strings.Contains(bound.Body.String(), `"bound":true`) {
+		t.Fatalf("authenticated bind: status=%d body=%s", bound.Code, bound.Body.String())
+	}
+	userProviders := request(http.MethodGet, "/api/fangji/auth/providers", token, "")
+	if userProviders.Code != http.StatusOK || !strings.Contains(userProviders.Body.String(), `"bound":true`) {
+		t.Fatalf("bound provider discovery: status=%d body=%s", userProviders.Code, userProviders.Body.String())
 	}
 }
 
