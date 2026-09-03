@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -27,6 +28,7 @@ import (
 const (
 	externalCredentialBodyLimit = 16 * 1024
 	externalAttemptLimit        = 10
+	externalTransportLimit      = 300
 	externalAttemptWindow       = 5 * time.Minute
 	externalAttemptMaxClients   = 10000
 )
@@ -50,6 +52,7 @@ type externalIdentityService struct {
 	app       core.App
 	providers map[string]externalIdentityProvider
 	limiter   *externalAttemptLimiter
+	transport *externalAttemptLimiter
 }
 
 func newExternalIdentityService(app core.App, providers ...externalIdentityProvider) *externalIdentityService {
@@ -64,6 +67,7 @@ func newExternalIdentityService(app core.App, providers ...externalIdentityProvi
 		app:       app,
 		providers: registry,
 		limiter:   newExternalAttemptLimiter(externalAttemptLimit, externalAttemptWindow),
+		transport: newExternalAttemptLimiter(externalTransportLimit, externalAttemptWindow),
 	}
 }
 
@@ -170,7 +174,9 @@ func (s *externalIdentityService) authenticateRequest(c echo.Context) (externalI
 	if identity == "" || len(identity) > 200 || password == "" || len(password) > 1024 {
 		return nil, "", apis.NewBadRequestError("请输入有效的外部账号和密码。", nil)
 	}
-	if !s.limiter.Allow(externalLimitKey(providerID, c.RealIP())) {
+	clientAllowed := s.limiter.Allow(externalLimitKey("client:"+providerID, c.RealIP()))
+	transportAllowed := s.transport.Allow(externalLimitKey("transport:"+providerID, transportIP(c.Request())))
+	if !clientAllowed || !transportAllowed {
 		s.logAuthResult(providerID, "rate_limited")
 		return nil, "", apis.NewApiError(http.StatusTooManyRequests, "登录尝试过于频繁，请稍后再试。", nil)
 	}
@@ -245,6 +251,14 @@ func (s *externalIdentityService) resolveOrCreateUser(provider, subject string) 
 		created = true
 		return nil
 	})
+	if err != nil {
+		// A concurrent first login may win the unique mapping race after our
+		// transaction started. Reuse that committed mapping instead of surfacing a
+		// transient failure or creating a second local account.
+		if mapped, lookupErr := findMappedUser(s.app.Dao(), provider, subject); lookupErr == nil {
+			return mapped, false, nil
+		}
+	}
 	return user, created, err
 }
 
@@ -394,4 +408,12 @@ func (l *externalAttemptLimiter) Allow(key string) bool {
 func externalLimitKey(provider, ip string) string {
 	hash := sha256.Sum256([]byte(provider + "\x00" + ip))
 	return hex.EncodeToString(hash[:])
+}
+
+func transportIP(request *http.Request) string {
+	host, _, err := net.SplitHostPort(request.RemoteAddr)
+	if err == nil && host != "" {
+		return host
+	}
+	return request.RemoteAddr
 }

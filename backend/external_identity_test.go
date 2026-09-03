@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -117,6 +118,53 @@ func TestExternalIdentityCreatesOneStableLocalMapping(t *testing.T) {
 	}
 }
 
+func TestConcurrentExternalLoginsConvergeOnOneAccount(t *testing.T) {
+	service, app := newExternalIdentityTestService(t)
+	const workers = 6
+	start := make(chan struct{})
+	results := make(chan struct {
+		id  string
+		err error
+	}, workers)
+	var wait sync.WaitGroup
+	for index := 0; index < workers; index++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			user, _, err := service.resolveOrCreateUser("mock", "concurrent-subject")
+			id := ""
+			if user != nil {
+				id = user.Id
+			}
+			results <- struct {
+				id  string
+				err error
+			}{id: id, err: err}
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(results)
+
+	userID := ""
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent login failed: %v", result.err)
+		}
+		if userID == "" {
+			userID = result.id
+		}
+		if result.id != userID {
+			t.Fatalf("concurrent login mapped to %q and %q", userID, result.id)
+		}
+	}
+	mappings, err := app.Dao().FindRecordsByFilter("external_identity_mappings", `subject = "concurrent-subject"`, "created", 10, 0)
+	if err != nil || len(mappings) != 1 {
+		t.Fatalf("concurrent mapping count=%d err=%v", len(mappings), err)
+	}
+}
+
 func TestExternalIdentityBindingConflictsAndIdempotency(t *testing.T) {
 	service, app := newExternalIdentityTestService(t)
 	users, err := app.Dao().FindRecordsByFilter("users", `id != ""`, "created", 2, 0)
@@ -170,6 +218,16 @@ func TestExternalAttemptLimiterBoundsClientEntries(t *testing.T) {
 	}
 	if len(limiter.entries) != externalAttemptMaxClients {
 		t.Fatalf("limiter retained %d clients; want %d", len(limiter.entries), externalAttemptMaxClients)
+	}
+}
+
+func TestTransportIPDoesNotTrustForwardedHeaders(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request.RemoteAddr = "10.20.30.40:12345"
+	request.Header.Set("X-Forwarded-For", "203.0.113.99")
+	request.Header.Set("X-Real-IP", "198.51.100.20")
+	if got := transportIP(request); got != "10.20.30.40" {
+		t.Fatalf("transport IP trusted a spoofable forwarding header: %q", got)
 	}
 }
 
