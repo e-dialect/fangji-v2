@@ -118,6 +118,14 @@ export function getDifferingHeaders(headers, firstRow, secondRow) {
   })
 }
 
+export function getDifferingHeadersForRows(headers, rows) {
+  const candidates = asList(rows)
+  if (candidates.length < 2) return []
+  return asList(headers).filter((header) => {
+    return new Set(candidates.map((row) => textValue(row?.[header]))).size > 1
+  })
+}
+
 export function getUnresolvedHeaders(differingHeaders, resolvedHeaders) {
   const resolved = resolvedHeaders instanceof Set
     ? resolvedHeaders

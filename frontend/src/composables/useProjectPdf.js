@@ -1,5 +1,5 @@
 import { computed, ref } from 'vue'
-import { findLatestProjectPdf, getFileUrl } from '@/services/projectFilesService'
+import { findLatestProjectPdf, getFileUrl, getProjectFile } from '@/services/projectFilesService'
 
 export function useProjectPdf(page) {
   const pdfFileRecord = ref(null)
@@ -43,6 +43,13 @@ export function useProjectPdf(page) {
     }
 
     try {
+      if (page.value?.project_file) {
+        const record = await getProjectFile(page.value.project_file)
+        if (record?.file) {
+          pdfFileRecord.value = record
+          return
+        }
+      }
       const matched = await findLatestProjectPdf(page.value?.project)
       if (matched) pdfFileRecord.value = matched
     } catch (error) {

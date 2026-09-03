@@ -1,21 +1,35 @@
 <template>
-  <main class="container page workspace-page arbitration-page">
-    <header class="page-heading">
-      <div>
-        <RouterLink :to="`/admin/projects/${projectId}?status=arbitration`" class="back-link">← 返回待仲裁列表</RouterLink>
-        <div class="page-eyebrow">管理员仲裁台</div>
-        <h1>逐项形成最终版本</h1>
-        <p v-if="caseData?.page">
-          第 {{ caseData.page.page_number }} 条 · PDF 第 {{ caseData.page.pdf_page }} 页 · 第 {{ caseData.page.proofread_round }} 轮
-        </p>
-      </div>
-    </header>
+  <DocumentReviewWorkspace
+    :page="casePage"
+    :loading="loading"
+    :watermark-user-id="currentUserId"
+    :return-to="`/admin/projects/${projectId}?status=arbitration`"
+    return-label="返回列表"
+    content-labelled-by="arbitration-panel-title"
+    empty-pdf-description="仍可根据导入原文和校对结果完成仲裁。"
+  >
+    <template #panel-header>
+      <header class="editor-panel-header editor-panel-header--task">
+        <div class="editor-context">
+          <span>管理员仲裁台 · 第 {{ casePage?.proofread_round || '—' }} 轮</span>
+          <strong id="arbitration-panel-title">第 {{ casePage?.page_number || '—' }} 条</strong>
+        </div>
+        <div class="editor-toolbar">
+          <span v-if="casePage" class="task-position">{{ resolvedCount }} / {{ differingHeaders.length }} 项差异</span>
+          <button
+            class="btn btn-success btn-sm"
+            :disabled="submitting || loading || unresolvedHeaders.length > 0 || !caseData"
+            @click="openSubmitReview"
+          >{{ submitting ? '保存中…' : '检查并完成仲裁' }}</button>
+        </div>
+      </header>
+    </template>
 
-    <div v-if="loading" class="panel-loading" aria-live="polite">正在加载两次校对结果…</div>
+    <div v-if="loading" class="panel-loading" aria-live="polite">正在加载校对结果与原文…</div>
     <div v-else-if="error" class="alert alert-error" role="alert">{{ error }}</div>
 
     <template v-else-if="caseData">
-      <section class="arbitration-summary card" aria-label="仲裁进度">
+      <section class="arbitration-summary" aria-label="仲裁进度">
         <div>
           <div class="page-eyebrow">差异确认</div>
           <strong>{{ resolvedCount }} / {{ differingHeaders.length }}</strong>
@@ -30,11 +44,11 @@
         </div>
       </section>
 
-      <section class="card arbitration-workspace">
+      <section class="arbitration-workspace">
         <header class="arbitration-toolbar">
           <div>
             <h2>校对结果对比</h2>
-            <p>采用任一版本，或直接编辑最终内容；匹配字段会随结果一并保存。</p>
+            <p>对照左侧 PDF，采用任一版本或直接编辑最终内容。</p>
           </div>
           <div class="arbitration-toolbar__view" role="group" aria-label="字段显示范围">
             <button type="button" :class="{ active: !showAllFields }" @click="showAllFields = false">
@@ -49,8 +63,13 @@
         <div v-if="differingHeaders.length" class="bulk-source-actions" aria-label="批量采用来源">
           <span>批量处理差异项</span>
           <button type="button" class="btn btn-secondary btn-sm" @click="applySourceToDifferences('original')">全部采用原文</button>
-          <button type="button" class="btn btn-secondary btn-sm" @click="applySourceToDifferences('first')">全部采用一校</button>
-          <button type="button" class="btn btn-secondary btn-sm" @click="applySourceToDifferences('second')">全部采用二校</button>
+          <button
+            v-for="item in attemptRows"
+            :key="`bulk-${item.key}`"
+            type="button"
+            class="btn btn-secondary btn-sm"
+            @click="applySourceToDifferences(item.key)"
+          >全部采用{{ item.label }}</button>
         </div>
 
         <div v-if="visibleHeaders.length" class="arbitration-fields">
@@ -65,7 +84,7 @@
           >
             <header class="arbitration-field__header">
               <h3>{{ header }}</h3>
-              <span v-if="!differs(header)" class="resolution-state resolution-state--matching">两校一致</span>
+              <span v-if="!differs(header)" class="resolution-state resolution-state--matching">结果一致</span>
               <span v-else-if="isResolved(header)" class="resolution-state resolution-state--resolved">已确认 · {{ resolutionLabel(header) }}</span>
               <span v-else class="resolution-state resolution-state--pending">待确认</span>
             </header>
@@ -76,22 +95,27 @@
                 <p>{{ displayValue(originalRow[header]) }}</p>
                 <button type="button" @click="pickValue(header, 'original')">采用原文</button>
               </section>
-              <section class="comparison-option" :class="{ selected: sourceIs(header, 'first') }">
-                <span>{{ firstAttempt?.proofreader_name || '一校结果' }}</span>
-                <p>{{ displayValue(firstRow[header]) }}</p>
-                <button type="button" @click="pickValue(header, 'first')">采用一校</button>
-              </section>
-              <section class="comparison-option" :class="{ selected: sourceIs(header, 'second') }">
-                <span>{{ secondAttempt?.proofreader_name || '二校结果' }}</span>
-                <p>{{ displayValue(secondRow[header]) }}</p>
-                <button type="button" @click="pickValue(header, 'second')">采用二校</button>
+              <section
+                v-for="item in attemptRows"
+                :key="`${header}-${item.key}`"
+                class="comparison-option"
+                :class="{ selected: sourceIs(header, item.key) }"
+              >
+                <span>{{ item.label }}</span>
+                <p>{{ displayValue(item.row[header]) }}</p>
+                <button type="button" @click="pickValue(header, item.key)">采用此结果</button>
               </section>
               <label class="final-value" :class="{ selected: sourceIs(header, 'custom') }">
                 <span>最终结果</span>
                 <textarea
+                  :ref="(element) => setTextareaRef(header, element)"
                   v-model="finalRow[header]"
                   class="form-control"
                   :aria-label="`${header}的最终仲裁结果`"
+                  @focus="rememberSelection(header, $event)"
+                  @select="rememberSelection(header, $event)"
+                  @keyup="rememberSelection(header, $event)"
+                  @click="rememberSelection(header, $event)"
                   @input="onFinalInput(header)"
                 ></textarea>
               </label>
@@ -101,12 +125,14 @@
 
         <div v-else class="empty-state">
           <div class="empty-state-mark" aria-hidden="true">同</div>
-          <div class="empty-state-text">两次校对没有字段差异</div>
-          <p>可切换到“全部字段”复核；若状态异常，请返回项目后重新加载。</p>
+          <div class="empty-state-text">所有校对结果一致</div>
+          <p>可切换到“全部字段”并结合左侧原文复核。</p>
         </div>
       </section>
 
-      <section class="card arbitration-submit-card">
+      <IpaKeyboard @insert="insertText" />
+
+      <section class="arbitration-submit-card">
         <div class="form-group">
           <label class="form-label" for="arbitration-note">仲裁说明 <span class="text-muted">（可选）</span></label>
           <textarea
@@ -122,7 +148,7 @@
           <p>
             <strong v-if="unresolvedHeaders.length">还有 {{ unresolvedHeaders.length }} 个差异字段未确认</strong>
             <strong v-else>最终结果已准备好</strong>
-            <span>提交后将完成条目，并永久保留两次校对与本次仲裁记录。</span>
+            <span>提交后将完成条目，并永久保留全部校对结果与本次仲裁记录。</span>
           </p>
           <button
             class="btn btn-success"
@@ -133,32 +159,35 @@
         </div>
       </section>
     </template>
+  </DocumentReviewWorkspace>
 
-    <div v-if="reviewingSubmission" class="modal-backdrop" role="presentation" @click.self="closeSubmitReview">
-      <section class="confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="arbitration-review-title" @keydown.esc="closeSubmitReview">
-        <div class="confirmation-dialog__mark" aria-hidden="true">裁</div>
-        <div>
-          <div class="page-eyebrow">最终确认</div>
-          <h2 id="arbitration-review-title">完成第 {{ caseData?.page?.page_number }} 条仲裁？</h2>
-          <p>已确认 {{ differingHeaders.length }} 个差异字段，其中 {{ sourceCount('custom') }} 个经过手工编辑。</p>
-          <p class="text-sm text-muted">提交后条目进入“校对完成”，该操作不能在当前界面撤回。</p>
-        </div>
-        <div class="confirmation-dialog__actions">
-          <button type="button" class="btn btn-secondary" @click="closeSubmitReview">继续检查</button>
-          <button ref="submitConfirmButton" type="button" class="btn btn-success" :disabled="submitting" @click="submitFinal">
-            {{ submitting ? '正在保存…' : '确认完成仲裁' }}
-          </button>
-        </div>
-      </section>
-    </div>
-  </main>
+  <div v-if="reviewingSubmission" class="modal-backdrop" role="presentation" @click.self="closeSubmitReview">
+    <section class="confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="arbitration-review-title" @keydown.esc="closeSubmitReview">
+      <div class="confirmation-dialog__mark" aria-hidden="true">裁</div>
+      <div>
+        <div class="page-eyebrow">最终确认</div>
+        <h2 id="arbitration-review-title">完成第 {{ casePage?.page_number }} 条仲裁？</h2>
+        <p>已确认 {{ differingHeaders.length }} 个差异字段，其中 {{ sourceCount('custom') }} 个经过手工编辑。</p>
+        <p class="text-sm text-muted">提交后条目进入“校对完成”，该操作不能在当前界面撤回。</p>
+      </div>
+      <div class="confirmation-dialog__actions">
+        <button type="button" class="btn btn-secondary" @click="closeSubmitReview">继续检查</button>
+        <button ref="submitConfirmButton" type="button" class="btn btn-success" :disabled="submitting" @click="submitFinal">
+          {{ submitting ? '正在保存…' : '确认完成仲裁' }}
+        </button>
+      </div>
+    </section>
+  </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { RouterLink, onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import DocumentReviewWorkspace from '@/components/editor/DocumentReviewWorkspace.vue'
+import IpaKeyboard from '@/components/editor/IpaKeyboard.vue'
 import { composeRowText, safeParseRowJson } from '@/composables/useStructuredRow'
-import { getDifferingHeaders, getUnresolvedHeaders } from '@/lib/workspaceInsights'
+import { getDifferingHeadersForRows, getUnresolvedHeaders } from '@/lib/workspaceInsights'
+import { currentUserId as getCurrentUserId } from '@/services/authService'
 import { getArbitrationCase, submitArbitration } from '@/services/arbitrationService'
 import { getPbMessage } from '@/utils/pbErrors'
 
@@ -176,25 +205,26 @@ const reviewingSubmission = ref(false)
 const submitConfirmButton = ref(null)
 const showAllFields = ref(false)
 const caseData = ref(null)
+const attemptRows = ref([])
 const originalRow = reactive({})
-const firstRow = reactive({})
-const secondRow = reactive({})
 const finalRow = reactive({})
 const resolutionSource = reactive({})
 const resolvedHeaders = reactive(new Set())
 const touchedHeaders = reactive(new Set())
 const note = ref('')
+const activeSelection = ref({ field: '', start: null, end: null })
+const textareaRefs = new Map()
 
-const firstAttempt = computed(() => caseData.value?.attempts?.find((item) => item.pass_no === 1) || null)
-const secondAttempt = computed(() => caseData.value?.attempts?.find((item) => item.pass_no === 2) || null)
-const headers = computed(() => {
-  return [...new Set([
-    ...Object.keys(originalRow),
-    ...Object.keys(firstRow),
-    ...Object.keys(secondRow)
-  ])]
-})
-const differingHeaders = computed(() => getDifferingHeaders(headers.value, firstRow, secondRow))
+const currentUserId = computed(() => getCurrentUserId() || '')
+const casePage = computed(() => caseData.value?.page || null)
+const headers = computed(() => [...new Set([
+  ...Object.keys(originalRow),
+  ...attemptRows.value.flatMap((item) => Object.keys(item.row))
+])])
+const differingHeaders = computed(() => getDifferingHeadersForRows(
+  headers.value,
+  attemptRows.value.map((item) => item.row)
+))
 const visibleHeaders = computed(() => showAllFields.value ? headers.value : differingHeaders.value)
 const unresolvedHeaders = computed(() => getUnresolvedHeaders(differingHeaders.value, resolvedHeaders))
 const resolvedCount = computed(() => differingHeaders.value.length - unresolvedHeaders.value.length)
@@ -227,13 +257,19 @@ async function loadCase() {
     }
     caseData.value = result
     Object.assign(originalRow, safeParseRowJson(result.page?.ocr_row_json) || { 内容: result.page?.ocr_text || '' })
-    Object.assign(firstRow, safeParseRowJson(result.attempts?.find((item) => item.pass_no === 1)?.row_json) || {})
-    Object.assign(secondRow, safeParseRowJson(result.attempts?.find((item) => item.pass_no === 2)?.row_json) || {})
+    attemptRows.value = (result.attempts || [])
+      .filter((attempt) => attempt.kind !== 'arbitration')
+      .sort((left, right) => Number(left.pass_no) - Number(right.pass_no))
+      .map((attempt, index) => ({
+        attempt,
+        key: `attempt:${attempt.id || index}`,
+        label: attempt.proofreader_name || `校对结果 ${index + 1}`,
+        row: safeParseRowJson(attempt.row_json) || {}
+      }))
+
     for (const header of headers.value) {
-      finalRow[header] = firstRow[header] ?? secondRow[header] ?? originalRow[header] ?? ''
-      if (String(firstRow[header] ?? '') === String(secondRow[header] ?? '')) {
-        resolutionSource[header] = 'matching'
-      }
+      finalRow[header] = attemptRows.value[0]?.row?.[header] ?? originalRow[header] ?? ''
+      if (!differingHeaders.value.includes(header)) resolutionSource[header] = 'matching'
     }
   } catch (e) {
     error.value = getPbMessage(e, '加载仲裁材料失败')
@@ -258,19 +294,20 @@ function sourceIs(header, source) {
   return resolutionSource[header] === source
 }
 
+function sourceLabel(source) {
+  if (source === 'original') return '采用原文'
+  if (source === 'custom') return '手工编辑'
+  const item = attemptRows.value.find((candidate) => candidate.key === source)
+  return item ? `采用${item.label}` : '已确认'
+}
+
 function resolutionLabel(header) {
-  return ({
-    original: '采用原文',
-    first: '采用一校',
-    second: '采用二校',
-    custom: '手工编辑'
-  })[resolutionSource[header]] || '已确认'
+  return sourceLabel(resolutionSource[header])
 }
 
 function sourceValue(header, source) {
   if (source === 'original') return originalRow[header]
-  if (source === 'second') return secondRow[header]
-  return firstRow[header]
+  return attemptRows.value.find((item) => item.key === source)?.row?.[header]
 }
 
 function pickValue(header, source) {
@@ -294,6 +331,36 @@ function applySourceToDifferences(source) {
 
 function sourceCount(source) {
   return differingHeaders.value.filter((header) => resolutionSource[header] === source).length
+}
+
+function setTextareaRef(header, element) {
+  if (element) textareaRefs.set(header, element)
+  else textareaRefs.delete(header)
+}
+
+function rememberSelection(header, event) {
+  const target = event?.target
+  activeSelection.value = {
+    field: header,
+    start: Number.isInteger(target?.selectionStart) ? target.selectionStart : null,
+    end: Number.isInteger(target?.selectionEnd) ? target.selectionEnd : null
+  }
+}
+
+async function insertText(text) {
+  const header = activeSelection.value.field || visibleHeaders.value[0] || headers.value[0]
+  if (!header) return
+  const current = String(finalRow[header] ?? '')
+  const start = Number.isInteger(activeSelection.value.start) ? activeSelection.value.start : current.length
+  const end = Number.isInteger(activeSelection.value.end) ? activeSelection.value.end : start
+  finalRow[header] = `${current.slice(0, start)}${text}${current.slice(end)}`
+  onFinalInput(header)
+  const cursor = start + text.length
+  await nextTick()
+  const target = textareaRefs.get(header)
+  target?.focus()
+  target?.setSelectionRange(cursor, cursor)
+  activeSelection.value = { field: header, start: cursor, end: cursor }
 }
 
 async function openSubmitReview() {
@@ -325,9 +392,8 @@ async function submitFinal() {
   submitting.value = true
   submitError.value = ''
   try {
-    const rowJson = JSON.stringify(finalRow)
     await submitArbitration(pageId, {
-      rowJson,
+      rowJson: JSON.stringify(finalRow),
       text: composeRowText(headers.value, finalRow),
       note: note.value
     })
@@ -344,5 +410,12 @@ async function submitFinal() {
 </script>
 
 <style scoped>
-.arbitration-page { display: grid; gap: 1rem; }
+.arbitration-summary { margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--gray-200); border-radius: var(--radius); background: #fff; }
+.arbitration-workspace { overflow: hidden; border: 1px solid var(--gray-200); border-radius: var(--radius); background: #fff; }
+.arbitration-source-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.arbitration-submit-card { margin-top: 1rem; padding: 1rem; border: 1px solid var(--gray-200); border-radius: var(--radius); background: #fff; }
+
+@media (max-width: 640px) {
+  .arbitration-source-grid { grid-template-columns: 1fr; }
+}
 </style>

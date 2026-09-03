@@ -387,7 +387,7 @@ routerAdd("GET", `${FANGJI_API}/pages/:pageId/arbitration`, (c) => {
     "proofreading_attempts",
     `page = "${pageId}" && round = ${round}`,
     "pass_no",
-    3,
+    100,
     0
   )
 

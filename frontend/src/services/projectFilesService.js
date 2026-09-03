@@ -2,7 +2,7 @@ import pb from '@/lib/pocketbase'
 
 export function getFileUrl(record, fileName) {
   if (!record || !fileName) return null
-  return pb.files.getUrl(record, fileName)
+  return pb.files.getURL(record, fileName)
 }
 
 export async function createProjectPdf({ projectId, file }) {

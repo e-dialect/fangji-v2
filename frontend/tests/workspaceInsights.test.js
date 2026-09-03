@@ -4,6 +4,7 @@ import { PAGE_STATUS } from '../src/constants/pageStatus.js'
 import {
   getChangedFields,
   getDifferingHeaders,
+  getDifferingHeadersForRows,
   getProofreaderQueueAction,
   getUnresolvedHeaders,
   sortProjectInsights,
@@ -106,6 +107,21 @@ test('workspace: identifies only fields that differ between arbitration attempts
     ),
     ['音标']
   )
+})
+
+test('workspace: identifies differences across an arbitrary number of attempts', () => {
+  assert.deepEqual(
+    getDifferingHeadersForRows(
+      ['词目', '音标', '释义'],
+      [
+        { 词目: '阿妗', 音标: 'a', 释义: '' },
+        { 词目: '阿妗', 音标: 'a', 释义: null },
+        { 词目: '阿妗', 音标: 'ɑ', 释义: '' }
+      ]
+    ),
+    ['音标']
+  )
+  assert.deepEqual(getDifferingHeadersForRows(['词目'], [{ 词目: '阿妗' }]), [])
 })
 
 test('workspace: keeps arbitration blocked until every differing field is explicitly resolved', () => {
