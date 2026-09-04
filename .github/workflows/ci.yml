@@ -50,8 +50,49 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Validate Compose configuration
-        run: docker compose config
+      - name: Validate Compose entry points
+        env:
+          TRAEFIK_HOST: fangji.example.com
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.dev.yml config --quiet
+          docker compose -f docker-compose.traefik.yml config --quiet
+
+          docker compose -f docker-compose.yml -f docker-compose.named-volume.yml config --quiet
+          docker compose -f docker-compose.dev.yml -f docker-compose.named-volume.yml config --quiet
+          docker compose -f docker-compose.traefik.yml -f docker-compose.named-volume.yml config --quiet
+
+      - name: Verify Compose entry point behavior
+        env:
+          TRAEFIK_HOST: fangji.example.com
+        run: |
+          docker compose config --format json | jq -e '
+            (.services.frontend.ports | length == 1) and
+            (.services.frontend.ports[0].published == "8080") and
+            (.services.frontend.ports[0].target == 80) and
+            ((.services.frontend.labels // {}) | length == 0) and
+            ((.services.backend.ports // []) | length == 0)
+          '
+
+          docker compose -f docker-compose.dev.yml config --format json | jq -e '
+            (.services.frontend.ports[0].published == "5250") and
+            (.services.backend.ports[0].host_ip == "127.0.0.1") and
+            (.services.backend.ports[0].published == "8090")
+          '
+
+          docker compose -f docker-compose.traefik.yml config --format json | jq -e '
+            ((.services.frontend.ports // []) | length == 0) and
+            ((.services.backend.ports // []) | length == 0) and
+            (.services.frontend.networks | has("app")) and
+            (.services.frontend.networks | has("traefik")) and
+            (.services.backend.networks | has("app")) and
+            ((.services.backend.networks | has("traefik")) | not) and
+            (.networks.traefik.external == true) and
+            (.networks.traefik.name == "traefik-global-proxy") and
+            (.services.frontend.labels["traefik.docker.network"] == "traefik-global-proxy") and
+            (.services.frontend.labels["traefik.http.routers.fangji.rule"] == "Host(`fangji.example.com`)") and
+            (.services.frontend.labels["traefik.http.services.fangji.loadbalancer.server.port"] == "80")
+          '
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
