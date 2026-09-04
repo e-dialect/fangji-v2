@@ -70,6 +70,7 @@ const manager = await createUser('manager')
 const proofreader = await createUser('proofreader')
 const outsider = await createUser('outsider')
 const passwordUser = await createUser('password-user')
+const rateLimitedUser = await createUser('rate-limited-user')
 const concurrentCreator = await createUser('concurrent-creator')
 const projectIds = []
 
@@ -209,6 +210,26 @@ try {
     token: passwordUser.token,
     expected: 403,
     body: { password: 'wrong-password' }
+  })
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    await request(`/api/fangji/projects/${publicProject.id}/join`, {
+      method: 'POST',
+      token: rateLimitedUser.token,
+      expected: 403,
+      body: { password: `wrong-password-${attempt}` }
+    })
+  }
+  await request(`/api/fangji/projects/${publicProject.id}/join`, {
+    method: 'POST',
+    token: rateLimitedUser.token,
+    expected: 429,
+    body: { password: 'wrong-password-5' }
+  })
+  await request(`/api/fangji/projects/${publicProject.id}/join`, {
+    method: 'POST',
+    token: rateLimitedUser.token,
+    expected: 429,
+    body: { password: projectPassword }
   })
   const joinedWithPassword = await request(`/api/fangji/projects/${publicProject.id}/join`, {
     method: 'POST',

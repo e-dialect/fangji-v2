@@ -3,7 +3,8 @@ FROM golang:1.21-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
-COPY main.go import_service.go import_service_test.go ./
+COPY *.go ./
+COPY pb_migrations/ ./pb_migrations/
 RUN go test ./...
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pocketbase .
 

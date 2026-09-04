@@ -33,7 +33,7 @@
           </div>
           <label v-else-if="project.access_mode === 'password'" class="form-group">
             <span class="form-label">项目口令</span>
-            <input v-model="passwords[project.id]" type="password" class="form-control" autocomplete="off" placeholder="输入项目管理员提供的口令" />
+            <input v-model="passwords[project.id]" type="password" class="form-control" maxlength="72" autocomplete="off" placeholder="输入项目管理员提供的口令" />
           </label>
           <footer class="project-work-card__footer">
             <span>{{ project.access_mode === 'members_only' ? '由项目管理员指定成员' : '加入后成为项目校对员' }}</span>

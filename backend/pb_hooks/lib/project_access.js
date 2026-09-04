@@ -1,4 +1,7 @@
 const idPattern = /^[a-z0-9]{15}$/
+const joinFailureLimit = 5
+const joinFailureWindowMs = 15 * 60 * 1000
+const joinBlockDurationMs = 15 * 60 * 1000
 
 function auth(c) {
   const record = c.get("authRecord")
@@ -155,6 +158,76 @@ function projectAcl(dao, projectId) {
   return records.length ? records[0] : null
 }
 
+function projectJoinAttempt(dao, projectId, userId) {
+  const records = dao.findRecordsByFilter(
+    "project_join_attempts",
+    `project = "${projectId}" && user = "${userId}"`,
+    "",
+    1,
+    0
+  )
+  return records.length ? records[0] : null
+}
+
+function dateMillis(value) {
+  if (!value || value.isZero()) return 0
+  return value.time().unixMilli()
+}
+
+function projectJoinBlocked(attempt, nowMs) {
+  return Boolean(attempt && dateMillis(attempt.getDateTime("blocked_until")) > nowMs)
+}
+
+function recordProjectJoinFailure(dao, projectId, userId, nowMs) {
+  let attempt = projectJoinAttempt(dao, projectId, userId)
+  if (!attempt) attempt = new Record(dao.findCollectionByNameOrId("project_join_attempts"))
+
+  const windowStarted = dateMillis(attempt.getDateTime("window_started"))
+  const withinWindow = windowStarted > 0 && nowMs - windowStarted < joinFailureWindowMs
+  const failures = (withinWindow ? attempt.getInt("failures") : 0) + 1
+  const startedAt = withinWindow ? new Date(windowStarted).toISOString() : new Date(nowMs).toISOString()
+  const blockedUntil = failures >= joinFailureLimit
+    ? new Date(nowMs + joinBlockDurationMs).toISOString()
+    : ""
+
+  attempt.set("project", projectId)
+  attempt.set("user", userId)
+  attempt.set("failures", failures)
+  attempt.set("window_started", startedAt)
+  attempt.set("blocked_until", blockedUntil)
+  dao.saveRecord(attempt)
+  return failures >= joinFailureLimit
+}
+
+function clearProjectJoinAttempt(dao, projectId, userId) {
+  const attempt = projectJoinAttempt(dao, projectId, userId)
+  if (attempt) dao.deleteRecord(attempt)
+}
+
+function clearProjectJoinAttempts(dao, projectId) {
+  const attempts = dao.findRecordsByFilter(
+    "project_join_attempts",
+    `project = "${projectId}"`,
+    "",
+    1000000,
+    0
+  )
+  for (const attempt of attempts) dao.deleteRecord(attempt)
+}
+
+function verifyProjectPassword(secret, password) {
+  return Boolean(secret && secret.validatePassword(String(password || "")))
+}
+
+function utf8ByteLength(value) {
+  let length = 0
+  for (const character of String(value || "")) {
+    const codePoint = character.codePointAt(0)
+    length += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4
+  }
+  return length
+}
+
 function syncProjectAcl(dao, projectId) {
   const projectRecord = project(dao, projectId)
   const memberships = dao.findRecordsByFilter(
@@ -187,21 +260,22 @@ function syncProjectAcl(dao, projectId) {
 
 function setProjectPassword(dao, projectId, password) {
   const value = String(password || "")
-  if (value.length < 8 || value.length > 200) {
-    throw new BadRequestError("项目口令必须为 8 到 200 个字符")
+  if (value.length < 8 || utf8ByteLength(value) > 72) {
+    throw new BadRequestError("项目口令至少需要 8 个字符，且编码后不能超过 72 字节")
   }
   let secret = projectSecret(dao, projectId)
   if (!secret) secret = new Record(dao.findCollectionByNameOrId("project_access_secrets"))
-  const salt = $security.randomString(48)
   secret.set("project", projectId)
-  secret.set("salt", salt)
-  secret.set("password_hash", $security.sha256(`${salt}\0${value}`))
+  secret.set("username", `project_${projectId}`)
+  secret.setPassword(value)
   dao.saveRecord(secret)
+  clearProjectJoinAttempts(dao, projectId)
 }
 
 function deleteProjectSecret(dao, projectId) {
   const secret = projectSecret(dao, projectId)
   if (secret) dao.deleteRecord(secret)
+  clearProjectJoinAttempts(dao, projectId)
 }
 
 module.exports = {
@@ -221,6 +295,12 @@ module.exports = {
   creationCapability,
   projectJson,
   projectSecret,
+  projectJoinAttempt,
+  projectJoinBlocked,
+  recordProjectJoinFailure,
+  clearProjectJoinAttempt,
+  clearProjectJoinAttempts,
+  verifyProjectPassword,
   projectAcl,
   syncProjectAcl,
   setProjectPassword,

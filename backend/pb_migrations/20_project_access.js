@@ -172,6 +172,40 @@ migrate((db) => {
 
   const secrets = new Collection({
     name: "project_access_secrets",
+    type: "auth",
+    schema: [
+      {
+        name: "project",
+        type: "relation",
+        required: true,
+        options: {
+          collectionId: projects.id,
+          cascadeDelete: true,
+          minSelect: null,
+          maxSelect: 1,
+          displayFields: ["name"]
+        }
+      }
+    ],
+    indexes: ["CREATE UNIQUE INDEX idx_project_access_secret_project ON project_access_secrets (project)"],
+    listRule: null,
+    viewRule: null,
+    createRule: null,
+    updateRule: null,
+    deleteRule: null,
+    options: {
+      allowEmailAuth: false,
+      allowOAuth2Auth: false,
+      allowUsernameAuth: false,
+      minPasswordLength: 8,
+      onlyVerified: false,
+      requireEmail: false
+    }
+  })
+  dao.saveCollection(secrets)
+
+  const joinAttempts = new Collection({
+    name: "project_join_attempts",
     type: "base",
     schema: [
       {
@@ -186,17 +220,30 @@ migrate((db) => {
           displayFields: ["name"]
         }
       },
-      { name: "salt", type: "text", required: true, options: { min: 32, max: 128, pattern: "^[a-zA-Z0-9_-]+$" } },
-      { name: "password_hash", type: "text", required: true, options: { min: 64, max: 64, pattern: "^[a-f0-9]{64}$" } }
+      {
+        name: "user",
+        type: "relation",
+        required: true,
+        options: {
+          collectionId: users.id,
+          cascadeDelete: true,
+          minSelect: null,
+          maxSelect: 1,
+          displayFields: ["email"]
+        }
+      },
+      { name: "failures", type: "number", required: true, options: { min: 0, max: 100000, noDecimal: true } },
+      { name: "window_started", type: "date", required: true, options: {} },
+      { name: "blocked_until", type: "date", required: false, options: {} }
     ],
-    indexes: ["CREATE UNIQUE INDEX idx_project_access_secret_project ON project_access_secrets (project)"],
+    indexes: ["CREATE UNIQUE INDEX idx_project_join_attempt_user ON project_join_attempts (project, user)"],
     listRule: null,
     viewRule: null,
     createRule: null,
     updateRule: null,
     deleteRule: null
   })
-  dao.saveCollection(secrets)
+  dao.saveCollection(joinAttempts)
 
   // Legacy proofreaders previously had global access. Persist that access as
   // explicit project membership before the collection rules are tightened.
@@ -380,6 +427,52 @@ migrate((db) => {
 }, (db) => {
   const dao = new Dao(db)
 
+  const projectFiles = dao.findCollectionByNameOrId("project_files")
+  projectFiles.listRule = '@request.auth.id != ""'
+  projectFiles.viewRule = '@request.auth.id != ""'
+  projectFiles.createRule = '@request.auth.role = "admin"'
+  projectFiles.updateRule = '@request.auth.role = "admin"'
+  projectFiles.deleteRule = '@request.auth.role = "admin"'
+  dao.saveCollection(projectFiles)
+
+  const pages = dao.findCollectionByNameOrId("pages")
+  const legacyPageReadRule = [
+    '@request.auth.id != "" && (',
+    '@request.auth.role = "admin"',
+    '|| (@request.auth.role = "proofreader" && status != "importing")',
+    ')'
+  ].join(" ")
+  pages.listRule = legacyPageReadRule
+  pages.viewRule = legacyPageReadRule
+  pages.createRule = '@request.auth.role = "admin"'
+  pages.updateRule = '@request.auth.role = "admin"'
+  pages.deleteRule = '@request.auth.role = "admin"'
+  dao.saveCollection(pages)
+
+  const attempts = dao.findCollectionByNameOrId("proofreading_attempts")
+  attempts.listRule = '@request.auth.role = "admin" || proofreader = @request.auth.id'
+  attempts.viewRule = attempts.listRule
+  attempts.createRule = null
+  attempts.updateRule = null
+  attempts.deleteRule = null
+  dao.saveCollection(attempts)
+
+  const importJobs = dao.findCollectionByNameOrId("import_jobs")
+  importJobs.listRule = '@request.auth.role = "admin"'
+  importJobs.viewRule = '@request.auth.role = "admin"'
+  importJobs.createRule = null
+  importJobs.updateRule = null
+  importJobs.deleteRule = '@request.auth.role = "admin"'
+  dao.saveCollection(importJobs)
+
+  const importErrors = dao.findCollectionByNameOrId("import_job_errors")
+  importErrors.listRule = '@request.auth.role = "admin"'
+  importErrors.viewRule = '@request.auth.role = "admin"'
+  importErrors.createRule = null
+  importErrors.updateRule = null
+  importErrors.deleteRule = null
+  dao.saveCollection(importErrors)
+
   const projects = dao.findCollectionByNameOrId("projects")
   const aclField = projects.schema.getFieldByName("acl")
   if (aclField) {
@@ -387,7 +480,7 @@ migrate((db) => {
     dao.saveCollection(projects)
   }
 
-  for (const name of ["project_access_secrets", "project_creator_grants", "project_memberships", "project_acls"]) {
+  for (const name of ["project_join_attempts", "project_access_secrets", "project_creator_grants", "project_memberships", "project_acls"]) {
     try { dao.deleteCollection(dao.findCollectionByNameOrId(name)) } catch {}
   }
 

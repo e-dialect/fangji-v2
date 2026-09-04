@@ -38,7 +38,7 @@
         </fieldset>
         <div v-if="form.accessMode === 'password'" class="form-group">
           <label class="form-label">项目口令</label>
-          <input v-model="form.password" type="password" class="form-control" minlength="8" maxlength="200" required autocomplete="new-password" placeholder="至少 8 个字符" />
+          <input v-model="form.password" type="password" class="form-control" minlength="8" maxlength="72" required autocomplete="new-password" placeholder="至少 8 个字符，UTF-8 编码最多 72 字节" />
         </div>
         <div class="form-group">
           <label class="form-label">项目简介</label>

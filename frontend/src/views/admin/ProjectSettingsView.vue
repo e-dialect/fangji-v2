@@ -26,7 +26,7 @@
           </fieldset>
           <label v-if="settings.accessMode === 'password'" class="form-group">
             <span class="form-label">{{ project.access_mode === 'password' ? '更新项目口令（留空则保持不变）' : '设置项目口令' }}</span>
-            <input v-model="settings.password" type="password" class="form-control" minlength="8" autocomplete="new-password" placeholder="至少 8 个字符" />
+            <input v-model="settings.password" type="password" class="form-control" minlength="8" maxlength="72" autocomplete="new-password" placeholder="至少 8 个字符，UTF-8 编码最多 72 字节" />
           </label>
           <button class="btn btn-primary" :disabled="saving">{{ saving ? '保存中…' : '保存项目设置' }}</button>
         </form>
