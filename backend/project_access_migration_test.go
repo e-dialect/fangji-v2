@@ -17,6 +17,8 @@ import (
 )
 
 func TestProjectAccessMigrationRollbackRestoresLegacyRules(t *testing.T) {
+	const projectAccessMigrationNumber = 20
+
 	migrationsDir, err := filepath.Abs("pb_migrations")
 	if err != nil {
 		t.Fatal(err)
@@ -42,6 +44,9 @@ func TestProjectAccessMigrationRollbackRestoresLegacyRules(t *testing.T) {
 	})
 	for index, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".js") {
+			continue
+		}
+		if migrationNumber(entry.Name()) > projectAccessMigrationNumber {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(migrationsDir, entry.Name()))
