@@ -242,6 +242,12 @@ func TestExternalClientIPExtractorUsesNearestUntrustedHop(t *testing.T) {
 	}
 }
 
+func TestExternalClientIPExtractorRejectsInvalidTrustedProxyCIDR(t *testing.T) {
+	if _, err := trustedClientIPExtractor("172.20.0.0/16,not-a-cidr"); err == nil {
+		t.Fatal("expected invalid trusted proxy CIDR to be rejected")
+	}
+}
+
 func TestExternalLoginRateLimitIgnoresRotatingSpoofedXFF(t *testing.T) {
 	_, app := newExternalIdentityTestService(t)
 	service := newExternalIdentityService(app, &mockExternalProvider{err: errExternalCredentials})

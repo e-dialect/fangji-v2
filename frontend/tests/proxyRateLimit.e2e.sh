@@ -19,6 +19,7 @@ docker run -d \
   --network "$network_name" \
   --network-alias backend \
   -e HINGHWA_IDENTITY_BASE_URL=https://127.0.0.1:1 \
+  -e TRUSTED_PROXY_CIDRS="$proxy_network_cidr" \
   fangji-backend:ci >/dev/null
 
 backend_ready=false
