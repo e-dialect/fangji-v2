@@ -8,12 +8,13 @@ if (!platformEmail || !platformPassword) {
   throw new Error('Set APP_ADMIN_EMAIL and APP_ADMIN_PASSWORD before running this integration test.')
 }
 
-async function rawRequest(path, { method = 'GET', token = '', body } = {}) {
+async function rawRequest(path, { method = 'GET', token = '', body, headers = {} } = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       ...(token ? { Authorization: token } : {}),
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...headers
     },
     body: body === undefined ? undefined : JSON.stringify(body)
   })
@@ -71,6 +72,9 @@ const proofreader = await createUser('proofreader')
 const outsider = await createUser('outsider')
 const passwordUser = await createUser('password-user')
 const rateLimitedUser = await createUser('rate-limited-user')
+const sharedSourceAttackers = await Promise.all(
+  Array.from({ length: 6 }, (_, index) => createUser(`shared-source-attacker-${index + 1}`))
+)
 const concurrentCreator = await createUser('concurrent-creator')
 const projectIds = []
 
@@ -205,12 +209,6 @@ try {
     token: platform.token,
     body: { accessMode: 'password', password: projectPassword, name: publicProject.name, description: '' }
   })
-  await request(`/api/fangji/projects/${publicProject.id}/join`, {
-    method: 'POST',
-    token: passwordUser.token,
-    expected: 403,
-    body: { password: 'wrong-password' }
-  })
   for (let attempt = 1; attempt <= 4; attempt += 1) {
     await request(`/api/fangji/projects/${publicProject.id}/join`, {
       method: 'POST',
@@ -231,12 +229,45 @@ try {
     expected: 429,
     body: { password: projectPassword }
   })
+
+  const resetProjectPassword = 'JoinThisProjectReset!'
+  await request(`/api/fangji/projects/${publicProject.id}`, {
+    method: 'PATCH',
+    token: platform.token,
+    body: {
+      accessMode: 'password',
+      password: resetProjectPassword,
+      name: publicProject.name,
+      description: ''
+    }
+  })
   const joinedWithPassword = await request(`/api/fangji/projects/${publicProject.id}/join`, {
     method: 'POST',
     token: passwordUser.token,
-    body: { password: projectPassword }
+    body: { password: resetProjectPassword }
   })
   assert.equal(joinedWithPassword.capabilities.projectRole, 'proofreader')
+
+  const sharedSourcePassword = 'SharedSourceGuard!'
+  await request(`/api/fangji/projects/${publicProject.id}`, {
+    method: 'PATCH',
+    token: platform.token,
+    body: {
+      accessMode: 'password',
+      password: sharedSourcePassword,
+      name: publicProject.name,
+      description: ''
+    }
+  })
+  for (let index = 0; index < sharedSourceAttackers.length; index += 1) {
+    await request(`/api/fangji/projects/${publicProject.id}/join`, {
+      method: 'POST',
+      token: sharedSourceAttackers[index].token,
+      expected: index < 4 ? 403 : 429,
+      headers: { 'X-Forwarded-For': `198.51.100.${index + 1}` },
+      body: { password: `shared-source-wrong-${index + 1}` }
+    })
+  }
 
   await request(`/api/fangji/platform/creator-grants/${creator.id}`, {
     method: 'PUT',

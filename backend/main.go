@@ -45,6 +45,7 @@ func main() {
 		Automigrate:  automigrate,
 		Dir:          migrationsDir,
 	})
+	registerTrustedClientIP(app)
 
 	app.OnAfterBootstrap().PreAdd(func(_ *core.BootstrapEvent) error {
 		app.Dao().ModelQueryTimeout = time.Duration(queryTimeout) * time.Second

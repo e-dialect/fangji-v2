@@ -245,6 +245,41 @@ migrate((db) => {
   })
   dao.saveCollection(joinAttempts)
 
+  const joinSourceAttempts = new Collection({
+    name: "project_join_source_attempts",
+    type: "base",
+    schema: [
+      {
+        name: "project",
+        type: "relation",
+        required: true,
+        options: {
+          collectionId: projects.id,
+          cascadeDelete: true,
+          minSelect: null,
+          maxSelect: 1,
+          displayFields: ["name"]
+        }
+      },
+      {
+        name: "source_key",
+        type: "text",
+        required: true,
+        options: { min: 64, max: 64, pattern: "^[a-f0-9]{64}$" }
+      },
+      { name: "failures", type: "number", required: true, options: { min: 0, max: 100000, noDecimal: true } },
+      { name: "window_started", type: "date", required: true, options: {} },
+      { name: "blocked_until", type: "date", required: false, options: {} }
+    ],
+    indexes: ["CREATE UNIQUE INDEX idx_project_join_attempt_source ON project_join_source_attempts (project, source_key)"],
+    listRule: null,
+    viewRule: null,
+    createRule: null,
+    updateRule: null,
+    deleteRule: null
+  })
+  dao.saveCollection(joinSourceAttempts)
+
   // Legacy proofreaders previously had global access. Persist that access as
   // explicit project membership before the collection rules are tightened.
   for (const project of existingProjects) {
@@ -480,7 +515,7 @@ migrate((db) => {
     dao.saveCollection(projects)
   }
 
-  for (const name of ["project_join_attempts", "project_access_secrets", "project_creator_grants", "project_memberships", "project_acls"]) {
+  for (const name of ["project_join_source_attempts", "project_join_attempts", "project_access_secrets", "project_creator_grants", "project_memberships", "project_acls"]) {
     try { dao.deleteCollection(dao.findCollectionByNameOrId(name)) } catch {}
   }
 

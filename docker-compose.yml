@@ -12,6 +12,7 @@ services:
       - PB_ADMIN_EMAIL=${PB_ADMIN_EMAIL:-}
       - PB_ADMIN_PASSWORD=${PB_ADMIN_PASSWORD:-}
       - PB_ALLOWED_ORIGINS=${PB_ALLOWED_ORIGINS:-}
+      - TRUSTED_PROXY_CIDRS=${TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
     volumes:
       # Persist PocketBase data on the host for easy backup and migration.
       - ./pb_data:/pb/pb_data
@@ -40,6 +41,7 @@ services:
     environment:
       - VITE_BACKEND_URL=${BACKEND_URL:-}
       - ENABLE_POCKETBASE_ADMIN_UI=${ENABLE_POCKETBASE_ADMIN_UI:-false}
+      - TRUSTED_PROXY_CIDRS=${TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
     depends_on:
       backend:
         condition: service_healthy

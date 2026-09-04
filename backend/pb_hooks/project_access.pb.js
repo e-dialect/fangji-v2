@@ -180,9 +180,10 @@ routerAdd("PUT", "/api/fangji/projects/:projectId/owner", (c) => {
 }, $apis.requireRecordAuth("users"))
 
 routerAdd("POST", "/api/fangji/projects/:projectId/join", (c) => {
-  const { auth: fangjiAuth, assertId: fangjiAssertId, project: fangjiProject, membership: fangjiMembership, projectSecret: fangjiProjectSecret, projectJoinAttempt: fangjiProjectJoinAttempt, projectJoinBlocked: fangjiProjectJoinBlocked, recordProjectJoinFailure: fangjiRecordProjectJoinFailure, clearProjectJoinAttempt: fangjiClearProjectJoinAttempt, verifyProjectPassword: fangjiVerifyProjectPassword, projectJson: fangjiProjectJson, syncProjectAcl: fangjiSyncProjectAcl } = require(`${__hooks}/lib/project_access.js`)
+  const { auth: fangjiAuth, assertId: fangjiAssertId, project: fangjiProject, membership: fangjiMembership, projectSecret: fangjiProjectSecret, projectJoinAttempt: fangjiProjectJoinAttempt, projectJoinSourceKey: fangjiProjectJoinSourceKey, projectJoinSourceAttempt: fangjiProjectJoinSourceAttempt, projectJoinBlocked: fangjiProjectJoinBlocked, recordProjectJoinFailure: fangjiRecordProjectJoinFailure, recordProjectJoinSourceFailure: fangjiRecordProjectJoinSourceFailure, clearProjectJoinAttempt: fangjiClearProjectJoinAttempt, clearProjectJoinSourceAttempt: fangjiClearProjectJoinSourceAttempt, verifyProjectPassword: fangjiVerifyProjectPassword, projectJson: fangjiProjectJson, syncProjectAcl: fangjiSyncProjectAcl } = require(`${__hooks}/lib/project_access.js`)
   const auth = fangjiAuth(c)
   const projectId = fangjiAssertId(c.pathParam("projectId"), "项目")
+  const sourceKey = fangjiProjectJoinSourceKey(c.realIP())
   const body = new DynamicModel({ password: "" })
   c.bind(body)
   let result = null
@@ -206,20 +207,23 @@ routerAdd("POST", "/api/fangji/projects/:projectId/join", (c) => {
     if (accessMode === "password") {
       const nowMs = Date.now()
       const attempt = fangjiProjectJoinAttempt(txDao, projectId, auth.getId())
-      if (fangjiProjectJoinBlocked(attempt, nowMs)) {
+      const sourceAttempt = fangjiProjectJoinSourceAttempt(txDao, projectId, sourceKey)
+      if (fangjiProjectJoinBlocked(attempt, nowMs) || fangjiProjectJoinBlocked(sourceAttempt, nowMs)) {
         denial = { status: 429, message: "项目口令尝试过于频繁，请稍后再试" }
         return
       }
       const secret = fangjiProjectSecret(txDao, projectId)
       const password = String(body.password || "")
       if (!fangjiVerifyProjectPassword(secret, password)) {
-        const blocked = fangjiRecordProjectJoinFailure(txDao, projectId, auth.getId(), nowMs)
-        denial = blocked
+        const userBlocked = fangjiRecordProjectJoinFailure(txDao, projectId, auth.getId(), nowMs)
+        const sourceBlocked = fangjiRecordProjectJoinSourceFailure(txDao, projectId, sourceKey, nowMs)
+        denial = userBlocked || sourceBlocked
           ? { status: 429, message: "项目口令尝试过于频繁，请稍后再试" }
           : { status: 403, message: "项目口令不正确" }
         return
       }
       fangjiClearProjectJoinAttempt(txDao, projectId, auth.getId())
+      fangjiClearProjectJoinSourceAttempt(txDao, projectId, sourceKey)
     }
     const membership = new Record(txDao.findCollectionByNameOrId("project_memberships"))
     membership.set("project", projectId)

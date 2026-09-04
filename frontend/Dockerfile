@@ -24,6 +24,7 @@ COPY nginx/pocketbase-admin-enabled.conf /opt/fangji/nginx/pocketbase-admin-enab
 COPY docker-entrypoint.d/40-runtime-config.sh /docker-entrypoint.d/40-runtime-config.sh
 RUN mkdir -p /etc/nginx/snippets \
   && cp /opt/fangji/nginx/pocketbase-admin-disabled.conf /etc/nginx/snippets/pocketbase-admin.conf \
+  && : > /etc/nginx/snippets/trusted-proxies.conf \
   && chmod +x /docker-entrypoint.d/40-runtime-config.sh
 COPY --from=build /app/dist /usr/share/nginx/html
 

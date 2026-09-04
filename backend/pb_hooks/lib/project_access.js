@@ -169,6 +169,22 @@ function projectJoinAttempt(dao, projectId, userId) {
   return records.length ? records[0] : null
 }
 
+function projectJoinSourceKey(source) {
+  const normalized = String(source || "").trim().toLowerCase() || "unknown"
+  return $security.sha256(`fangji-project-join-source-v1:${normalized}`)
+}
+
+function projectJoinSourceAttempt(dao, projectId, sourceKey) {
+  const records = dao.findRecordsByFilter(
+    "project_join_source_attempts",
+    `project = "${projectId}" && source_key = "${sourceKey}"`,
+    "",
+    1,
+    0
+  )
+  return records.length ? records[0] : null
+}
+
 function dateMillis(value) {
   if (!value || value.isZero()) return 0
   return value.time().unixMilli()
@@ -199,8 +215,34 @@ function recordProjectJoinFailure(dao, projectId, userId, nowMs) {
   return failures >= joinFailureLimit
 }
 
+function recordProjectJoinSourceFailure(dao, projectId, sourceKey, nowMs) {
+  let attempt = projectJoinSourceAttempt(dao, projectId, sourceKey)
+  if (!attempt) attempt = new Record(dao.findCollectionByNameOrId("project_join_source_attempts"))
+
+  const windowStarted = dateMillis(attempt.getDateTime("window_started"))
+  const withinWindow = windowStarted > 0 && nowMs - windowStarted < joinFailureWindowMs
+  const failures = (withinWindow ? attempt.getInt("failures") : 0) + 1
+  const startedAt = withinWindow ? new Date(windowStarted).toISOString() : new Date(nowMs).toISOString()
+  const blockedUntil = failures >= joinFailureLimit
+    ? new Date(nowMs + joinBlockDurationMs).toISOString()
+    : ""
+
+  attempt.set("project", projectId)
+  attempt.set("source_key", sourceKey)
+  attempt.set("failures", failures)
+  attempt.set("window_started", startedAt)
+  attempt.set("blocked_until", blockedUntil)
+  dao.saveRecord(attempt)
+  return failures >= joinFailureLimit
+}
+
 function clearProjectJoinAttempt(dao, projectId, userId) {
   const attempt = projectJoinAttempt(dao, projectId, userId)
+  if (attempt) dao.deleteRecord(attempt)
+}
+
+function clearProjectJoinSourceAttempt(dao, projectId, sourceKey) {
+  const attempt = projectJoinSourceAttempt(dao, projectId, sourceKey)
   if (attempt) dao.deleteRecord(attempt)
 }
 
@@ -213,6 +255,15 @@ function clearProjectJoinAttempts(dao, projectId) {
     0
   )
   for (const attempt of attempts) dao.deleteRecord(attempt)
+
+  const sourceAttempts = dao.findRecordsByFilter(
+    "project_join_source_attempts",
+    `project = "${projectId}"`,
+    "",
+    1000000,
+    0
+  )
+  for (const attempt of sourceAttempts) dao.deleteRecord(attempt)
 }
 
 function verifyProjectPassword(secret, password) {
@@ -296,9 +347,13 @@ module.exports = {
   projectJson,
   projectSecret,
   projectJoinAttempt,
+  projectJoinSourceKey,
+  projectJoinSourceAttempt,
   projectJoinBlocked,
   recordProjectJoinFailure,
+  recordProjectJoinSourceFailure,
   clearProjectJoinAttempt,
+  clearProjectJoinSourceAttempt,
   clearProjectJoinAttempts,
   verifyProjectPassword,
   projectAcl,

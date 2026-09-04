@@ -91,6 +91,13 @@ func TestProjectAccessMigrationRollbackRestoresLegacyRules(t *testing.T) {
 	if _, err := app.Dao().FindCollectionByNameOrId("project_join_attempts"); err != nil {
 		t.Fatalf("find project_join_attempts: %v", err)
 	}
+	joinSourceAttempts, err := app.Dao().FindCollectionByNameOrId("project_join_source_attempts")
+	if err != nil {
+		t.Fatalf("find project_join_source_attempts: %v", err)
+	}
+	if field := joinSourceAttempts.Schema.GetFieldByName("source_key"); field == nil {
+		t.Fatal("project_join_source_attempts.source_key is missing")
+	}
 
 	users, err := app.Dao().FindCollectionByNameOrId("users")
 	if err != nil {
@@ -168,7 +175,7 @@ func TestProjectAccessMigrationRollbackRestoresLegacyRules(t *testing.T) {
 		view: `@request.auth.role = "admin"`,
 	})
 
-	for _, name := range []string{"project_join_attempts", "project_access_secrets", "project_creator_grants", "project_memberships", "project_acls"} {
+	for _, name := range []string{"project_join_source_attempts", "project_join_attempts", "project_access_secrets", "project_creator_grants", "project_memberships", "project_acls"} {
 		if _, err := app.Dao().FindCollectionByNameOrId(name); err == nil {
 			t.Fatalf("collection %q still exists after rollback", name)
 		}
