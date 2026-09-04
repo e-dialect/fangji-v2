@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -221,13 +222,83 @@ func TestExternalAttemptLimiterBoundsClientEntries(t *testing.T) {
 	}
 }
 
-func TestTransportIPDoesNotTrustForwardedHeaders(t *testing.T) {
+func TestExternalClientIPExtractorUsesNearestUntrustedHop(t *testing.T) {
+	extractor, err := trustedClientIPExtractor("172.20.0.0/16")
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := httptest.NewRequest(http.MethodPost, "/", nil)
-	request.RemoteAddr = "10.20.30.40:12345"
-	request.Header.Set("X-Forwarded-For", "203.0.113.99")
-	request.Header.Set("X-Real-IP", "198.51.100.20")
-	if got := transportIP(request); got != "10.20.30.40" {
-		t.Fatalf("transport IP trusted a spoofable forwarding header: %q", got)
+	request.RemoteAddr = "172.20.0.4:12345"
+	request.Header.Set("X-Forwarded-For", "198.51.100.99, 203.0.113.20, 172.20.0.3")
+	if got := extractor(request); got != "203.0.113.20" {
+		t.Fatalf("extractor trusted a spoofed leftmost address: %q", got)
+	}
+
+	direct := httptest.NewRequest(http.MethodPost, "/", nil)
+	direct.RemoteAddr = "203.0.113.55:12345"
+	direct.Header.Set("X-Forwarded-For", "198.51.100.77")
+	if got := extractor(direct); got != "203.0.113.55" {
+		t.Fatalf("direct request trusted a spoofed forwarding header: %q", got)
+	}
+}
+
+func TestExternalLoginRateLimitIgnoresRotatingSpoofedXFF(t *testing.T) {
+	_, app := newExternalIdentityTestService(t)
+	service := newExternalIdentityService(app, &mockExternalProvider{err: errExternalCredentials})
+	service.register()
+	e, err := apis.InitApi(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.OnBeforeServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
+		t.Fatal(err)
+	}
+
+	login := func(clientIP, spoofedIP string) int {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"/api/fangji/auth/external/mock/login",
+			strings.NewReader(`{"identity":"remote-name","password":"remote-secret"}`),
+		)
+		request.RemoteAddr = "172.20.0.4:12345"
+		request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		request.Header.Set("X-Forwarded-For", fmt.Sprintf("%s, %s, 172.20.0.3", spoofedIP, clientIP))
+		e.ServeHTTP(recorder, request)
+		return recorder.Code
+	}
+
+	for attempt := 0; attempt < externalAttemptLimit; attempt++ {
+		status := login("203.0.113.20", fmt.Sprintf("198.51.100.%d", attempt+1))
+		if status != http.StatusUnauthorized {
+			t.Fatalf("attempt %d status=%d; want 401", attempt+1, status)
+		}
+	}
+	if status := login("203.0.113.20", "198.51.100.250"); status != http.StatusTooManyRequests {
+		t.Fatalf("rotating spoofed XFF bypassed client limit: status=%d", status)
+	}
+	if status := login("203.0.113.21", "198.51.100.250"); status != http.StatusUnauthorized {
+		t.Fatalf("independent client shared another client's limit: status=%d", status)
+	}
+}
+
+func TestExternalLoginGlobalLimitIsSeparateFromClientLimit(t *testing.T) {
+	_, app := newExternalIdentityTestService(t)
+	service := newExternalIdentityService(app, &mockExternalProvider{err: errExternalCredentials})
+	service.limiter = newExternalAttemptLimiter(1, time.Minute)
+	service.global = newExternalAttemptLimiter(2, time.Minute)
+
+	if !service.allowAttempt("mock", "203.0.113.31") {
+		t.Fatal("first client should be allowed")
+	}
+	if service.allowAttempt("mock", "203.0.113.31") {
+		t.Fatal("repeated client should reach its client limit")
+	}
+	if !service.allowAttempt("mock", "203.0.113.32") {
+		t.Fatal("client-limited retry consumed global capacity")
+	}
+	if service.allowAttempt("mock", "203.0.113.33") {
+		t.Fatal("third client should reach the independent global limit")
 	}
 }
 

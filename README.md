@@ -107,6 +107,7 @@ docker compose down
 - 生产入口默认隐藏 PocketBase Admin UI。确需维护时，将 `ENABLE_POCKETBASE_ADMIN_UI=true` 后执行 `docker compose up -d --force-recreate frontend`；完成后改回 `false` 并再次重建前端容器。
 - HTTPS/HSTS 应由 Traefik 或最外层 TLS 终止代理统一配置；应用 Nginx 始终通过容器内 HTTP 提供服务。
 - Traefik 容器必须和 `frontend` 容器共享 Docker network；如果 Traefik 在另一个 compose 项目里，请把它接入本项目网络或给本项目增加 Traefik 的 external network。
+- `TRUSTED_PROXY_CIDRS` 必须限制为实际 Traefik/入口代理所在的 Docker network。内置 Nginx 只信任这些来源提供的 `X-Real-IP`，并会覆盖浏览器传入的 `X-Forwarded-For`；不要把 backend 端口直接暴露到公网。
 - `BACKEND_URL` 留空时，前端自动使用 `window.location.origin`，适合同域名或同端口反向代理部署。
 - `BACKEND_URL` 设置为完整后端地址时，前端容器会把构建产物里的 `VITE_BACKEND_URL_RUNTIME_REPLACEMENT` 替换成该地址，适合前后端不同域名部署。
 - PocketBase 数据默认通过本地目录 `./pb_data` 持久化，重建容器不会清空数据库和上传文件。Windows 宿主机如果遇到 SQLite 或文件挂载问题，可叠加 `docker-compose.named-volume.yml` 改用 Docker named volume。
@@ -625,7 +626,7 @@ PB_SUPER_PASSWORD=your-password \
 node backend/tests/volunteer_accounts_integration.mjs
 ```
 
-外部身份测试完全使用本机 mock HTTPS provider，不访问真实统一身份服务；覆盖成功、失败、超时、禁止重定向、畸形/超大响应、重复映射、绑定冲突、无资料同步和默认无项目权限：
+外部身份测试完全使用本机 mock HTTPS provider，不访问真实统一身份服务；覆盖成功、失败、超时、禁止重定向、畸形/超大响应、重复映射、绑定冲突、无资料同步、默认无项目权限、可信代理取址和客户端/全局双层限流：
 
 ```bash
 cd backend
@@ -633,6 +634,8 @@ go test ./...
 ```
 
 部署环境只在获得一次性测试账号时进行人工联调，CI 不依赖外部服务。适配行为依据上游 Django [`/login` 接口](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/user/views.py)及其[令牌实现](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/utils/token.py)；方辑只使用响应中的稳定用户 ID，不消费远端 token。
+
+容器 CI 还会经过实际 Nginx 代理轮换伪造的 `X-Forwarded-For`，确认同一可信 `X-Real-IP` 仍共享客户端额度，并确认另一客户端不会被该额度连带封锁。
 
 项目权限集成测试覆盖默认拒绝创建、有限/无限额度、并发额度边界、创建授权撤销、所有权转移、成员角色互斥、三种访问方式、成员持久性、账号与可信来源双重口令限速，以及跨项目越权拦截：
 
