@@ -25,6 +25,7 @@ import (
 
 func newExternalIdentityTestService(t *testing.T) (*externalIdentityService, *tests.TestApp) {
 	t.Helper()
+	t.Setenv("TRUSTED_PROXY_CIDRS", defaultTrustedProxyCIDRs)
 	app, err := tests.NewTestApp()
 	if err != nil {
 		t.Fatal(err)
