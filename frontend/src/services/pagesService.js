@@ -89,6 +89,12 @@ export async function getPage(pageId, options = {}) {
   })
 }
 
+export async function getProofreaderTask(pageId) {
+  return pb.send(`/api/fangji/pages/${encodeURIComponent(pageId)}/task`, {
+    requestKey: null
+  })
+}
+
 export async function updatePage(pageId, data) {
   return pb.collection('pages').update(pageId, data, { requestKey: null })
 }
@@ -143,10 +149,8 @@ export async function getPagedProjectPages(projectId, page, perPage, options = {
 }
 
 export async function listProofreaderNeighborTasks(projectId, userId) {
-  return pb.collection('pages').getFullList({
-    filter: `project="${projectId}" && ${relationFilter('proofreader', userId)} && (${statusFilter(PROOFREADER_ACTIVE_STATUSES)})`,
-    sort: 'page_number',
-    fields: 'id,page_number',
+  if (!projectId || !userId) return []
+  return pb.send(`/api/fangji/projects/${encodeURIComponent(projectId)}/tasks/mine`, {
     requestKey: null
   })
 }

@@ -97,6 +97,60 @@ routerAdd("POST", `${FANGJI_API}/projects/:projectId/claim`, (c) => {
   return c.json(200, response)
 }, $apis.requireRecordAuth("users"))
 
+routerAdd("GET", `${FANGJI_API}/pages/:pageId/task`, (c) => {
+  const { assertId: proofAssertId, canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)
+  const auth = c.get("authRecord")
+  if (!auth) throw new ForbiddenError("无权执行此操作")
+  const pageId = proofAssertId(c.pathParam("pageId"), "条目")
+  const dao = $app.dao()
+  let page = null
+  try { page = dao.findRecordById("pages", pageId) } catch { throw new NotFoundError("条目不存在") }
+  if (!proofCanProofread(dao, page.getString("project"), auth)) {
+    throw new ForbiddenError("你不是该项目的校对员")
+  }
+  const active = page.getString("proofreader") === auth.getId()
+    && ["claimed", "proofreading"].includes(page.getString("status"))
+  if (!active) throw new ForbiddenError("该任务当前未分配给你")
+
+  const project = dao.findRecordById("projects", page.getString("project"))
+  return c.json(200, {
+    id: page.getId(),
+    project: page.getString("project"),
+    project_file: page.getString("project_file"),
+    page_number: page.getInt("page_number"),
+    pdf_page: page.getInt("pdf_page"),
+    status: page.getString("status"),
+    proofreader: page.getString("proofreader"),
+    ocr_text: page.getString("ocr_text"),
+    ocr_row_json: page.getString("ocr_row_json"),
+    expand: {
+      project: { id: project.getId(), name: project.getString("name") }
+    }
+  })
+}, $apis.requireRecordAuth("users"))
+
+routerAdd("GET", `${FANGJI_API}/projects/:projectId/tasks/mine`, (c) => {
+  const { assertId: proofAssertId, canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)
+  const auth = c.get("authRecord")
+  if (!auth) throw new ForbiddenError("无权执行此操作")
+  const projectId = proofAssertId(c.pathParam("projectId"), "项目")
+  const dao = $app.dao()
+  try { dao.findRecordById("projects", projectId) } catch { throw new NotFoundError("项目不存在") }
+  if (!proofCanProofread(dao, projectId, auth)) throw new ForbiddenError("你不是该项目的校对员")
+
+  const pages = dao.findRecordsByFilter(
+    "pages",
+    `project = "${projectId}" && proofreader = "${auth.getId()}" && (status = "claimed" || status = "proofreading")`,
+    "page_number",
+    100000,
+    0
+  )
+  return c.json(200, pages.map((page) => ({
+    id: page.getId(),
+    page_number: page.getInt("page_number")
+  })))
+}, $apis.requireRecordAuth("users"))
+
 routerAdd("GET", `${FANGJI_API}/proofreading-queues`, (c) => {
   const { capabilities: proofCapabilities } = require(`${__hooks}/lib/project_access.js`)
   const { leaseForPage: proofLeaseForPage, leaseExpired: proofLeaseExpired } = require(`${__hooks}/lib/task_leases.js`)

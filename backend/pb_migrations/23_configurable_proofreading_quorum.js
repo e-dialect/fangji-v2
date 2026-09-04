@@ -32,6 +32,33 @@ migrate((db) => {
   passField.options.max = 1001
   dao.saveCollection(attempts)
 
+  // PocketBase 0.21 doesn't support field-level read rules. Keep blind-review
+  // progress out of native collection responses entirely and expose only
+  // purpose-built, role-redacted endpoints to proofreaders.
+  const projectManagerReadRule = [
+    '@request.auth.id != "" && (',
+    '@request.auth.role = "platform_admin"',
+    '|| admin = @request.auth.id',
+    '|| acl.managers.id ?= @request.auth.id',
+    ')'
+  ].join(" ")
+  const projectChildManagerReadRule = [
+    '@request.auth.id != "" && (',
+    '@request.auth.role = "platform_admin"',
+    '|| project.admin = @request.auth.id',
+    '|| project.acl.managers.id ?= @request.auth.id',
+    ')'
+  ].join(" ")
+  projects.listRule = projectManagerReadRule
+  projects.viewRule = projectManagerReadRule
+  dao.saveCollection(projects)
+  pages.listRule = `${projectChildManagerReadRule} && status != "importing"`
+  pages.viewRule = `${projectChildManagerReadRule} && status != "importing"`
+  dao.saveCollection(pages)
+  attempts.listRule = projectChildManagerReadRule
+  attempts.viewRule = projectChildManagerReadRule
+  dao.saveCollection(attempts)
+
   for (const attempt of dao.findRecordsByFilter(
     "proofreading_attempts",
     'kind = "first" || kind = "second"',
@@ -65,7 +92,42 @@ migrate((db) => {
   }
 }, (db) => {
   const dao = new Dao(db)
+  const projects = dao.findCollectionByNameOrId("projects")
+  const pages = dao.findCollectionByNameOrId("pages")
   const attempts = dao.findCollectionByNameOrId("proofreading_attempts")
+
+  const projectReadRule = [
+    '@request.auth.id != "" && (',
+    '@request.auth.role = "platform_admin"',
+    '|| admin = @request.auth.id',
+    '|| acl.members.id ?= @request.auth.id',
+    '|| access_mode = "public"',
+    '|| access_mode = "password"',
+    ')'
+  ].join(" ")
+  const projectChildReadRule = [
+    '@request.auth.id != "" && (',
+    '@request.auth.role = "platform_admin"',
+    '|| project.admin = @request.auth.id',
+    '|| project.acl.members.id ?= @request.auth.id',
+    ')'
+  ].join(" ")
+  projects.listRule = projectReadRule
+  projects.viewRule = projectReadRule
+  dao.saveCollection(projects)
+  pages.listRule = `${projectChildReadRule} && status != "importing"`
+  pages.viewRule = `${projectChildReadRule} && status != "importing"`
+  dao.saveCollection(pages)
+  attempts.listRule = [
+    '@request.auth.id != "" && (',
+    '@request.auth.role = "platform_admin"',
+    '|| proofreader = @request.auth.id',
+    '|| project.admin = @request.auth.id',
+    ')'
+  ].join(" ")
+  attempts.viewRule = attempts.listRule
+  dao.saveCollection(attempts)
+
   const kindField = attempts.schema.getFieldByName("kind")
   kindField.options.values = ["proofread", "arbitration", "first", "second"]
   dao.saveCollection(attempts)
@@ -100,12 +162,10 @@ migrate((db) => {
   ]
   dao.saveCollection(attempts)
 
-  const pages = dao.findCollectionByNameOrId("pages")
   const countField = pages.schema.getFieldByName("proofread_count")
   if (countField) pages.schema.removeField(countField.id)
   dao.saveCollection(pages)
 
-  const projects = dao.findCollectionByNameOrId("projects")
   const requiredField = projects.schema.getFieldByName("required_proofreads")
   if (requiredField) projects.schema.removeField(requiredField.id)
   dao.saveCollection(projects)

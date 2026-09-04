@@ -89,12 +89,13 @@ async function setQuorum(projectId, requiredProofreads) {
   })
 }
 
-async function createPage(projectId, pageNumber, value) {
+async function createPage(projectId, pageNumber, value, projectFileId = '') {
   return request('/api/collections/pages/records', {
     method: 'POST',
     token: superAuth.token,
     body: {
       project: projectId,
+      project_file: projectFileId,
       page_number: pageNumber,
       pdf_page: pageNumber,
       ocr_row_json: JSON.stringify({ 词条: value }),
@@ -110,6 +111,57 @@ async function pageRecord(pageId) {
   return request(`/api/collections/pages/records/${pageId}`, { token: platformAuth.token })
 }
 
+const blindFields = [
+  'required_proofreads',
+  'proofread_count',
+  'first_proofreader',
+  'second_proofreader',
+  'proofread_round',
+  'pass_no'
+]
+
+function assertBlindFieldsConcealed(payload, label) {
+  const serialized = JSON.stringify(payload)
+  for (const field of blindFields) {
+    assert.equal(serialized.includes(field), false, `${label} leaked ${field}`)
+  }
+}
+
+async function assertNativeProgressIsHidden(projectId, pageId, user) {
+  await request(`/api/collections/projects/records/${projectId}`, {
+    token: user.token,
+    expected: 404
+  })
+  await request(`/api/collections/pages/records/${pageId}`, {
+    token: user.token,
+    expected: 404
+  })
+  const nativeProjects = await request(
+    `/api/collections/projects/records?filter=${encodeURIComponent(`id="${projectId}"`)}`,
+    { token: user.token }
+  )
+  assert.equal(nativeProjects.totalItems, 0, 'native projects list exposed blind-review configuration')
+  const nativePages = await request(
+    `/api/collections/pages/records?filter=${encodeURIComponent(`id="${pageId}"`)}`,
+    { token: user.token }
+  )
+  assert.equal(nativePages.totalItems, 0, 'native pages list exposed blind-review progress')
+
+  const project = await request(`/api/fangji/projects/${projectId}`, { token: user.token })
+  assertBlindFieldsConcealed(project, 'redacted project endpoint')
+  const task = await request(`/api/fangji/pages/${pageId}/task`, { token: user.token })
+  assert.equal(task.id, pageId)
+  assertBlindFieldsConcealed(task, 'proofreader task endpoint')
+  if (task.project_file) {
+    const projectFile = await request(`/api/collections/project_files/records/${task.project_file}?expand=project`, {
+      token: user.token
+    })
+    assert.equal(projectFile.project, projectId, 'proofreader must retain access to the source PDF record')
+    assert.equal(projectFile.expand?.project, undefined, 'native relation expansion exposed the restricted project')
+    assertBlindFieldsConcealed(projectFile, 'source PDF record')
+  }
+}
+
 async function claimAndSubmit(projectId, pageId, user, value, expectedStatus) {
   const claim = await request(`/api/fangji/projects/${projectId}/claim`, {
     method: 'POST',
@@ -119,6 +171,7 @@ async function claimAndSubmit(projectId, pageId, user, value, expectedStatus) {
   assert.equal(claim.first_proofreader, undefined)
   assert.equal(claim.second_proofreader, undefined)
   assert.equal(claim.proofread_round, undefined)
+  await assertNativeProgressIsHidden(projectId, pageId, user)
   const result = await request(`/api/fangji/pages/${pageId}/submit`, {
     method: 'POST',
     token: user.token,
@@ -131,6 +184,21 @@ async function claimAndSubmit(projectId, pageId, user, value, expectedStatus) {
   assert.equal(result.status, expectedStatus)
   assert.equal(result.proofreadCount, undefined)
   assert.equal(result.requiredProofreads, undefined)
+
+  const ownAttempts = await request(
+    `/api/collections/proofreading_attempts/records?filter=${encodeURIComponent(`page="${pageId}" && proofreader="${user.id}" && kind="proofread"`)}`,
+    { token: superAuth.token }
+  )
+  assert.equal(ownAttempts.totalItems, 1)
+  await request(`/api/collections/proofreading_attempts/records/${ownAttempts.items[0].id}`, {
+    token: user.token,
+    expected: 404
+  })
+  const nativeAttempts = await request(
+    `/api/collections/proofreading_attempts/records?filter=${encodeURIComponent(`page="${pageId}"`)}`,
+    { token: user.token }
+  )
+  assert.equal(nativeAttempts.totalItems, 0, 'native attempts list exposed pass ordering')
   return result
 }
 
@@ -156,7 +224,17 @@ const users = await Promise.all([
 
 try {
   const matching = await createProject('Three matching', 3, users)
-  const matchingPage = await createPage(matching.id, 1, '一致')
+  const matchingSource = await request('/api/collections/project_files/records', {
+    method: 'POST',
+    token: superAuth.token,
+    body: {
+      project: matching.id,
+      original_filename: 'blind-review-source.pdf',
+      status: 'ready',
+      is_primary: true
+    }
+  })
+  const matchingPage = await createPage(matching.id, 1, '一致', matchingSource.id)
   await claimAndSubmit(matching.id, matchingPage.id, users[0], '一致', 'proofread')
   assert.equal((await pageRecord(matchingPage.id)).proofread_count, 1)
   const duplicateClaim = await request(`/api/fangji/projects/${matching.id}/claim`, {
@@ -171,7 +249,7 @@ try {
 
   const queues = await request('/api/fangji/proofreading-queues', { token: users[0].token })
   const serializedQueues = JSON.stringify(queues)
-  for (const concealed of ['required_proofreads', 'proofread_count', 'first_proofreader', 'second_proofreader', 'pass_no']) {
+  for (const concealed of blindFields) {
     assert.equal(serializedQueues.includes(concealed), false, `queue leaked ${concealed}`)
   }
 

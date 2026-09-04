@@ -129,18 +129,22 @@ function creationCapability(dao, authRecord) {
 }
 
 function projectJson(dao, projectRecord, authRecord) {
-  return {
+  const permissions = capabilities(dao, projectRecord, authRecord)
+  const result = {
     id: projectRecord.getId(),
     name: projectRecord.getString("name"),
     description: projectRecord.getString("description"),
     owner: projectRecord.getString("admin"),
     admin: projectRecord.getString("admin"),
     access_mode: projectRecord.getString("access_mode") || "members_only",
-    required_proofreads: Math.max(2, projectRecord.getInt("required_proofreads") || 2),
     created: String(projectRecord.get("created") || ""),
     updated: String(projectRecord.get("updated") || ""),
-    capabilities: capabilities(dao, projectRecord, authRecord)
+    capabilities: permissions
   }
+  if (permissions.canManage) {
+    result.required_proofreads = Math.max(2, projectRecord.getInt("required_proofreads") || 2)
+  }
+  return result
 }
 
 function projectSecret(dao, projectId) {

@@ -186,7 +186,7 @@ import { clearTaskLease, loadTaskLease, saveTaskLease } from '@/lib/taskLease'
 import { currentUserId as getCurrentUserId } from '@/services/authService'
 import {
   claimNextProjectPage,
-  getPage,
+  getProofreaderTask,
   listProofreaderNeighborTasks,
   releaseTaskLease,
   renewTaskLease,
@@ -316,7 +316,7 @@ async function loadPage() {
   textareaRefs.clear()
 
   try {
-    page.value = await getPage(route.params.id, { expand: 'project,project_file' })
+    page.value = await getProofreaderTask(route.params.id)
     hydrateForProofread(page.value)
     initialRowJson.value = stringifyEditedRow()
     restoreDraft()
