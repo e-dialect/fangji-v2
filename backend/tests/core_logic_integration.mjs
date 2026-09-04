@@ -130,7 +130,7 @@ try {
   })
   const attempts = await request(
     `/api/collections/proofreading_attempts/records?filter=${encodeURIComponent(`page="${page.id}"`)}`,
-    { token: userAuth.token }
+    { token: adminAuth.token }
   )
   assert.equal(attempts.totalItems, 1)
   assert.equal(attempts.items[0].text, '天光 清晨')

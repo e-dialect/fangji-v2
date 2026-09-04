@@ -135,11 +135,10 @@ try {
   })
   assert.equal(firstSubmit.status, 'proofread')
 
-  const blindPage = await request(`/api/collections/pages/records/${page.id}`, {
-    token: secondUser.token
+  await request(`/api/collections/pages/records/${page.id}`, {
+    token: secondUser.token,
+    expected: 404
   })
-  assert.equal(blindPage.first_proofread_row_json, '')
-  assert.equal(blindPage.proofread_row_json, '')
 
   const hiddenAttempts = await request(
     `/api/collections/proofreading_attempts/records?filter=${encodeURIComponent(`page="${page.id}"`)}`,
@@ -152,6 +151,13 @@ try {
     token: secondUser.token
   })
   assert.equal(secondClaim.id, page.id)
+  const blindTask = await request(`/api/fangji/pages/${page.id}/task`, {
+    token: secondUser.token
+  })
+  assert.equal(blindTask.id, page.id)
+  for (const field of ['first_proofread_row_json', 'proofread_row_json', 'proofread_count', 'first_proofreader', 'second_proofreader', 'proofread_round']) {
+    assert.equal(blindTask[field], undefined, `proofreader task leaked ${field}`)
+  }
 
   const secondRow = { 词条: '天光', 释义: '早晨' }
   const secondSubmit = await request(`/api/fangji/pages/${page.id}/submit`, {
