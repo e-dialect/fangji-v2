@@ -1,13 +1,16 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/migrations"
 	"github.com/pocketbase/pocketbase/models"
@@ -35,49 +38,8 @@ func TestProjectAccessMigrationRollbackRestoresLegacyRules(t *testing.T) {
 		t.Fatalf("create empty hooks directory: %v", err)
 	}
 
-	entries, err := os.ReadDir(migrationsDir)
-	if err != nil {
-		t.Fatalf("read migrations: %v", err)
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		return migrationNumber(entries[i].Name()) < migrationNumber(entries[j].Name())
-	})
-	for index, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".js") {
-			continue
-		}
-		if migrationNumber(entry.Name()) > projectAccessMigrationNumber {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(migrationsDir, entry.Name()))
-		if err != nil {
-			t.Fatalf("read migration %s: %v", entry.Name(), err)
-		}
-		isolatedDir := filepath.Join(tempDir, "ordered_migrations", strconv.Itoa(index))
-		if err := os.MkdirAll(isolatedDir, 0o755); err != nil {
-			t.Fatalf("create ordered migration directory: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(isolatedDir, entry.Name()), raw, 0o644); err != nil {
-			t.Fatalf("copy migration %s: %v", entry.Name(), err)
-		}
-		jsvm.MustRegister(app, jsvm.Config{
-			HooksDir:      emptyHooksDir,
-			MigrationsDir: isolatedDir,
-			TypesDir:      filepath.Join(tempDir, "types"),
-		})
-		orderedRunner, err := migrate.NewRunner(app.DB(), migrations.AppMigrations)
-		if err != nil {
-			t.Fatalf("create migration runner for %s: %v", entry.Name(), err)
-		}
-		if _, err := orderedRunner.Up(); err != nil {
-			t.Fatalf("apply migration %s in numeric order: %v", entry.Name(), err)
-		}
-	}
-
-	runner, err := migrate.NewRunner(app.DB(), migrations.AppMigrations)
-	if err != nil {
-		t.Fatalf("create migration runner: %v", err)
-	}
+	projectMigrations := loadProjectMigrations(t, app, migrationsDir, emptyHooksDir)
+	applyProjectMigrationsThrough(t, app, projectMigrations, projectAccessMigrationNumber)
 	secrets, err := app.Dao().FindCollectionByNameOrId("project_access_secrets")
 	if err != nil {
 		t.Fatalf("find project_access_secrets: %v", err)
@@ -142,7 +104,10 @@ func TestProjectAccessMigrationRollbackRestoresLegacyRules(t *testing.T) {
 		t.Fatal("project secret bcrypt validation returned an unexpected result")
 	}
 
-	if _, err := runner.Down(1); err != nil {
+	projectAccessMigration := findProjectMigration(t, projectMigrations, "20_project_access.js")
+	if err := app.DB().Transactional(func(tx *dbx.Tx) error {
+		return projectAccessMigration.Down(tx)
+	}); err != nil {
 		t.Fatalf("rollback project access migration: %v", err)
 	}
 
@@ -180,6 +145,70 @@ func TestProjectAccessMigrationRollbackRestoresLegacyRules(t *testing.T) {
 			t.Fatalf("collection %q still exists after rollback", name)
 		}
 	}
+}
+
+func loadProjectMigrations(t *testing.T, app core.App, migrationsDir, hooksDir string) []*migrate.Migration {
+	t.Helper()
+	jsvm.MustRegister(app, jsvm.Config{
+		HooksDir:      hooksDir,
+		MigrationsDir: migrationsDir,
+		TypesDir:      filepath.Join(t.TempDir(), "types"),
+	})
+
+	byName := map[string]*migrate.Migration{}
+	for _, migration := range migrations.AppMigrations.Items() {
+		if strings.HasSuffix(migration.File, ".js") {
+			byName[migration.File] = migration
+		}
+	}
+	result := make([]*migrate.Migration, 0, len(byName))
+	for _, migration := range byName {
+		result = append(result, migration)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return migrationNumber(result[i].File) < migrationNumber(result[j].File)
+	})
+	return result
+}
+
+func applyProjectMigrationsThrough(t *testing.T, app core.App, projectMigrations []*migrate.Migration, maximum int) {
+	t.Helper()
+	for index, migration := range projectMigrations {
+		if migrationNumber(migration.File) > maximum {
+			continue
+		}
+		applyProjectMigration(t, app, migration, index)
+	}
+}
+
+func applyProjectMigration(t *testing.T, app core.App, migration *migrate.Migration, order int) {
+	t.Helper()
+	err := app.DB().Transactional(func(tx *dbx.Tx) error {
+		if migration.Up != nil {
+			if err := migration.Up(tx); err != nil {
+				return fmt.Errorf("apply %s: %w", migration.File, err)
+			}
+		}
+		_, err := tx.Insert(migrate.DefaultMigrationsTable, dbx.Params{
+			"file":    migration.File,
+			"applied": time.Now().UnixMicro() + int64(order),
+		}).Execute()
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func findProjectMigration(t *testing.T, projectMigrations []*migrate.Migration, filename string) *migrate.Migration {
+	t.Helper()
+	for _, migration := range projectMigrations {
+		if migration.File == filename {
+			return migration
+		}
+	}
+	t.Fatalf("project migration %q was not registered", filename)
+	return nil
 }
 
 func migrationNumber(name string) int {

@@ -16,7 +16,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/models"
 )
@@ -55,7 +54,7 @@ type keyboardPreset struct {
 	Hash       string
 }
 
-func registerKeyboardPresets(app *pocketbase.PocketBase) error {
+func registerKeyboardPresets(app core.App) error {
 	presets, err := loadKeyboardPresets(embeddedKeyboardFiles)
 	if err != nil {
 		return fmt.Errorf("validate embedded keyboard presets: %w", err)
@@ -64,7 +63,10 @@ func registerKeyboardPresets(app *pocketbase.PocketBase) error {
 		return fmt.Errorf("default keyboard %q is not embedded", defaultKeyboardID)
 	}
 
-	app.OnAfterBootstrap().Add(func(_ *core.BootstrapEvent) error {
+	// PocketBase applies pending migrations after bootstrap and before this hook.
+	// Synchronizing here ensures a direct `pocketbase serve` upgrade can create
+	// migration 21's collections and seed presets during the same process start.
+	app.OnBeforeServe().Add(func(_ *core.ServeEvent) error {
 		if err := syncKeyboardPresets(app, presets); err != nil {
 			return fmt.Errorf("sync embedded keyboard presets: %w", err)
 		}
@@ -176,7 +178,7 @@ func validateKeyboardDefinition(definition keyboardDefinition) error {
 	return nil
 }
 
-func syncKeyboardPresets(app *pocketbase.PocketBase, presets map[string]keyboardPreset) error {
+func syncKeyboardPresets(app core.App, presets map[string]keyboardPreset) error {
 	dao := app.Dao()
 	collection, err := dao.FindCollectionByNameOrId("keyboards")
 	if err != nil {
@@ -234,7 +236,7 @@ func syncKeyboardPresets(app *pocketbase.PocketBase, presets map[string]keyboard
 	return nil
 }
 
-func enableDefaultKeyboardForExistingProjects(app *pocketbase.PocketBase, keyboardID string) error {
+func enableDefaultKeyboardForExistingProjects(app core.App, keyboardID string) error {
 	dao := app.Dao()
 	keyboards, err := dao.FindRecordsByFilter("keyboards", fmt.Sprintf(`keyboard_id = %q && active = true`, keyboardID), "", 1, 0)
 	if err != nil || len(keyboards) == 0 {
