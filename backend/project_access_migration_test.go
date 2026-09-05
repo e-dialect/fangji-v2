@@ -147,6 +147,44 @@ func TestProjectAccessMigrationRollbackRestoresLegacyRules(t *testing.T) {
 	}
 }
 
+func TestProjectJoinAttemptRetentionMigrationIndexes(t *testing.T) {
+	const retentionMigrationNumber = 26
+
+	migrationsDir, err := filepath.Abs("pb_migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, err := tests.NewTestApp()
+	if err != nil {
+		t.Fatalf("create test app: %v", err)
+	}
+	defer app.Cleanup()
+	emptyHooksDir := filepath.Join(t.TempDir(), "empty_hooks")
+	if err := os.MkdirAll(emptyHooksDir, 0o755); err != nil {
+		t.Fatalf("create empty hooks directory: %v", err)
+	}
+
+	projectMigrations := loadProjectMigrations(t, app, migrationsDir, emptyHooksDir)
+	applyProjectMigrationsThrough(t, app, projectMigrations, retentionMigrationNumber)
+	indexes := map[string]string{
+		"project_join_attempts":        "idx_project_join_attempt_window",
+		"project_join_source_attempts": "idx_project_join_source_attempt_window",
+	}
+	for collectionName, indexName := range indexes {
+		assertCollectionHasIndex(t, app, collectionName, indexName, true)
+	}
+
+	retentionMigration := findProjectMigration(t, projectMigrations, "26_project_join_attempt_retention.js")
+	if err := app.DB().Transactional(func(tx *dbx.Tx) error {
+		return retentionMigration.Down(tx)
+	}); err != nil {
+		t.Fatalf("rollback project join attempt retention migration: %v", err)
+	}
+	for collectionName, indexName := range indexes {
+		assertCollectionHasIndex(t, app, collectionName, indexName, false)
+	}
+}
+
 func loadProjectMigrations(t *testing.T, app core.App, migrationsDir, hooksDir string) []*migrate.Migration {
 	t.Helper()
 	jsvm.MustRegister(app, jsvm.Config{
@@ -255,4 +293,22 @@ func assertCollectionRules(t *testing.T, app core.App, name string, want collect
 	assertRule("createRule", collection.CreateRule, want.create)
 	assertRule("updateRule", collection.UpdateRule, want.update)
 	assertRule("deleteRule", collection.DeleteRule, want.delete)
+}
+
+func assertCollectionHasIndex(t *testing.T, app core.App, collectionName, indexName string, expected bool) {
+	t.Helper()
+	collection, err := app.Dao().FindCollectionByNameOrId(collectionName)
+	if err != nil {
+		t.Fatalf("find collection %q: %v", collectionName, err)
+	}
+	found := false
+	for _, index := range collection.Indexes {
+		if strings.Contains(index, indexName) {
+			found = true
+			break
+		}
+	}
+	if found != expected {
+		t.Fatalf("collection %q index %q presence = %t, want %t", collectionName, indexName, found, expected)
+	}
 }

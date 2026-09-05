@@ -2,6 +2,10 @@ const idPattern = /^[a-z0-9]{15}$/
 const joinFailureLimit = 5
 const joinFailureWindowMs = 15 * 60 * 1000
 const joinBlockDurationMs = 15 * 60 * 1000
+const joinAttemptRetentionMs = 24 * 60 * 60 * 1000
+const joinAttemptCleanupIntervalMs = 5 * 60 * 1000
+const joinAttemptCleanupBatchSize = 250
+let nextJoinAttemptCleanupAtMs = 0
 
 function auth(c) {
   const record = c.get("authRecord")
@@ -271,6 +275,41 @@ function clearProjectJoinAttempts(dao, projectId) {
   for (const attempt of sourceAttempts) dao.deleteRecord(attempt)
 }
 
+function projectJoinAttemptExpired(attempt, nowMs) {
+  const windowStarted = dateMillis(attempt.getDateTime("window_started"))
+  if (!windowStarted) return false
+  const blockedUntil = dateMillis(attempt.getDateTime("blocked_until"))
+  const lastRelevantAt = Math.max(windowStarted + joinFailureWindowMs, blockedUntil)
+  return nowMs - lastRelevantAt >= joinAttemptRetentionMs
+}
+
+function cleanupExpiredProjectJoinAttempts(dao, nowMs, batchSize) {
+  const limit = Math.max(1, Math.min(Number(batchSize) || joinAttemptCleanupBatchSize, 1000))
+  const windowCutoff = new Date(nowMs - joinAttemptRetentionMs - joinFailureWindowMs).toISOString()
+  let deleted = 0
+  for (const collection of ["project_join_attempts", "project_join_source_attempts"]) {
+    const attempts = dao.findRecordsByFilter(
+      collection,
+      `window_started <= "${windowCutoff}"`,
+      "window_started",
+      limit,
+      0
+    )
+    for (const attempt of attempts) {
+      if (!projectJoinAttemptExpired(attempt, nowMs)) continue
+      dao.deleteRecord(attempt)
+      deleted += 1
+    }
+  }
+  return deleted
+}
+
+function maybeCleanupExpiredProjectJoinAttempts(dao, nowMs) {
+  if (nowMs < nextJoinAttemptCleanupAtMs) return 0
+  nextJoinAttemptCleanupAtMs = nowMs + joinAttemptCleanupIntervalMs
+  return cleanupExpiredProjectJoinAttempts(dao, nowMs, 25)
+}
+
 function verifyProjectPassword(secret, password) {
   return Boolean(secret && secret.validatePassword(String(password || "")))
 }
@@ -360,6 +399,9 @@ module.exports = {
   clearProjectJoinAttempt,
   clearProjectJoinSourceAttempt,
   clearProjectJoinAttempts,
+  projectJoinAttemptExpired,
+  cleanupExpiredProjectJoinAttempts,
+  maybeCleanupExpiredProjectJoinAttempts,
   verifyProjectPassword,
   projectAcl,
   syncProjectAcl,

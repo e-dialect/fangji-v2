@@ -50,6 +50,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
       - name: Validate Compose entry points
         env:
           TRAEFIK_HOST: fangji.example.com
@@ -119,3 +125,6 @@ jobs:
 
       - name: Verify trusted proxy rate limiting
         run: sh frontend/tests/proxyRateLimit.e2e.sh
+
+      - name: Verify project join attempt retention
+        run: node --test backend/tests/project_access_rate_limits.test.cjs

@@ -194,10 +194,16 @@ routerAdd("PUT", "/api/fangji/projects/:projectId/owner", (c) => {
 }, $apis.requireRecordAuth("users"))
 
 routerAdd("POST", "/api/fangji/projects/:projectId/join", (c) => {
-  const { auth: fangjiAuth, assertId: fangjiAssertId, project: fangjiProject, membership: fangjiMembership, projectSecret: fangjiProjectSecret, projectJoinAttempt: fangjiProjectJoinAttempt, projectJoinSourceKey: fangjiProjectJoinSourceKey, projectJoinSourceAttempt: fangjiProjectJoinSourceAttempt, projectJoinBlocked: fangjiProjectJoinBlocked, recordProjectJoinFailure: fangjiRecordProjectJoinFailure, recordProjectJoinSourceFailure: fangjiRecordProjectJoinSourceFailure, clearProjectJoinAttempt: fangjiClearProjectJoinAttempt, clearProjectJoinSourceAttempt: fangjiClearProjectJoinSourceAttempt, verifyProjectPassword: fangjiVerifyProjectPassword, projectJson: fangjiProjectJson, syncProjectAcl: fangjiSyncProjectAcl } = require(`${__hooks}/lib/project_access.js`)
+  const { auth: fangjiAuth, assertId: fangjiAssertId, project: fangjiProject, membership: fangjiMembership, projectSecret: fangjiProjectSecret, projectJoinAttempt: fangjiProjectJoinAttempt, projectJoinSourceKey: fangjiProjectJoinSourceKey, projectJoinSourceAttempt: fangjiProjectJoinSourceAttempt, projectJoinBlocked: fangjiProjectJoinBlocked, recordProjectJoinFailure: fangjiRecordProjectJoinFailure, recordProjectJoinSourceFailure: fangjiRecordProjectJoinSourceFailure, clearProjectJoinAttempt: fangjiClearProjectJoinAttempt, clearProjectJoinSourceAttempt: fangjiClearProjectJoinSourceAttempt, maybeCleanupExpiredProjectJoinAttempts: fangjiMaybeCleanupExpiredProjectJoinAttempts, verifyProjectPassword: fangjiVerifyProjectPassword, projectJson: fangjiProjectJson, syncProjectAcl: fangjiSyncProjectAcl } = require(`${__hooks}/lib/project_access.js`)
   const auth = fangjiAuth(c)
   const projectId = fangjiAssertId(c.pathParam("projectId"), "项目")
   const sourceKey = fangjiProjectJoinSourceKey(c.realIP())
+  const nowMs = Date.now()
+  try {
+    fangjiMaybeCleanupExpiredProjectJoinAttempts($app.dao(), nowMs)
+  } catch (error) {
+    console.log(`[project join cleanup] ${error}`)
+  }
   const body = new DynamicModel({ password: "" })
   c.bind(body)
   let result = null
@@ -219,7 +225,6 @@ routerAdd("POST", "/api/fangji/projects/:projectId/join", (c) => {
       return
     }
     if (accessMode === "password") {
-      const nowMs = Date.now()
       const attempt = fangjiProjectJoinAttempt(txDao, projectId, auth.getId())
       const sourceAttempt = fangjiProjectJoinSourceAttempt(txDao, projectId, sourceKey)
       if (fangjiProjectJoinBlocked(attempt, nowMs) || fangjiProjectJoinBlocked(sourceAttempt, nowMs)) {
