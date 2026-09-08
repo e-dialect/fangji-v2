@@ -11,6 +11,14 @@ export function safeParseRowJson(raw) {
   }
 }
 
+// JSON object enumeration reorders integer-like keys; keep CSV order explicitly.
+export function orderedRowHeaders(page, row) {
+  let saved = []
+  try { saved = JSON.parse(page?.row_headers_json || '[]') } catch {}
+  const keys = Object.keys(row || {})
+  return [...new Set([...(Array.isArray(saved) ? saved.filter(key => typeof key === 'string' && keys.includes(key)) : []), ...keys])]
+}
+
 export function composeRowText(headers, rowObj) {
   return headers
     .map((header) => String(rowObj?.[header] || '').trim())
@@ -40,7 +48,7 @@ export function useStructuredRow() {
 
   function hydrateForProofread(page) {
     const ocrObj = safeParseRowJson(page?.ocr_row_json) || { '内容': page?.ocr_text || '' }
-    const headers = Object.keys(ocrObj)
+    const headers = orderedRowHeaders(page, ocrObj)
 
     rowHeaders.value = headers.length ? headers : ['内容']
     originalRow.value = {}
@@ -61,7 +69,7 @@ export function useStructuredRow() {
       ...ocrObj,
       '内容': page?.proofread_text || ocrObj['内容'] || ''
     }
-    const headers = Object.keys(ocrObj)
+    const headers = orderedRowHeaders(page, ocrObj)
 
     rowHeaders.value = headers.length ? headers : ['内容']
     originalRow.value = {}

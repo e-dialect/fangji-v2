@@ -481,3 +481,16 @@ func TestBuildCSVPage(t *testing.T) {
 		t.Fatalf("unexpected page-range validation error: %#v", validationErr)
 	}
 }
+
+func TestCSVPreservesExplicitColumnOrder(t *testing.T) {
+	row, err := buildCSVPage([]string{"词条", "10", "PDF页码", "释义", "2"}, []string{"𢶀", "十", "1", "意思", "二"}, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.headersJSON != `["词条","10","释义","2"]` {
+		t.Fatalf("order lost: %s", row.headersJSON)
+	}
+	if row.entryText != "𢶀 十 意思 二" {
+		t.Fatalf("text reordered: %s", row.entryText)
+	}
+}
