@@ -2,13 +2,31 @@
   <div class="container page">
     <div class="flex items-center justify-between mb-6">
       <div>
-        <h2 class="font-bold" style="font-size:1.5rem">个人主页</h2>
-        <p class="text-sm text-muted mt-1">查看你的校对参与情况与当前排行</p>
+        <h2 class="font-bold" style="font-size:1.5rem">个人中心</h2>
+        <p class="text-sm text-muted mt-1">管理个人资料，查看校对参与情况与当前排行</p>
       </div>
       <button class="btn btn-secondary btn-sm" @click="loadStats" :disabled="loading">
         {{ loading ? '刷新中...' : '刷新' }}
       </button>
     </div>
+
+    <section class="card mb-6" aria-labelledby="profile-details-title">
+      <h3 id="profile-details-title" class="card-title">个人资料</h3>
+      <form @submit.prevent="saveProfile">
+        <div class="form-group">
+          <label for="profile-name" class="form-label">昵称</label>
+          <input id="profile-name" v-model="profile.name" class="form-control" autocomplete="nickname" required :disabled="savingProfile" />
+        </div>
+        <div class="form-group">
+          <label for="profile-email" class="form-label">邮箱（选填）</label>
+          <input id="profile-email" v-model.trim="profile.email" class="form-control" type="email" autocomplete="email" maxlength="255" :disabled="savingProfile" />
+          <p class="text-sm text-muted mt-1">修改邮箱后将标记为未验证。个人资料仅保存在方辑，不会修改外部账号。</p>
+        </div>
+        <div v-if="profileError" class="alert alert-error mb-4" role="alert">{{ profileError }}</div>
+        <div v-if="profileSuccess" class="alert alert-success mb-4" role="status">{{ profileSuccess }}</div>
+        <button type="submit" class="btn btn-primary" :disabled="savingProfile || !profile.name.trim()">{{ savingProfile ? '保存中...' : '保存资料' }}</button>
+      </form>
+    </section>
 
     <div v-if="error" class="alert alert-error mb-4">{{ error }}</div>
     <div v-if="loading" class="text-muted">加载中...</div>
@@ -50,7 +68,7 @@
 
       <section v-if="providers.length" class="card mt-6">
         <div class="card-title">统一身份绑定</div>
-        <p class="profile-note mb-4">绑定后可以使用外部账号登录方辑。方辑不会同步外部账号的姓名、邮箱或密码。</p>
+        <p class="profile-note mb-4">绑定后可以使用外部账号登录方辑。绑定不会覆盖你的方辑资料；新用户首次通过外部账号登录时会继承可用的昵称，邮箱与密码不会同步。</p>
         <div class="identity-list">
           <div v-for="provider in providers" :key="provider.id" class="identity-card">
             <div class="identity-heading">
@@ -100,11 +118,37 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
-import { bindExternalIdentity, currentUserId, listExternalProviders } from '@/services/authService'
+import { bindExternalIdentity, currentUserId, listExternalProviders, updateProfile } from '@/services/authService'
 import { getProofreaderProfileStats } from '@/services/proofreaderStatsService'
 import { formatPbError } from '@/utils/pbErrors'
 
 const auth = useAuthStore()
+const profile = reactive({ name: auth.user?.name || '', email: auth.user?.email || '' })
+const savingProfile = ref(false)
+const profileError = ref('')
+const profileSuccess = ref('')
+
+async function saveProfile() {
+  if (savingProfile.value) return
+  profileError.value = ''
+  profileSuccess.value = ''
+  if (!profile.name.trim() || Array.from(profile.name.trim()).length > 255) {
+    profileError.value = '昵称不能为空且不能超过 255 个字符'
+    return
+  }
+  savingProfile.value = true
+  try {
+    const record = await updateProfile({ name: profile.name.trim(), email: profile.email.trim() })
+    profile.name = record.name || ''
+    profile.email = record.email || ''
+    profileSuccess.value = '个人资料已保存'
+  } catch (e) {
+    profileError.value = formatPbError('保存个人资料失败', e)
+  } finally {
+    savingProfile.value = false
+  }
+}
+
 const loading = ref(true)
 const error = ref('')
 const providers = ref([])

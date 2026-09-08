@@ -9,10 +9,10 @@
       <div class="navbar-nav">
         <slot name="nav-links" />
         <span class="navbar-divider" aria-hidden="true"></span>
-        <span class="navbar-user" :title="auth.user?.email">
+        <RouterLink to="/tasks/profile" class="navbar-user" aria-label="个人中心" :title="auth.user?.email">
           <span class="navbar-avatar" aria-hidden="true">{{ userInitial }}</span>
-          <span>{{ auth.user?.name || auth.user?.email }}</span>
-        </span>
+          <span>{{ auth.user?.name || auth.user?.email || auth.user?.username }}</span>
+        </RouterLink>
         <button class="btn btn-quiet btn-sm" @click="handleLogout">退出</button>
       </div>
     </div>

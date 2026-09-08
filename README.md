@@ -313,7 +313,7 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 
 #### 外部统一身份
 
-在 `.env` 设置 `HINGHWA_IDENTITY_BASE_URL=https://identity.example.com` 后，登录页会显示“兴化语记”入口，方辑后端向该地址的 `/login` 发送 `username`、`password`。首次验证成功时系统创建一个没有项目权限的本地 `user` 并保存 provider subject 映射；已登录用户也可在个人主页显式绑定。系统不会按邮箱或姓名自动合并账号，也不会同步外部资料、密码或项目权限。
+在 `.env` 设置 `HINGHWA_IDENTITY_BASE_URL=https://identity.example.com` 后，登录页会显示“兴化语记”入口，方辑后端向该地址的 `/login` 发送 `username`、`password`。首次验证成功时系统创建一个没有项目权限的本地 `user` 并保存 provider subject 映射；已登录用户也可在个人主页显式绑定。系统不会按邮箱或姓名自动合并账号，首次创建本地账号时会从公开 `/users/{id}` 详情读取昵称（失败时仍允许登录）；后续登录和绑定不会覆盖本地资料，也不会同步邮箱、密码或项目权限。
 
 远端返回的 HS256 token 只在单次后端请求内读取后立即丢弃，不写数据库、日志或浏览器响应，也不需要共享远端签名密钥。适配器强制 HTTPS、5 秒超时、禁止重定向、限制响应为 64 KiB，并按来源地址执行登录限流；日志只记录 provider 与脱敏后的结果类别。`HINGHWA_IDENTITY_BASE_URL` 为空时该入口不会显示。
 
@@ -632,14 +632,14 @@ PB_SUPER_PASSWORD=your-password \
 node backend/tests/volunteer_accounts_integration.mjs
 ```
 
-外部身份测试完全使用本机 mock HTTPS provider，不访问真实统一身份服务；覆盖成功、失败、超时、禁止重定向、畸形/超大响应、重复映射、绑定冲突、无资料同步、默认无项目权限、可信代理取址和客户端/全局双层限流：
+外部身份测试完全使用本机 mock HTTPS provider，不访问真实统一身份服务；覆盖成功、失败、超时、禁止重定向、畸形/超大响应、重复映射、绑定冲突、仅首次继承昵称、默认无项目权限、可信代理取址和客户端/全局双层限流：
 
 ```bash
 cd backend
 go test ./...
 ```
 
-部署环境只在获得一次性测试账号时进行人工联调，CI 不依赖外部服务。适配行为依据上游 Django [`/login` 接口](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/user/views.py)及其[令牌实现](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/utils/token.py)；方辑只使用响应中的稳定用户 ID，不消费远端 token。
+部署环境只在获得一次性测试账号时进行人工联调，CI 不依赖外部服务。适配行为依据上游 Django [`/login` 接口](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/user/views.py)及其[令牌实现](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/utils/token.py)；方辑使用响应中的稳定用户 ID，不消费远端 token；首次注册另外读取公开用户详情中的昵称并核对 ID。
 
 容器 CI 还会经过实际 Nginx 代理轮换伪造的 `X-Forwarded-For`，确认同一可信 `X-Real-IP` 仍共享客户端额度，并确认另一客户端不会被该额度连带封锁。
 
@@ -764,3 +764,7 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up --bui
 ### 上传 PDF 后没有自动生成校对条目
 
 当前实现中 PDF 只用于原文预览。请通过 CSV 导入待校对文本条目。
+
+### 个人中心
+
+点击导航头像进入个人中心，可修改当前账号的昵称和邮箱。保存后导航即时更新。邮箱是选填项，修改或清空邮箱会撤销原验证状态；不会修改外部身份的邮箱，也不会改变角色或项目权限。`PATCH /api/fangji/profile` 仅接受当前登录用户的 `name`、`email`，使用 PocketBase 校验邮箱格式和唯一性，无需数据迁移。
