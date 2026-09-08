@@ -6,9 +6,10 @@
         <div class="page-eyebrow">项目工作区</div>
         <h1>{{ project?.name || '项目详情' }}</h1>
         <p v-if="project?.description">{{ project.description }}</p>
+        <RouterLink v-if="project?.capabilities?.canManage" :to="`/admin/projects/${projectId}/settings#project-details`" class="btn btn-secondary btn-sm mt-3">编辑项目资料</RouterLink>
       </div>
       <nav v-if="project" class="project-section-nav" aria-label="项目页面分区">
-        <RouterLink :to="`/admin/projects/${projectId}/settings`">成员与设置</RouterLink>
+        <RouterLink :to="`/admin/projects/${projectId}/settings`">项目设置（资料与成员）</RouterLink>
         <a href="#project-files">文件准备</a>
         <a href="#project-export">导出结果</a>
         <a href="#project-entries">条目管理</a>
