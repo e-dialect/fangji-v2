@@ -1,0 +1,3 @@
+# Issue 58: Traefik administrator access
+
+Expose the existing authenticated PocketBase administrator UI by default only in the Traefik Compose entrypoint; retain an explicit ENABLE_POCKETBASE_ADMIN_UI=false override and local Compose's current default. Make both /_ and /_/ deterministic when enabled/disabled; the enabled slash redirect must remain relative behind TLS termination. Document the exact same-origin URL, required PocketBase administrator credentials and frontend recreation command. Extend the container test to cover default-denied, enabled UI/assets, relative redirect, and unauthenticated protected API rejection.

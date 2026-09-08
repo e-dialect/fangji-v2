@@ -5,18 +5,29 @@
         <RouterLink :to="`/admin/projects/${projectId}`" class="back-link">← 返回项目</RouterLink>
         <div class="page-eyebrow">项目配置</div>
         <h1>{{ project?.name || '项目设置' }}</h1>
-        <p>访问方式影响新成员如何加入；已经加入的成员不会被自动移除。</p>
+        <p>编辑项目名称与简介，管理加入方式、成员、校对人数和键盘。</p>
       </div>
     </header>
     <div v-if="error" class="alert alert-error">{{ error }}</div>
     <div v-if="success" class="alert alert-success">{{ success }}</div>
     <div v-if="loading" class="card text-muted">正在加载项目配置…</div>
-    <template v-else-if="project">
-      <section class="card project-settings-section mb-6">
-        <div class="section-heading"><div><h2>项目与访问方式</h2><p>指定成员是默认且最严格的模式。</p></div></div>
+    <template v-else-if="project?.capabilities?.canManage">
+      <section id="project-details" class="card project-settings-section mb-6" aria-labelledby="project-details-title">
+        <div class="section-heading"><div><h2 id="project-details-title">项目资料</h2><p>名称和简介会同步显示在工作台、项目详情和发现项目中。</p></div></div>
+        <form class="settings-form" @submit.prevent="saveDetails">
+          <fieldset :disabled="savingDetails" style="border:0;padding:0;margin:0;min-width:0">
+            <label class="form-group"><span class="form-label">项目名称</span><input v-model="details.name" class="form-control" required /></label>
+            <label class="form-group"><span class="form-label">项目简介</span><textarea v-model="details.description" class="form-control" placeholder="介绍校对目标、材料来源或参与须知"></textarea></label>
+            <p v-if="detailsError" class="alert alert-error" role="alert">{{ detailsError }}</p>
+            <p v-if="detailsSuccess" class="alert alert-success" role="status">{{ detailsSuccess }}</p>
+            <button class="btn btn-primary" :disabled="!detailsDirty">{{ savingDetails ? '保存中…' : '保存项目资料' }}</button>
+          </fieldset>
+        </form>
+      </section>
+
+      <section id="project-access" class="card project-settings-section mb-6">
+        <div class="section-heading"><div><h2>加入方式与校对规则</h2><p>指定成员是默认且最严格的模式。</p></div></div>
         <form class="settings-form" @submit.prevent="saveSettings">
-          <label class="form-group"><span class="form-label">项目名称</span><input v-model.trim="settings.name" class="form-control" required maxlength="500" /></label>
-          <label class="form-group"><span class="form-label">项目简介</span><textarea v-model="settings.description" class="form-control" maxlength="2000"></textarea></label>
           <fieldset class="access-mode-grid">
             <legend class="form-label">新成员加入方式</legend>
             <label v-for="mode in accessModes" :key="mode.value" class="access-mode-option" :class="{ 'is-selected': settings.accessMode === mode.value }">
@@ -194,7 +205,12 @@ const keyboardLibrary = ref([])
 const enabledKeyboardIds = ref([])
 const defaultKeyboardId = ref('')
 const generatedBatch = ref(null)
-const settings = reactive({ name: '', description: '', accessMode: 'members_only', password: '', requiredProofreads: 2 })
+const details = reactive({ name: '', description: '' })
+const savingDetails = ref(false)
+const detailsError = ref('')
+const detailsSuccess = ref('')
+const detailsDirty = computed(() => details.name.trim() !== project.value?.name || details.description.trim() !== (project.value?.description || ''))
+const settings = reactive({ accessMode: 'members_only', password: '', requiredProofreads: 2 })
 const newMember = reactive({ userId: '', role: 'proofreader' })
 const volunteerForm = reactive({ count: 10, usernamePattern: 'volunteer-{n}', startNumber: 1, digits: 3, nicknamePattern: '志愿者 {n}' })
 const accessModes = [
@@ -214,8 +230,8 @@ async function load() {
   try {
     project.value = await getProject(projectId)
     if (!project.value.capabilities.canManage) throw new Error('你没有管理该项目的权限。')
-    settings.name = project.value.name
-    settings.description = project.value.description || ''
+    details.name = project.value.name
+    details.description = project.value.description || ''
     settings.accessMode = project.value.access_mode
     settings.requiredProofreads = Number(project.value.required_proofreads || 2)
     const [nextMembers, nextCandidates, nextKeyboardLibrary, keyboardConfig] = await Promise.all([
@@ -233,14 +249,36 @@ async function load() {
   finally { loading.value = false }
 }
 
+async function saveDetails() {
+  if (savingDetails.value || !detailsDirty.value) return
+  detailsError.value = ''
+  detailsSuccess.value = ''
+  const name = details.name.trim()
+  const description = details.description.trim()
+  if (!name || Array.from(name).length > 500 || Array.from(description).length > 2000) {
+    detailsError.value = '项目名称需为 1–500 个字符，简介不能超过 2000 个字符。'
+    return
+  }
+  savingDetails.value = true
+  try {
+    project.value = await updateProject(projectId, { name, description })
+    details.name = project.value.name
+    details.description = project.value.description || ''
+    detailsSuccess.value = '项目资料已保存。'
+  } catch (e) {
+    detailsError.value = getPbMessage(e, '项目资料保存失败，请重试。')
+  } finally {
+    savingDetails.value = false
+  }
+}
+
 async function saveSettings() {
+  if (saving.value) return
   saving.value = true
   error.value = ''
   success.value = ''
   try {
     project.value = await updateProject(projectId, {
-      name: settings.name,
-      description: settings.description,
       accessMode: settings.accessMode,
       password: settings.password,
       requiredProofreads: settings.requiredProofreads

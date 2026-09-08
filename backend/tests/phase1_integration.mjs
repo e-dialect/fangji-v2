@@ -79,6 +79,12 @@ try {
   const firstUser = await createUser('phase1-first')
   const secondUser = await createUser('phase1-second')
 
+  const emptyStats = await request('/api/fangji/proofreader-stats', { token: firstUser.token })
+  assert.equal(emptyStats.proofreadCount, 0)
+  assert.equal(emptyStats.evaluatedCount, 0)
+  assert.equal(emptyStats.accuracyRank, null)
+  assert.equal(emptyStats.proofreadRank, null)
+
   const project = await request('/api/fangji/projects', {
     method: 'POST',
     token: admin.token,
@@ -134,6 +140,11 @@ try {
     body: { rowJson: JSON.stringify(firstRow), text: '天光 清晨', leaseToken: firstClaim.leaseToken }
   })
   assert.equal(firstSubmit.status, 'proofread')
+  const waitingStats = await request('/api/fangji/proofreader-stats', { token: firstUser.token })
+  assert.equal(waitingStats.proofreadCount, 1)
+  assert.equal(waitingStats.evaluatedCount, 0)
+  assert.equal(waitingStats.accuracyRank, null)
+  assert.equal(waitingStats.proofreadRank, 1)
 
   await request(`/api/collections/pages/records/${page.id}`, {
     token: secondUser.token,

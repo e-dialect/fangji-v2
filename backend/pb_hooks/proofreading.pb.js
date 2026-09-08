@@ -566,7 +566,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/arbitrate`, (c) => {
     return { parsed, keys: sourceKeys }
   }
   const composeRowText = (keys, parsed) => keys.map((key) => parsed[key].trim()).filter(Boolean).join(" ")
-  const note = String(body.note || "").slice(0, 4000)
+  const note = Array.from(String(body.note || "")).slice(0, 4000).join("")
   const now = new Date().toISOString()
   let response = null
 
@@ -697,12 +697,12 @@ routerAdd("GET", `${FANGJI_API}/proofreader-stats`, (c) => {
     return result
   }
 
-  const accuracySorted = profiles.slice().sort((a, b) =>
+  const accuracySorted = profiles.filter((item) => item.evaluatedCount > 0).sort((a, b) =>
     (b.accuracy - a.accuracy) ||
     (b.evaluatedCount - a.evaluatedCount) ||
     a.userId.localeCompare(b.userId)
   )
-  const countSorted = profiles.slice().sort((a, b) =>
+  const countSorted = profiles.filter((item) => item.proofreadCount > 0).sort((a, b) =>
     (b.proofreadCount - a.proofreadCount) ||
     (b.accuracy - a.accuracy) ||
     a.userId.localeCompare(b.userId)
@@ -713,6 +713,6 @@ routerAdd("GET", `${FANGJI_API}/proofreader-stats`, (c) => {
     ...current,
     accuracyRank: rank(accuracySorted, auth.getId(), "accuracy"),
     proofreadRank: rank(countSorted, auth.getId(), "proofreadCount"),
-    rankedProofreaderCount: profiles.length
+    rankedProofreaderCount: countSorted.length
   })
 }, $apis.requireRecordAuth("users"))
