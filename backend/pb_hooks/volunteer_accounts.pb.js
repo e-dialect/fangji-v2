@@ -7,9 +7,9 @@ routerAdd("POST", "/api/fangji/projects/:projectId/volunteers/generate", (c) => 
     return `"${text.replace(/"/g, '""')}"`
   }
   const batchFileName = (projectName) => {
-    const safe = String(projectName || "project")
-      .replace(/[\\/:*?"<>|\r\n]+/g, "_")
-      .slice(0, 80)
+    const safe = Array.from(String(projectName || "project")
+      .replace(/[\\/:*?"<>|\r\n]+/g, "_"))
+      .slice(0, 80).join("")
     return `${safe || "project"}_志愿者账号.csv`
   }
   const {

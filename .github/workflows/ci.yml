@@ -42,6 +42,25 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+  backend-unicode:
+    name: Backend Unicode workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.21"
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Run backend tests
+        working-directory: backend
+        run: go test ./...
+      - name: Verify Unicode import, proofreading, arbitration and restart persistence
+        run: python3 backend/tests/run_rare_characters_integration.py
+
   containers:
     name: Containers
     runs-on: ubuntu-latest
@@ -61,6 +80,14 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.named-volume.yml config --quiet
           docker compose -f docker-compose.dev.yml -f docker-compose.named-volume.yml config --quiet
           docker compose -f docker-compose.traefik.yml -f docker-compose.named-volume.yml config --quiet
+
+      - name: Verify administrator UI entrypoint defaults and explicit override
+        env:
+          TRAEFIK_HOST: fangji.example.com
+        run: |
+          env -u ENABLE_POCKETBASE_ADMIN_UI docker compose -f docker-compose.traefik.yml config --format json | jq -e '.services.frontend.environment.ENABLE_POCKETBASE_ADMIN_UI == "true"'
+          ENABLE_POCKETBASE_ADMIN_UI=false docker compose -f docker-compose.traefik.yml config --format json | jq -e '.services.frontend.environment.ENABLE_POCKETBASE_ADMIN_UI == "false"'
+          env -u ENABLE_POCKETBASE_ADMIN_UI docker compose config --format json | jq -e '.services.frontend.environment.ENABLE_POCKETBASE_ADMIN_UI == "false"'
 
       - name: Verify Compose entry point behavior
         env:
@@ -119,6 +146,36 @@ jobs:
 
       - name: Verify trusted proxy rate limiting
         run: sh frontend/tests/proxyRateLimit.e2e.sh
+
+  profile-stats:
+    name: profile-stats integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: python3 backend/tests/run_integration.py phase1_integration.mjs
+
+  project-management:
+    name: project-management integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: python3 backend/tests/run_integration.py project_access_integration.mjs
 
   pdf-access:
     name: pdf-access integration

@@ -25,6 +25,9 @@ export function diffTexts(oldText, newText) {
 }
 
 function charLevelDiff(a, b) {
+  // Compare Unicode code points so a supplementary Han character stays whole.
+  a = Array.from(a)
+  b = Array.from(b)
   // LCS-based char diff
   const m = a.length
   const n = b.length
