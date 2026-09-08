@@ -40,7 +40,8 @@ var (
 )
 
 // externalIdentityProvider deliberately exposes only the provider-local stable
-// subject. Remote tokens and profile fields never cross this boundary.
+// subject. Remote tokens never cross this boundary; an optional public nickname
+// is read separately only when creating a local user.
 type externalIdentityProvider interface {
 	ID() string
 	Name() string
@@ -114,7 +115,15 @@ func (s *externalIdentityService) login(c echo.Context) error {
 		return err
 	}
 
-	user, created, err := s.resolveOrCreateUser(provider.ID(), subject)
+	name := ""
+	if _, lookupErr := findMappedUser(s.app.Dao(), provider.ID(), subject); errors.Is(lookupErr, sql.ErrNoRows) {
+		if profile, ok := provider.(interface {
+			Nickname(context.Context, string) string
+		}); ok {
+			name = profile.Nickname(c.Request().Context(), subject)
+		}
+	}
+	user, created, err := s.resolveOrCreateUserWithName(provider.ID(), subject, name)
 	if err != nil {
 		s.logAuthResult(provider.ID(), "mapping_error")
 		return apis.NewApiError(http.StatusInternalServerError, "外部账号登录暂时不可用，请稍后重试。", nil)
@@ -203,6 +212,10 @@ func stringValue(value any) string {
 }
 
 func (s *externalIdentityService) resolveOrCreateUser(provider, subject string) (*models.Record, bool, error) {
+	return s.resolveOrCreateUserWithName(provider, subject, "")
+}
+
+func (s *externalIdentityService) resolveOrCreateUserWithName(provider, subject, name string) (*models.Record, bool, error) {
 	if user, err := findMappedUser(s.app.Dao(), provider, subject); err == nil {
 		return user, false, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -233,6 +246,7 @@ func (s *externalIdentityService) resolveOrCreateUser(provider, subject string) 
 		username := availableExternalUsername(txDao, users.Id, provider, subject)
 		user = models.NewRecord(users)
 		user.Set("username", username)
+		user.Set("name", name)
 		user.Set("role", "user")
 		user.Set("must_change_password", false)
 		if err := user.SetPassword(security.RandomString(64)); err != nil {
