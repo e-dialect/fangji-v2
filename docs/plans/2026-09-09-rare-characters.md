@@ -13,3 +13,6 @@
 No data migration. Code rollback removes fallback fonts; Unicode data stays unchanged. PDF glyphs remain governed by the source PDF.
 
 Validation completed: 32 frontend tests and production build; Go suite; disposable server CSV import/inspection, source and structured JSON, two submissions, arbitration and 4000-code-point note boundary, auto-approval, volunteer nickname/filename, and post-restart persistence. Real Chrome workflow verified localStorage reload, editor submit, arbitration UI and exact downloaded CSV rows. Chrome, Firefox and WebKit verified five actual fallback glyphs, only five subset requests (309,156 bytes), ordinary-page zero requests and failure notices. Nginx MIME/cache/CSP/404/304 tests are included in the container CI test.
+
+## BUC follow-up
+The issue update expands scope to lowercase BUC combining sequences. Add a renamed OFL Charis 7.000 subset covering every shipped keyboard key with ASCII bases and GSUB/GPOS, verify source/output checksums, all 46 lowercase keys in Chrome/Firefox/WebKit, and representative stacked marks through import, submissions, arbitration and restart. This 23 KB Latin subset loads on ordinary Latin pages; the original zero-large-Han-shard behavior remains. Do not describe the new behavior as zero font requests.

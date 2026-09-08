@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { toSafeCsvCell } from '../../frontend/src/lib/csvExport.js'
 
 const baseUrl = process.env.PB_URL || 'http://127.0.0.1:18095'
-const sample = '𢶀𠮷㙟𰻞䲠'
+const sample = '𢶀𠮷㙟𰻞䲠a̤̍e̤̍o̤̍ṳ́ṳ̂ṳ̍ṳ̄n̂n̍n̄'
 const key = '词条𢶀'
 const sourceRow = { [key]: sample, 释义: sample }
 const password = 'RareIntegration12345'
