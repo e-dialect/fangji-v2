@@ -99,8 +99,14 @@ routerAdd("PATCH", "/api/fangji/projects/:projectId", (c) => {
   const { reconcileProjectQuorum: fangjiReconcileProjectQuorum } = require(`${__hooks}/lib/proofreading_workflow.js`)
   const auth = fangjiAuth(c)
   const projectId = fangjiAssertId(c.pathParam("projectId"), "项目")
-  const body = new DynamicModel({ name: "", description: "", accessMode: "", password: "", requiredProofreads: 0 })
-  c.bind(body)
+  // PATCH must distinguish an omitted field from an explicitly empty value.
+  const body = $apis.requestInfo(c).data
+  const has = (key) => Object.prototype.hasOwnProperty.call(body, key)
+  const allowed = ["name", "description", "accessMode", "password", "requiredProofreads"]
+  if (Object.keys(body).some((key) => !allowed.includes(key))) throw new BadRequestError("包含不支持的项目设置字段")
+  for (const key of ["name", "description", "accessMode", "password"]) {
+    if (has(key) && typeof body[key] !== "string") throw new BadRequestError(`字段“${key}”必须是文本`)
+  }
   let result = null
   $app.dao().runInTransaction((txDao) => {
     const { project } = fangjiRequireManager(txDao, projectId, auth)
@@ -109,15 +115,16 @@ routerAdd("PATCH", "/api/fangji/projects/:projectId", (c) => {
     const accessMode = String(body.accessMode || "").trim()
     const requiredProofreads = Number(body.requiredProofreads || 0)
     let quorumChanged = false
-    if (name) {
-      if (name.length > 500) throw new BadRequestError("项目名称不能超过 500 个字符")
+    if (has("name")) {
+      if (!name) throw new BadRequestError("项目名称不能为空")
+      if (Array.from(name).length > 500) throw new BadRequestError("项目名称不能超过 500 个字符")
       project.set("name", name)
     }
-    if (body.description !== undefined) {
-      if (description.length > 2000) throw new BadRequestError("项目简介不能超过 2000 个字符")
+    if (has("description")) {
+      if (Array.from(description).length > 2000) throw new BadRequestError("项目简介不能超过 2000 个字符")
       project.set("description", description)
     }
-    if (accessMode) {
+    if (has("accessMode")) {
       if (!["public", "members_only", "password"].includes(accessMode)) throw new BadRequestError("项目访问模式无效")
       if (accessMode === "password" && !fangjiProjectSecret(txDao, projectId) && !String(body.password || "")) {
         throw new BadRequestError("切换为口令加入时必须设置项目口令")
@@ -131,8 +138,8 @@ routerAdd("PATCH", "/api/fangji/projects/:projectId", (c) => {
       }
       fangjiSetProjectPassword(txDao, projectId, body.password)
     }
-    if (requiredProofreads) {
-      if (!Number.isInteger(requiredProofreads) || requiredProofreads < 2 || requiredProofreads > 1000) {
+    if (has("requiredProofreads")) {
+      if (typeof body.requiredProofreads !== "number" || !Number.isInteger(requiredProofreads) || requiredProofreads < 2 || requiredProofreads > 1000) {
         throw new BadRequestError("校对人数必须为 2 到 1000 的整数")
       }
       quorumChanged = project.getInt("required_proofreads") !== requiredProofreads
