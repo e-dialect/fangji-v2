@@ -60,7 +60,7 @@
           class="btn btn-primary btn-block btn-lg"
           :disabled="loading || !canSubmit"
         >
-          {{ loading ? '登录中...' : selectedProvider ? `使用${selectedProvider.name}登录` : '登录' }}
+          {{ loading ? '登录中...' : selectedProvider ? `通过 ${selectedProvider.name} 登录` : '登录' }}
         </button>
       </form>
 
