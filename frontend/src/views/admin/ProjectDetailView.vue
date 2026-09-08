@@ -313,7 +313,7 @@
                 <td class="text-sm text-muted">{{ pg.expand?.proofreader?.name || pg.expand?.proofreader?.email || '—' }}</td>
                 <td class="text-sm text-muted">{{ pg.mismatch_count || 0 }}</td>
                 <td class="text-sm text-muted" style="max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                  {{ pg.ocr_text?.slice(0, 80) || '—' }}
+                  {{ Array.from(pg.ocr_text || '').slice(0, 80).join('') || '—' }}
                 </td>
                 <td>
                   <RouterLink
