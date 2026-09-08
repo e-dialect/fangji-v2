@@ -767,3 +767,28 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up --bui
 ### 上传 PDF 后没有自动生成校对条目
 
 当前实现中 PDF 只用于原文预览。请通过 CSV 导入待校对文本条目。
+
+### 生僻字与 Unicode 验证
+
+网页字体链包含自托管的 Fangji Rare Han 补充字体（思源黑体及遍黑体 OFL 子集），覆盖源字体包含的扩展 A–J 及兼容汉字，共 82,007 个码位。283 个 WOFF2 分片总计约 13.6 MB，使用精确 `unicode-range` 按需下载；常用汉字/ASCII 页面不请求这些字体。字体声明增加约 24 KB gzip CSS，不预加载整套字体。字体来源、许可证、覆盖清单和可复现构建方式见 [字体说明](frontend/public/fonts/rare-han/README.md)。
+
+UTF-8、SQLite 和 PocketBase 能存储四字节生僻字，不需要 schema 迁移。差异高亮、头像/列表截断及后端仲裁说明按 Unicode 码位处理；输入光标仍使用浏览器规定的 UTF-16 偏移。校对/仲裁中的生僻字补充字体加载失败时显示码位提示，原始内容保持不变。PDF 字形仍取决于原始 PDF。
+
+全链路测试使用 `𢶀𠮷㙟𰻞䲠`，包含扩展字字段名、CSV 预检/导入、Go 入库、JS hooks 校对提交、仲裁/说明、自动通过和 UTF-8 导出。仅对临时数据库执行：
+
+```sh
+PB_URL=http://127.0.0.1:18095 \
+APP_ADMIN_EMAIL=test-admin@example.com APP_ADMIN_PASSWORD='<test password>' \
+PB_SUPER_EMAIL=test-super@example.com PB_SUPER_PASSWORD='<test password>' \
+node backend/tests/rare_characters_integration.mjs
+```
+
+脚本默认清理创建的项目和用户；设置 `RARE_BROWSER_FIXTURE=/tmp/fangji-rare-fixture.json` 可保留临时测试数据及认证信息供浏览器后续验收，此文件不能提交。前端单元测试另覆盖差异片段不产生孤立代理码元、键盘插入光标、JSON/CSV 与字体失败提示；Go 测试覆盖 SQLite 持久化读取。
+
+可一键建立全新临时数据库、按部署顺序迁移、执行上述链路、重启后检查持久化并清理：
+
+```sh
+python3 backend/tests/run_rare_characters_integration.py
+```
+
+该测试已加入 CI 的 `Backend Unicode workflow`。浏览器测试脚本位于 `frontend/scripts/test-rare-fonts.cjs`（Chrome、Firefox、WebKit 字形与失败提示）和 `test-rare-workflow.cjs`（真实编辑/草稿/校对/仲裁/CSV 下载）。可在临时目录安装 Playwright，通过 `NODE_PATH` 指向其 `node_modules`；设置 `FRONTEND_URL`、`SCREENSHOT_DIR`，后者还需要 `RARE_BROWSER_FIXTURE` 指向前述测试保留的临时数据。每次完整浏览器流程需要一套新 fixture。普通 `npm test` 无需安装浏览器。
