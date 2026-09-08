@@ -57,6 +57,7 @@ func main() {
 
 	importer := newImportService(app)
 	importer.register()
+	importer.registerPDFPreview()
 
 	identityProviders := make([]externalIdentityProvider, 0, 1)
 	if hinghwaBaseURL := os.Getenv("HINGHWA_IDENTITY_BASE_URL"); hinghwaBaseURL != "" {
