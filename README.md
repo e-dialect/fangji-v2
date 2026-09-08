@@ -74,7 +74,7 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up -d --
 
 - `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD`：方辑业务管理员账号。
 - `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`：需要创建 PocketBase 管理员时再改；生产入口默认不会公开 Admin UI。
-- `ENABLE_POCKETBASE_ADMIN_UI`：默认 `false`。仅在受控维护窗口临时设为 `true`。
+- `ENABLE_POCKETBASE_ADMIN_UI`：Traefik 模式默认 `true`，本地生产入口默认 `false`；可显式设置 `false` 关闭后台入口。后台始终要求独立的 PocketBase 管理员登录。
 
 启动后访问：
 
@@ -103,7 +103,7 @@ docker compose down
 
 - `docker-compose.yml` 是本机生产镜像入口，不使用 Vite dev server，因此不需要维护 Vite `allowedHosts`。
 - `frontend` 内置 Nginx 会把 `/api/` 转发到 Docker 内部地址 `backend:8090`；backend 不发布宿主机端口。
-- 生产入口默认隐藏 PocketBase Admin UI。确需维护时，将 `ENABLE_POCKETBASE_ADMIN_UI=true` 后执行 `docker compose up -d --force-recreate frontend`；完成后改回 `false` 并再次重建前端容器。
+- 本地生产入口默认隐藏 PocketBase Admin UI。需要访问时，将 `ENABLE_POCKETBASE_ADMIN_UI=true` 后执行 `docker compose up -d --force-recreate frontend`；完成后改回 `false` 并再次重建前端容器。
 - `TRUSTED_PROXY_CIDRS` 必须限制为实际 Traefik、内置 Nginx 与后端共享的 Docker network。Nginx 只信任这些来源提供的 `X-Real-IP`，并会覆盖浏览器传入的 `X-Forwarded-For`；后端也只解析该网段转发的地址。不要把 backend 端口直接暴露到公网。
 - `BACKEND_URL` 留空时，前端自动使用 `window.location.origin`，适合同域名或同端口反向代理部署。
 - `BACKEND_URL` 设置为完整后端地址时，前端容器会把构建产物里的 `VITE_BACKEND_URL_RUNTIME_REPLACEMENT` 替换成该地址，适合前后端不同域名部署。
@@ -240,7 +240,7 @@ APP_ADMIN_PASSWORD=请换成强密码
 APP_ADMIN_NAME=管理员
 PB_ADMIN_EMAIL=pb-admin@example.com
 PB_ADMIN_PASSWORD=请换成另一个强密码
-ENABLE_POCKETBASE_ADMIN_UI=false
+ENABLE_POCKETBASE_ADMIN_UI=true
 BACKEND_URL=
 PB_ALLOWED_ORIGINS=
 ```
@@ -271,7 +271,10 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 7. 首次登录应用：
 
 - 使用 `.env` 里的 `APP_ADMIN_EMAIL` 和 `APP_ADMIN_PASSWORD` 登录网站。
-- 如果需要进入 PocketBase Admin UI，先在受控维护窗口设置 `ENABLE_POCKETBASE_ADMIN_UI=true`，再执行 `docker compose -f docker-compose.traefik.yml up -d --force-recreate frontend`。完成后立即改回 `false` 并再次重建前端。
+- Traefik 模式默认开放 **`https://你的域名/_/`** 的 PocketBase 管理员登录页；输入 `/_` 会相对跳转到 `/_/`，不会跳向容器地址或降级为 HTTP。
+- 这里使用 **`PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`** 对应的 PocketBase 管理员账号，与方辑的 `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD` 账号不同。
+- 如果旧 `.env` 中有 `ENABLE_POCKETBASE_ADMIN_UI=false`，它会继续覆盖默认值并返回 404。改为 `true` 后执行 `docker compose -f docker-compose.traefik.yml up -d --build --force-recreate frontend`（仅 restart 不会更新容器环境变量）。
+- 要关闭后台，显式设置 `ENABLE_POCKETBASE_ADMIN_UI=false` 并重新创建 frontend。backend 仍不发布宿主机端口，不需要给 Traefik 新增 backend 路由。
 - PocketBase collections、字段和 API rules 会由迁移自动应用，不需要进后台手动配置业务规则。
 
 如果服务器前面是宿主机上的 Nginx/Caddy/宝塔而不是 Traefik，请使用默认 `docker-compose.yml`，并把域名代理到 `${FRONTEND_PORT:-8080}`。backend 始终不直接发布宿主机端口。
