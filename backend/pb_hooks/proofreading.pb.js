@@ -564,7 +564,7 @@ routerAdd("POST", `${FANGJI_API}/pages/:pageId/arbitrate`, (c) => {
     return { parsed, keys: sourceKeys }
   }
   const composeRowText = (keys, parsed) => keys.map((key) => parsed[key].trim()).filter(Boolean).join(" ")
-  const note = String(body.note || "").slice(0, 4000)
+  const note = Array.from(String(body.note || "")).slice(0, 4000).join("")
   const now = new Date().toISOString()
   let response = null
 

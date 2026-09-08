@@ -74,6 +74,8 @@
             <span class="pass-badge">独立校对</span>
           </div>
 
+      <RareCharacterNotice :texts="[...Object.values(originalRow), ...Object.values(editedRow)]" />
+
           <div class="proofread-fields">
             <article
               v-for="(header, index) in rowHeaders"
@@ -167,6 +169,7 @@
 </template>
 
 <script setup>
+import RareCharacterNotice from '@/components/editor/RareCharacterNotice.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import DocumentReviewWorkspace from '@/components/editor/DocumentReviewWorkspace.vue'
