@@ -46,6 +46,7 @@ func main() {
 		Dir:          migrationsDir,
 	})
 	registerTrustedClientIP(app)
+	registerProfile(app)
 
 	app.OnAfterBootstrap().PreAdd(func(_ *core.BootstrapEvent) error {
 		app.Dao().ModelQueryTimeout = time.Duration(queryTimeout) * time.Second
