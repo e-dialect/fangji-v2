@@ -814,10 +814,11 @@ func (s *importService) openRecordFile(record *models.Record, field string) (io.
 }
 
 type csvPage struct {
-	line      int
-	pdfPage   int
-	rowJSON   string
-	entryText string
+	line        int
+	pdfPage     int
+	rowJSON     string
+	headersJSON string
+	entryText   string
 }
 
 type csvCounters struct {
@@ -1422,12 +1423,14 @@ func buildCSVPage(headers, values []string, pdfIndex, line int) (csvPage, *rowVa
 
 	structured := make(map[string]string, len(headers)-1)
 	parts := make([]string, 0, len(headers)-1)
+	orderedHeaders := make([]string, 0, len(headers)-1)
 	for index, header := range headers {
 		if index == pdfIndex {
 			continue
 		}
 		value := strings.TrimSpace(values[index])
 		structured[header] = value
+		orderedHeaders = append(orderedHeaders, header)
 		if value != "" {
 			parts = append(parts, value)
 		}
@@ -1440,6 +1443,7 @@ func buildCSVPage(headers, values []string, pdfIndex, line int) (csvPage, *rowVa
 		}
 	}
 
+	headersJSON, _ := json.Marshal(orderedHeaders)
 	rowJSON, err := json.Marshal(structured)
 	if err != nil {
 		return csvPage{}, &rowValidationError{
@@ -1449,10 +1453,11 @@ func buildCSVPage(headers, values []string, pdfIndex, line int) (csvPage, *rowVa
 		}
 	}
 	return csvPage{
-		line:      line,
-		pdfPage:   pdfPage,
-		rowJSON:   string(rowJSON),
-		entryText: strings.Join(parts, " "),
+		line:        line,
+		pdfPage:     pdfPage,
+		rowJSON:     string(rowJSON),
+		headersJSON: string(headersJSON),
+		entryText:   strings.Join(parts, " "),
 	}, nil
 }
 
@@ -1572,6 +1577,7 @@ func savePage(dao *daos.Dao, jobID, projectID, projectFileID string, pageNumber 
 	record.Set("page_number", pageNumber)
 	record.Set("pdf_page", row.pdfPage)
 	record.Set("ocr_row_json", row.rowJSON)
+	record.Set("row_headers_json", row.headersJSON)
 	record.Set("ocr_text", row.entryText)
 	record.Set("proofread_round", 1)
 	record.Set("mismatch_count", 0)

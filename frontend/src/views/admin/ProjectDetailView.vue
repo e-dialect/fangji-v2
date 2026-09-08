@@ -375,6 +375,7 @@
 </template>
 
 <script setup>
+import { orderedRowHeaders } from '@/composables/useStructuredRow'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { filterAdminPages, paginateItems, parseRangeInput } from '@/lib/adminPageList'
@@ -744,7 +745,7 @@ async function exportCsv() {
   exportSuccess.value = ''
   try {
     const all = await listAllProjectPages(projectId, {
-      fields: 'id,page_number,pdf_page,status,ocr_text,proofread_text,ocr_row_json,proofread_row_json'
+      fields: 'id,page_number,pdf_page,status,ocr_text,proofread_text,ocr_row_json,proofread_row_json,row_headers_json'
     })
     if (!all.length) {
       throw new Error('当前项目暂无可导出的条目')
@@ -757,7 +758,7 @@ async function exportCsv() {
         : null
       const ocrObj = safeParseRowJson(item.ocr_row_json)
       const rowObj = proofObj || ocrObj || { 内容: item.proofread_text || item.ocr_text || '' }
-      for (const key of Object.keys(rowObj)) {
+      for (const key of orderedRowHeaders(item, rowObj)) {
         if (!headers.includes(key)) headers.push(key)
       }
       return {

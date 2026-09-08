@@ -124,6 +124,7 @@ routerAdd("GET", `${FANGJI_API}/pages/:pageId/task`, (c) => {
     proofreader: page.getString("proofreader"),
     ocr_text: page.getString("ocr_text"),
     ocr_row_json: page.getString("ocr_row_json"),
+    row_headers_json: page.getString("row_headers_json"),
     expand: {
       project: { id: project.getId(), name: project.getString("name") }
     }
@@ -525,6 +526,7 @@ routerAdd("GET", `${FANGJI_API}/pages/:pageId/arbitration`, (c) => {
       proofread_round: page.getInt("proofread_round") || 1,
       mismatch_count: page.getInt("mismatch_count") || 0,
       ocr_row_json: page.getString("ocr_row_json"),
+    row_headers_json: page.getString("row_headers_json"),
       ocr_text: page.getString("ocr_text")
     },
     attempts: attempts.map((attempt) => summarizeAttempt(dao, attempt))

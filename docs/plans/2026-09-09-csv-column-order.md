@@ -1,0 +1,2 @@
+# CSV column order
+Preserve the source header sequence in a separate JSON array on each imported page. Use it in proofreading, arbitration and export; objects alone cannot preserve integer-like keys. Migration 26 recovers historical order from retained import inspection metadata, falling back to current order where original metadata no longer exists. Rollback removes only the order metadata. Verify Go import parsing, numeric headers, Vue hydration and real migrated API responses.
