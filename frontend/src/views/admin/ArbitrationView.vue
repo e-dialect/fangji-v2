@@ -44,6 +44,8 @@
         </div>
       </section>
 
+      <RareCharacterNotice :texts="[...Object.values(originalRow), ...Object.values(finalRow), ...attemptRows.flatMap(item => Object.values(item.row))]" />
+
       <section class="arbitration-workspace">
         <header class="arbitration-toolbar">
           <div>
@@ -181,6 +183,7 @@
 </template>
 
 <script setup>
+import RareCharacterNotice from '@/components/editor/RareCharacterNotice.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import DocumentReviewWorkspace from '@/components/editor/DocumentReviewWorkspace.vue'
