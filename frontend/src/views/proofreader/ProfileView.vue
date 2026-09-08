@@ -28,26 +28,30 @@
       </form>
     </section>
 
-    <div v-if="error" class="alert alert-error mb-4">{{ error }}</div>
-    <div v-if="loading" class="text-muted">加载中...</div>
+    <div v-if="error" class="alert alert-error mb-4" role="alert">
+      <p>{{ error }}</p>
+      <p v-if="stats" class="text-sm">下方保留上次成功加载的统计，可能不是最新结果。</p>
+      <p v-else class="text-sm">暂时无法显示统计；这不代表你的校对记录为零。</p>
+      <button class="btn btn-secondary btn-sm mt-3" :disabled="loading" @click="loadStats">重试统计</button>
+    </div>
+    <div v-if="loading && !stats" class="text-muted" role="status">正在加载统计…</div>
 
-    <template v-else>
       <section class="profile-hero mb-6">
         <div>
           <div class="text-sm text-muted">账户名称</div>
           <div class="profile-name">{{ displayName }}</div>
         </div>
-        <div class="profile-rank">
+        <div v-if="stats" class="profile-rank">
           <span>一致率排行</span>
           <strong>{{ rankLabel(stats.accuracyRank) }}</strong>
         </div>
-        <div class="profile-rank">
+        <div v-if="stats" class="profile-rank">
           <span>条目排行</span>
           <strong>{{ rankLabel(stats.proofreadRank) }}</strong>
         </div>
       </section>
 
-      <section class="profile-stats">
+      <section v-if="stats" class="profile-stats" aria-label="校对统计">
         <div class="stat-card">
           <div class="stat-value">{{ stats.projectCount }}</div>
           <div class="stat-label">参加项目数</div>
@@ -111,7 +115,6 @@
           一致率按已完成系统比对的校对尝试计算；仍在等待其他独立结果的提交暂不进入分母。不一致记录会永久保留并计入统计。
         </div>
       </div>
-    </template>
   </div>
 </template>
 
@@ -149,23 +152,16 @@ async function saveProfile() {
   }
 }
 
-const loading = ref(true)
+const loading = ref(false)
 const error = ref('')
 const providers = ref([])
 const credentials = reactive({})
 const bindingProvider = ref('')
 const bindingError = reactive({})
-const stats = ref({
-  projectCount: 0,
-  proofreadCount: 0,
-  correctCount: 0,
-  accuracy: 0,
-  accuracyRank: null,
-  proofreadRank: null
-})
+const stats = ref(null)
 
 const displayName = computed(() => auth.user?.name || auth.user?.email || auth.user?.username || '校对员')
-const accuracyLabel = computed(() => `${stats.value.accuracy}%`)
+const accuracyLabel = computed(() => stats.value?.evaluatedCount ? `${stats.value.accuracy}%` : '暂无已评估结果')
 
 onMounted(async () => {
   await Promise.all([loadStats(), loadProviders()])
@@ -206,6 +202,7 @@ async function bindProvider(provider) {
 }
 
 async function loadStats() {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -213,7 +210,7 @@ async function loadStats() {
     if (!userId) throw new Error('登录状态已失效，请重新登录')
     stats.value = await getProofreaderProfileStats(userId)
   } catch (e) {
-    error.value = formatPbError('加载个人主页失败', e)
+    error.value = formatPbError('统计暂时无法加载', e)
   } finally {
     loading.value = false
   }

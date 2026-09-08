@@ -74,7 +74,7 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up -d --
 
 - `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD`：方辑业务管理员账号。
 - `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`：需要创建 PocketBase 管理员时再改；生产入口默认不会公开 Admin UI。
-- `ENABLE_POCKETBASE_ADMIN_UI`：默认 `false`。仅在受控维护窗口临时设为 `true`。
+- `ENABLE_POCKETBASE_ADMIN_UI`：Traefik 模式默认 `true`，本地生产入口默认 `false`；可显式设置 `false` 关闭后台入口。后台始终要求独立的 PocketBase 管理员登录。
 
 启动后访问：
 
@@ -103,7 +103,7 @@ docker compose down
 
 - `docker-compose.yml` 是本机生产镜像入口，不使用 Vite dev server，因此不需要维护 Vite `allowedHosts`。
 - `frontend` 内置 Nginx 会把 `/api/` 转发到 Docker 内部地址 `backend:8090`；backend 不发布宿主机端口。
-- 生产入口默认隐藏 PocketBase Admin UI。确需维护时，将 `ENABLE_POCKETBASE_ADMIN_UI=true` 后执行 `docker compose up -d --force-recreate frontend`；完成后改回 `false` 并再次重建前端容器。
+- 本地生产入口默认隐藏 PocketBase Admin UI。需要访问时，将 `ENABLE_POCKETBASE_ADMIN_UI=true` 后执行 `docker compose up -d --force-recreate frontend`；完成后改回 `false` 并再次重建前端容器。
 - `TRUSTED_PROXY_CIDRS` 必须限制为实际 Traefik、内置 Nginx 与后端共享的 Docker network。Nginx 只信任这些来源提供的 `X-Real-IP`，并会覆盖浏览器传入的 `X-Forwarded-For`；后端也只解析该网段转发的地址。不要把 backend 端口直接暴露到公网。
 - `BACKEND_URL` 留空时，前端自动使用 `window.location.origin`，适合同域名或同端口反向代理部署。
 - `BACKEND_URL` 设置为完整后端地址时，前端容器会把构建产物里的 `VITE_BACKEND_URL_RUNTIME_REPLACEMENT` 替换成该地址，适合前后端不同域名部署。
@@ -240,7 +240,7 @@ APP_ADMIN_PASSWORD=请换成强密码
 APP_ADMIN_NAME=管理员
 PB_ADMIN_EMAIL=pb-admin@example.com
 PB_ADMIN_PASSWORD=请换成另一个强密码
-ENABLE_POCKETBASE_ADMIN_UI=false
+ENABLE_POCKETBASE_ADMIN_UI=true
 BACKEND_URL=
 PB_ALLOWED_ORIGINS=
 ```
@@ -271,7 +271,10 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 7. 首次登录应用：
 
 - 使用 `.env` 里的 `APP_ADMIN_EMAIL` 和 `APP_ADMIN_PASSWORD` 登录网站。
-- 如果需要进入 PocketBase Admin UI，先在受控维护窗口设置 `ENABLE_POCKETBASE_ADMIN_UI=true`，再执行 `docker compose -f docker-compose.traefik.yml up -d --force-recreate frontend`。完成后立即改回 `false` 并再次重建前端。
+- Traefik 模式默认开放 **`https://你的域名/_/`** 的 PocketBase 管理员登录页；输入 `/_` 会相对跳转到 `/_/`，不会跳向容器地址或降级为 HTTP。
+- 这里使用 **`PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`** 对应的 PocketBase 管理员账号，与方辑的 `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD` 账号不同。
+- 如果旧 `.env` 中有 `ENABLE_POCKETBASE_ADMIN_UI=false`，它会继续覆盖默认值并返回 404。改为 `true` 后执行 `docker compose -f docker-compose.traefik.yml up -d --build --force-recreate frontend`（仅 restart 不会更新容器环境变量）。
+- 要关闭后台，显式设置 `ENABLE_POCKETBASE_ADMIN_UI=false` 并重新创建 frontend。backend 仍不发布宿主机端口，不需要给 Traefik 新增 backend 路由。
 - PocketBase collections、字段和 API rules 会由迁移自动应用，不需要进后台手动配置业务规则。
 
 如果服务器前面是宿主机上的 Nginx/Caddy/宝塔而不是 Traefik，请使用默认 `docker-compose.yml`，并把域名代理到 `${FRONTEND_PORT:-8080}`。backend 始终不直接发布宿主机端口。
@@ -768,3 +771,28 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up --bui
 ### 个人中心
 
 点击导航头像进入个人中心，可修改当前账号的昵称和邮箱。保存后导航即时更新。邮箱是选填项，修改或清空邮箱会撤销原验证状态；不会修改外部身份的邮箱，也不会改变角色或项目权限。`PATCH /api/fangji/profile` 仅接受当前登录用户的 `name`、`email`，使用 PocketBase 校验邮箱格式和唯一性，无需数据迁移。
+
+### 生僻字与 Unicode 验证
+
+网页字体链包含自托管的 Fangji Rare Han 补充字体（思源黑体及遍黑体 OFL 子集），覆盖源字体包含的扩展 A–J 及兼容汉字，共 82,007 个码位。283 个 WOFF2 分片总计约 13.6 MB，使用精确 `unicode-range` 按需下载；常用汉字/ASCII 页面不请求这些字体。字体声明增加约 24 KB gzip CSS，不预加载整套字体。字体来源、许可证、覆盖清单和可复现构建方式见 [字体说明](frontend/public/fonts/rare-han/README.md)。
+
+UTF-8、SQLite 和 PocketBase 能存储四字节生僻字，不需要 schema 迁移。差异高亮、头像/列表截断及后端仲裁说明按 Unicode 码位处理；输入光标仍使用浏览器规定的 UTF-16 偏移。校对/仲裁中的生僻字补充字体加载失败时显示码位提示，原始内容保持不变。PDF 字形仍取决于原始 PDF。
+
+全链路测试使用 `𢶀𠮷㙟𰻞䲠`，包含扩展字字段名、CSV 预检/导入、Go 入库、JS hooks 校对提交、仲裁/说明、自动通过和 UTF-8 导出。仅对临时数据库执行：
+
+```sh
+PB_URL=http://127.0.0.1:18095 \
+APP_ADMIN_EMAIL=test-admin@example.com APP_ADMIN_PASSWORD='<test password>' \
+PB_SUPER_EMAIL=test-super@example.com PB_SUPER_PASSWORD='<test password>' \
+node backend/tests/rare_characters_integration.mjs
+```
+
+脚本默认清理创建的项目和用户；设置 `RARE_BROWSER_FIXTURE=/tmp/fangji-rare-fixture.json` 可保留临时测试数据及认证信息供浏览器后续验收，此文件不能提交。前端单元测试另覆盖差异片段不产生孤立代理码元、键盘插入光标、JSON/CSV 与字体失败提示；Go 测试覆盖 SQLite 持久化读取。
+
+可一键建立全新临时数据库、按部署顺序迁移、执行上述链路、重启后检查持久化并清理：
+
+```sh
+python3 backend/tests/run_rare_characters_integration.py
+```
+
+该测试已加入 CI 的 `Backend Unicode workflow`。浏览器测试脚本位于 `frontend/scripts/test-rare-fonts.cjs`（Chrome、Firefox、WebKit 字形与失败提示）和 `test-rare-workflow.cjs`（真实编辑/草稿/校对/仲裁/CSV 下载）。可在临时目录安装 Playwright，通过 `NODE_PATH` 指向其 `node_modules`；设置 `FRONTEND_URL`、`SCREENSHOT_DIR`，后者还需要 `RARE_BROWSER_FIXTURE` 指向前述测试保留的临时数据。每次完整浏览器流程需要一套新 fixture。普通 `npm test` 无需安装浏览器。

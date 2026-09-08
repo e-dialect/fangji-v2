@@ -36,7 +36,7 @@ services:
       - "traefik.http.services.fangji.loadbalancer.server.port=80"
     environment:
       - VITE_BACKEND_URL=${BACKEND_URL:-}
-      - ENABLE_POCKETBASE_ADMIN_UI=${ENABLE_POCKETBASE_ADMIN_UI:-false}
+      - ENABLE_POCKETBASE_ADMIN_UI=${ENABLE_POCKETBASE_ADMIN_UI:-true}
       - TRUSTED_PROXY_CIDRS=${TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
     depends_on:
       backend:

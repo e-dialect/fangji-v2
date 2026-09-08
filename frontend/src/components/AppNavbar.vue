@@ -26,7 +26,7 @@ import { useRouter } from 'vue-router'
 
 const auth = useAuthStore()
 const router = useRouter()
-const userInitial = computed(() => String(auth.user?.name || auth.user?.email || '校').slice(0, 1).toLocaleUpperCase('zh-CN'))
+const userInitial = computed(() => Array.from(String(auth.user?.name || auth.user?.email || '校'))[0].toLocaleUpperCase('zh-CN'))
 
 function handleLogout() {
   auth.logout()
