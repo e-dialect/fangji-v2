@@ -60,3 +60,13 @@ test('shipped font coverage and immutable filenames match the assets', async () 
   assert.equal(covered.size, manifest.glyphs)
   for (const char of sample) assert(covered.has(char.codePointAt(0)), `missing ${char}`)
 })
+
+
+test('phonetic font covers every shipped keyboard code point, including BUC combining marks', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const keyboard = JSON.parse(await readFile(new URL('../../backend/keyboards/hinghwa-dialect.json', import.meta.url), 'utf8'))
+  const manifest = JSON.parse(await readFile(new URL('../public/fonts/phonetic/manifest.json', import.meta.url), 'utf8'))
+  for (const section of keyboard.sections) for (const key of section.keys) for (const char of key.value) {
+    assert(manifest.codepoints.includes(char.codePointAt(0)), `${section.id}: ${char}`)
+  }
+})
