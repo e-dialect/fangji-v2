@@ -3,7 +3,7 @@
     <div class="ipa-keyboard-heading">
       <div>
         <div class="ipa-keyboard-title">{{ selectedKeyboard.name }}</div>
-        <p>{{ selectedKeyboard.description || '字符会插入当前字段的光标位置；展开需要的分组即可。' }}</p>
+        <p>{{ selectedKeyboard.description || (mobile ? '切换分组，字符插入当前字段。' : '字符会插入当前字段的光标位置；展开需要的分组即可。') }}</p>
       </div>
       <label v-if="keyboards.length > 1" class="keyboard-switcher">
         <span class="sr-only">切换项目键盘</span>
@@ -14,11 +14,21 @@
       <span v-else>{{ keyCount }} 个字符</span>
     </div>
 
+    <div v-if="mobile && sections.length > 1" class="keyboard-section-switcher" role="group" aria-label="字符分组">
+      <button v-for="section in sections" :key="section.id" type="button"
+        :aria-pressed="activeSection === section.id" :aria-controls="`${keyboardUid}-${section.id}`"
+        @mousedown.prevent @click="activeSection = section.id">
+        {{ section.label }} <span>{{ section.keys.length }}</span>
+      </button>
+    </div>
     <details
-      v-for="section in selectedKeyboard.definition.sections"
-      :key="section.id"
+      v-for="section in sections"
+      :key="`${section.id}-${mobile}`"
+      :id="`${keyboardUid}-${section.id}`"
+      v-show="!mobile || activeSection === section.id"
+      :aria-label="section.label"
       class="ipa-section"
-      :open="section.defaultOpen"
+      :open="mobile || section.defaultOpen"
     >
       <summary class="ipa-section-label">
         <span>{{ section.label }}</span>
@@ -41,20 +51,31 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { currentUserId } from '@/services/authService'
 import { getProjectKeyboards } from '@/services/keyboardsService'
 import { chooseProjectKeyboard, keyboardPreferenceKey } from '@/lib/keyboardSelection'
 
 const props = defineProps({ projectId: { type: String, default: '' } })
-defineEmits(['insert'])
+const emit = defineEmits(['insert', 'availability'])
 
 const keyboards = ref([])
 const projectDefaultId = ref('')
 const selectedKeyboardId = ref('')
 let loadGeneration = 0
+const keyboardUid = useId()
+const mobile = ref(false)
+const activeSection = ref('')
+const updateMobile = () => { mobile.value = window.innerWidth <= 768 }
+onMounted(() => { updateMobile(); window.addEventListener('resize', updateMobile) })
+onBeforeUnmount(() => window.removeEventListener('resize', updateMobile))
 
 const selectedKeyboard = computed(() => keyboards.value.find((item) => item.keyboardId === selectedKeyboardId.value) || null)
+const sections = computed(() => selectedKeyboard.value?.definition?.sections || [])
+watch(selectedKeyboard, (keyboard) => {
+  emit('availability', Boolean(keyboard))
+  activeSection.value = sections.value.find((section) => section.defaultOpen)?.id || sections.value[0]?.id || ''
+}, { immediate: true })
 const keyCount = computed(() => selectedKeyboard.value?.definition?.sections?.reduce((total, section) => total + section.keys.length, 0) || 0)
 
 watch(() => props.projectId, load, { immediate: true })

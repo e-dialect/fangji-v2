@@ -266,7 +266,7 @@ onBeforeUnmount(async () => {
 .pdf-viewer {
   width: 100%;
   height: 100%;
-  min-height: 720px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -371,7 +371,11 @@ onBeforeUnmount(async () => {
 @media (max-width: 700px) {
   .pdf-toolbar {
     align-items: flex-start;
-    flex-direction: column;
+    flex-direction: row;
+    overflow-x: auto;
+    padding: .25rem;
   }
+  .pdf-toolbar-group { flex: 0 0 auto; }
+  .pdf-tool { white-space: nowrap; }
 }
 </style>
