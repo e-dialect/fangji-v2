@@ -22,7 +22,7 @@ services:
       retries: 12
       start_period: 20s
     cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     networks:
       - app
@@ -56,7 +56,7 @@ services:
       retries: 6
       start_period: 5s
     cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     networks:
       - app
