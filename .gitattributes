@@ -1,3 +1,9 @@
 # Shell scripts are executed inside Linux containers; keep them LF in the repo
 # and in every checkout, regardless of the developer's host OS.
 *.sh text eol=lf
+
+# Preserve upstream license bytes (including their original whitespace).
+# Exact paths only: source files and other vendored files retain normal checks.
+frontend/public/fonts/rare-han/OFL.txt -whitespace
+frontend/public/pdfjs/cmaps/LICENSE -whitespace
+frontend/public/pdfjs/standard_fonts/LICENSE_LIBERATION -whitespace
