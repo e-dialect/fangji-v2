@@ -35,7 +35,7 @@ const platformAuth = await request('/api/collections/users/auth-with-password', 
   method: 'POST',
   body: { identity: platformEmail, password: platformPassword }
 })
-const superAuth = await request('/api/admins/auth-with-password', {
+const superAuth = await request('/api/collections/_superusers/auth-with-password', {
   method: 'POST',
   body: { identity: superEmail, password: superPassword }
 })

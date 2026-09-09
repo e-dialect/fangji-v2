@@ -43,7 +43,7 @@ const password = 'Phase1Proof123!'
 const createdUserIds = []
 let projectId = ''
 
-const superAuth = await request('/api/admins/auth-with-password', {
+const superAuth = await request('/api/collections/_superusers/auth-with-password', {
   method: 'POST',
   body: { identity: superEmail, password: superPassword }
 })

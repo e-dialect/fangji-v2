@@ -1,6 +1,6 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-routerAdd("POST", "/api/fangji/projects/:projectId/volunteers/generate", (c) => {
+routerAdd("POST", "/api/fangji/projects/{projectId}/volunteers/generate", (c) => {
   const csvCell = (value) => {
     let text = String(value ?? "")
     if (/^[=+\-@]/.test(text)) text = `'${text}`
@@ -20,7 +20,7 @@ routerAdd("POST", "/api/fangji/projects/:projectId/volunteers/generate", (c) => 
     syncProjectAcl: fangjiAccountsSyncProjectAcl
   } = require(`${__hooks}/lib/project_access.js`)
   const auth = fangjiAccountsAuth(c)
-  const projectId = fangjiAccountsAssertId(c.pathParam("projectId"), "项目")
+  const projectId = fangjiAccountsAssertId(c.request.pathValue("projectId"), "项目")
   const body = new DynamicModel({
     count: 0,
     usernamePattern: "",
@@ -29,7 +29,7 @@ routerAdd("POST", "/api/fangji/projects/:projectId/volunteers/generate", (c) => 
     nicknamePattern: "",
     loginUrl: ""
   })
-  c.bind(body)
+  c.bindBody(body)
 
   const count = Number(body.count)
   const startNumber = Number(body.startNumber)
@@ -69,7 +69,7 @@ routerAdd("POST", "/api/fangji/projects/:projectId/volunteers/generate", (c) => 
 
   let projectName = ""
   const created = []
-  $app.dao().runInTransaction((txDao) => {
+  $app.runInTransaction((txDao) => {
     const { project } = fangjiAccountsRequireManager(txDao, projectId, auth)
     projectName = project.getString("name")
     const conflicts = []
@@ -92,17 +92,17 @@ routerAdd("POST", "/api/fangji/projects/:projectId/volunteers/generate", (c) => 
       user.set("must_change_password", true)
       user.setPassword(candidate.password)
       user.setVerified(true)
-      txDao.saveRecord(user)
-      if (fangjiAccountsMembership(txDao, projectId, user.getId())) throw new BadRequestError("账号成员关系重复")
+      txDao.save(user)
+      if (fangjiAccountsMembership(txDao, projectId, user.id)) throw new BadRequestError("账号成员关系重复")
 
       const membership = new Record(membershipsCollection)
       membership.set("project", projectId)
-      membership.set("user", user.getId())
+      membership.set("user", user.id)
       membership.set("role", "proofreader")
       membership.set("source", "assigned")
-      membership.set("created_by", auth.getId())
-      txDao.saveRecord(membership)
-      created.push({ id: user.getId(), username: candidate.username, nickname: candidate.nickname })
+      membership.set("created_by", auth.id)
+      txDao.save(membership)
+      created.push({ id: user.id, username: candidate.username, nickname: candidate.nickname })
     }
     fangjiAccountsSyncProjectAcl(txDao, projectId)
   })
@@ -112,13 +112,13 @@ routerAdd("POST", "/api/fangji/projects/:projectId/volunteers/generate", (c) => 
     ...candidates.map((candidate) => [projectName, candidate.nickname, candidate.username, candidate.password, loginUrl])
   ]
   const csv = `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`
-  c.response().header().set("Cache-Control", "no-store, max-age=0")
-  c.response().header().set("Pragma", "no-cache")
-  c.response().header().set("Expires", "0")
+  c.response.header().set("Cache-Control", "no-store, max-age=0")
+  c.response.header().set("Pragma", "no-cache")
+  c.response.header().set("Expires", "0")
   return c.json(201, {
     count: created.length,
     fileName: batchFileName(projectName),
     csv,
     accounts: created
   })
-}, $apis.requireRecordAuth("users"))
+}, $apis.requireAuth("users"))

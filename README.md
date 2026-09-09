@@ -52,6 +52,12 @@
 - 页面运行异常会显示可恢复的错误界面，管理员列表加载和批量操作均提供页面内反馈。
 - 浏览器保存的登录身份会在应用启动时向后端刷新；账号失效时自动回到登录页。
 
+## PocketBase 0.40 重建升级
+
+当前后端使用 PocketBase 0.40.3 / Go 1.27，前端使用 Node 24 LTS / PocketBase SDK 0.28.1。
+旧版本尚无正式运营数据，本次采用新目录重建；不要直接复用旧 pb_data。
+部署切换、回滚及验证证据见 [升级决策](docs/dependency-upgrades.md)。
+
 ## 快速启动
 
 ### Docker Compose 本地生产模式
@@ -312,7 +318,7 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 - 所有用户登录后进入 `/workspace`，入口按当前项目能力显示。
 - 平台管理员可进入“创建权限”，向普通用户授权、设置额度或撤销授权。
 - 获得项目管理能力的用户可进入 `/admin`；项目校对员可进入 `/tasks`。
-- 旧的全局 `admin` 会迁移为 `platform_admin`，旧的全局 `proofreader` 会迁移为 `user` 并保留为现有项目的校对成员。
+- 新数据库直接使用 `platform_admin` / `user` 及项目成员职责；历史角色转换仅保留在旧迁移参考目录中，不在本次重建时运行。
 
 #### 外部统一身份
 
@@ -774,7 +780,7 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up --bui
 
 ### 个人中心
 
-点击导航头像进入个人中心，可修改当前账号的昵称和邮箱。保存后导航即时更新。邮箱是选填项，修改或清空邮箱会撤销原验证状态；不会修改外部身份的邮箱，也不会改变角色或项目权限。`PATCH /api/fangji/profile` 仅接受当前登录用户的 `name`、`email`，使用 PocketBase 校验邮箱格式和唯一性，无需数据迁移。
+点击导航头像进入个人中心，可修改当前账号的昵称和邮箱。保存后导航即时更新。邮箱是选填项，修改或清空邮箱会撤销原验证状态；不会修改外部身份的邮箱，也不会改变角色或项目权限。`PATCH /api/fangji/profile` 仅接受当前登录用户的 `name`、`email`，使用 PocketBase 校验邮箱格式和唯一性，保存成功返回新的认证令牌与用户记录，前端同步刷新会话。
 
 ### 生僻字与 Unicode 验证
 

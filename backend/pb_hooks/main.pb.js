@@ -41,7 +41,8 @@
 //       proofreader 可领取 pending 或 proofread 页面，且可更新自己负责的页面
 //   - deleteRule: @request.auth.role = "platform_admin"
 
-onAfterBootstrap((e) => {
+onBootstrap((e) => {
+  e.next()
   if (($os.getenv("FANGJI_SKIP_ADMIN_BOOTSTRAP") || "").trim() === "1") {
     return
   }
@@ -68,7 +69,7 @@ onAfterBootstrap((e) => {
       return
     }
 
-    const dao = $app.dao()
+    const dao = $app
     let users = null
     try {
       users = dao.findCollectionByNameOrId("users")
@@ -76,7 +77,7 @@ onAfterBootstrap((e) => {
       console.warn("users collection is not ready yet; skipping app admin bootstrap until migrations finish.")
       return
     }
-    if (!users.schema.getFieldByName("role")) {
+    if (!users.fields.getByName("role")) {
       console.warn("users.role is not ready yet; skipping app admin bootstrap until migrations finish.")
       return
     }
@@ -92,14 +93,16 @@ onAfterBootstrap((e) => {
         existing.set("role", "platform_admin")
         changed = true
       }
-      if (!existing.verified()) {
+      if (!existing.verified) {
         existing.setVerified(true)
         changed = true
       }
-      existing.setPassword(password)
-      changed = true
+      if (!existing.validatePassword(password)) {
+        existing.setPassword(password)
+        changed = true
+      }
       if (changed) {
-        dao.saveRecord(existing)
+        dao.save(existing)
         console.log("Updated existing app admin:", email)
       }
       return
@@ -113,7 +116,7 @@ onAfterBootstrap((e) => {
     record.setVerified(true)
     record.set("name", name)
     record.set("role", "platform_admin")
-    dao.saveRecord(record)
+    dao.save(record)
     console.log("Created initial app admin:", email)
   }
 
@@ -133,19 +136,21 @@ onAfterBootstrap((e) => {
       return
     }
 
-    const dao = $app.dao()
+    const dao = $app
     try {
-      const existing = dao.findAdminByEmail(email)
-      existing.setPassword(password)
-      dao.saveAdmin(existing)
+      const existing = dao.findAuthRecordByEmail("_superusers", email)
+      if (!existing.validatePassword(password)) {
+        existing.setPassword(password)
+        dao.save(existing)
+      }
       console.log("Updated existing PocketBase admin:", email)
       return
     } catch {}
 
-    const admin = new Admin()
-    admin.email = email
+    const admin = new Record(dao.findCollectionByNameOrId("_superusers"))
+    admin.setEmail(email)
     admin.setPassword(password)
-    dao.saveAdmin(admin)
+    dao.save(admin)
     console.log("Created initial PocketBase admin:", email)
   }
 
@@ -164,29 +169,31 @@ onAfterBootstrap((e) => {
 
 // Hook: when a project_file is created, log it (actual OCR processing
 // would be done by an external worker or manual upload)
-onRecordAfterCreateRequest((e) => {
-  console.log("New project_file uploaded:", e.record.getId())
+onRecordCreateRequest((e) => {
+  console.log("New project_file uploaded:", e.record.id)
+  return e.next()
 }, "project_files")
 
 // Hook: force public registration users to the unprivileged global role.
 // This keeps role assignment fixed and prevents privilege escalation at signup.
-onRecordBeforeCreateRequest((e) => {
+onRecordCreateRequest((e) => {
   e.record.set("role", "user")
   e.record.set("must_change_password", false)
+  return e.next()
 }, "users")
 
 // A signed-in user may update profile fields, but role assignment is an
 // administrator-only operation. Registration protection alone is not enough:
 // Without this check a regular user could PATCH their own role to platform_admin.
-onRecordBeforeUpdateRequest((e) => {
-  const authRecord = e.httpContext?.get && e.httpContext.get("authRecord")
+onRecordUpdateRequest((e) => {
+  const authRecord = e.auth
   if (authRecord?.getString && authRecord.getString("role") === "platform_admin") {
-    return
+    return e.next()
   }
 
   let current = null
   try {
-    current = $app.dao().findRecordById("users", e.record.getId())
+    current = $app.findRecordById("users", e.record.id)
   } catch {
     throw new BadRequestError("用户记录不存在或已被删除")
   }
@@ -196,26 +203,27 @@ onRecordBeforeUpdateRequest((e) => {
   if (e.record.getBool("must_change_password") !== current.getBool("must_change_password")) {
     throw new ForbiddenError("请通过首次改密流程更新密码状态")
   }
+  return e.next()
 }, "users")
 
 // Hook: enforce valid status transitions on pages to prevent race conditions.
 //
 // - pending/proofread → claimed: only allowed while the page is still claimable
 //   and the same person has not already submitted in the current round.
-onRecordBeforeUpdateRequest((e) => {
-  const authRecord = e.httpContext?.get && e.httpContext.get("authRecord")
+onRecordUpdateRequest((e) => {
+  const authRecord = e.auth
   if (authRecord?.getString && authRecord.getString("role") === "platform_admin") {
-    return
+    return e.next()
   }
 
-  const recordId = e.record.getId()
+  const recordId = e.record.id
   if (!recordId) {
     throw new BadRequestError("无效的页面记录ID")
   }
 
   let current = null
   try {
-    current = $app.dao().findRecordById("pages", recordId)
+    current = $app.findRecordById("pages", recordId)
   } catch {
     throw new BadRequestError("页面记录不存在或已被删除")
   }
@@ -224,10 +232,10 @@ onRecordBeforeUpdateRequest((e) => {
   const newStatus = e.record.getString("status")
   const claimableStatus = oldStatus === "pending" || oldStatus === "proofread"
   if (!claimableStatus && newStatus !== "claimed") {
-    return
+    return e.next()
   }
 
-  const authId = e.httpContext?.get && e.httpContext.get("authRecord")?.id
+  const authId = e.auth?.id
   const newProofreader = e.record.getString("proofreader") || authId
 
   if (!claimableStatus) {
@@ -245,7 +253,7 @@ onRecordBeforeUpdateRequest((e) => {
   }
   if (oldStatus === "proofread") {
     const round = current.getInt("proofread_round") || 1
-    const submitted = $app.dao().findRecordsByFilter(
+    const submitted = $app.findRecordsByFilter(
       "proofreading_attempts",
       `page = "${recordId}" && round = ${round} && kind = "proofread" && proofreader = "${newProofreader}"`,
       "",
@@ -287,4 +295,5 @@ onRecordBeforeUpdateRequest((e) => {
       throw new BadRequestError("认领任务时不允许修改页面内容")
     }
   }
+  return e.next()
 }, "pages")
