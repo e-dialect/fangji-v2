@@ -5,7 +5,7 @@ migrate((app) => {
     ["project_join_source_attempts", "idx_project_join_source_attempt_window"]
   ]) {
     const collection = app.findCollectionByNameOrId(table)
-    collection.indexes.push(`CREATE INDEX ${name} ON ${table} (window_started, id)`)
+    collection.indexes = [...collection.indexes, `CREATE INDEX ${name} ON ${table} (window_started, id)`]
     app.save(collection)
   }
 }, (app) => {
