@@ -1,6 +1,8 @@
 <template>
   <DocumentReviewWorkspace
     :page="page"
+    :keyboard-available="keyboardAvailable"
+    :suspended="(mobile && overview) || reviewingSubmission"
     :loading="loadingPage"
     :watermark-user-id="currentUserId"
     return-to="/tasks"
@@ -14,6 +16,9 @@
           <span>{{ projectName }} · 独立校对</span>
           <strong id="task-panel-title">第 {{ page?.page_number || '—' }} 条</strong>
         </div>
+        <details class="task-actions-menu" :open="!mobile">
+          <summary>任务操作</summary>
+          <RouterLink v-if="mobile" to="/tasks" class="btn btn-quiet">返回大厅</RouterLink>
         <div class="editor-toolbar" aria-label="校对任务导航">
           <span class="task-position" aria-label="当前任务位置">
             {{ taskPosition || 1 }} / {{ taskCount || 1 }}
@@ -40,8 +45,10 @@
             :disabled="saving || loadingPage || !page || leaseLost || !leaseToken"
           >{{ saving ? '提交中…' : '检查并提交' }}</button>
         </div>
+        </details>
       </header>
     </template>
+    <template #default="{ inputMode }">
         <div v-if="loadingPage" class="panel-loading" aria-live="polite">正在准备校对字段…</div>
         <div v-else-if="!page" class="empty-state">
           <div class="empty-state-text">页面不存在</div>
@@ -81,12 +88,14 @@
               v-for="(header, index) in rowHeaders"
               :key="header"
               class="proofread-field"
+              v-show="!mobile || overview || currentField === header"
               :class="{
                 'proofread-field--active': activeField === header,
                 'proofread-field--changed': isFieldChanged(header)
               }"
             >
               <header class="proofread-field__header">
+                <button v-if="mobile && overview" class="btn btn-secondary" @click="selectField(index)">修改此字段</button>
                 <div>
                   <span>字段 {{ index + 1 }}</span>
                   <h2>{{ header }}</h2>
@@ -109,11 +118,14 @@
 
               <label class="sr-only" :for="`proofread-field-${index}`">{{ header }} 校对结果</label>
               <textarea
+                :inputmode="inputMode"
+                :readonly="mobile && overview"
                 :id="`proofread-field-${index}`"
                 :ref="(el) => setTextareaRef(header, el)"
                 v-model="editedRow[header]"
                 class="form-control proofread-textarea"
                 @focus="activateField(header, $event)"
+                @blur="rememberSelection(header, $event)"
                 @select="rememberSelection(header, $event)"
                 @keyup="rememberSelection(header, $event)"
                 @click="rememberSelection(header, $event)"
@@ -123,8 +135,12 @@
             </article>
           </div>
 
-          <ProjectKeyboard :project-id="page.project" @insert="insertText" />
         </template>
+    </template>
+    <template #navigation><FieldNavigation :headers="rowHeaders" :index="fieldIndex" :overview="overview" @select="selectField" @next="nextField">
+      <template #submit><button class="btn btn-success" @click="openSubmitReview">检查并提交</button></template>
+    </FieldNavigation></template>
+    <template #keyboard><ProjectKeyboard v-if="page" :project-id="page.project" @availability="keyboardAvailable = $event" @insert="insertText" /></template>
   </DocumentReviewWorkspace>
 
     <div
@@ -173,6 +189,8 @@ import RareCharacterNotice from '@/components/editor/RareCharacterNotice.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import DocumentReviewWorkspace from '@/components/editor/DocumentReviewWorkspace.vue'
+import FieldNavigation from '@/components/editor/FieldNavigation.vue'
+import { useFieldNavigation } from '@/composables/useFieldNavigation'
 import ProjectKeyboard from '@/components/editor/ProjectKeyboard.vue'
 import { useStructuredRow } from '@/composables/useStructuredRow'
 import { useTaskNeighbors } from '@/composables/useTaskNeighbors'
@@ -268,6 +286,16 @@ const {
   return listProofreaderNeighborTasks(currentPage.project, userId)
 })
 
+const keyboardAvailable = ref(false)
+const { index: fieldIndex, overview, mobile, current: currentField, select: selectField, next: nextField } = useFieldNavigation(rowHeaders, () => page.value?.id)
+const fieldSelections = new Map()
+watch(() => page.value?.id, () => { fieldSelections.clear(); keyboardAvailable.value = false })
+watch([currentField, mobile], ([field]) => {
+  if (!field) return
+  activeField.value = field
+  activeSelection.value = fieldSelections.get(field) || { field, start: null, end: null }
+})
+
 watch(() => route.params.id, async () => {
   await loadPage()
 }, { immediate: true })
@@ -353,11 +381,14 @@ function onTextChange() {
 }
 
 async function insertText(char) {
-  const field = activeField.value || rowHeaders.value[0]
+  if (mobile.value && overview.value) return
+  const field = mobile.value ? currentField.value : activeField.value || rowHeaders.value[0]
+  if (!field) return
+  activeField.value = field
   const textarea = textareaRefs.get(field)
   const selection = activeSelection.value.field === field
     ? activeSelection.value
-    : {
+    : fieldSelections.get(field) || {
         start: textarea?.selectionStart,
         end: textarea?.selectionEnd
       }
@@ -366,9 +397,11 @@ async function insertText(char) {
   if (cursor == null) return
   await nextTick()
   const target = textareaRefs.get(field)
-  target?.focus()
+  target?.focus({ preventScroll: true })
+  if (mobile.value) target?.scrollIntoView({ block: 'nearest' })
   target?.setSelectionRange(cursor, cursor)
   activeSelection.value = { field, start: cursor, end: cursor }
+  fieldSelections.set(field, { ...activeSelection.value })
 }
 
 function setTextareaRef(header, element) {
@@ -377,16 +410,24 @@ function setTextareaRef(header, element) {
 }
 
 function activateField(header, event) {
-  activeField.value = header
   rememberSelection(header, event)
 }
 
 function rememberSelection(header, event) {
   const target = event?.target
-  activeSelection.value = {
+  const selection = {
     field: header,
     start: Number.isInteger(target?.selectionStart) ? target.selectionStart : null,
     end: Number.isInteger(target?.selectionEnd) ? target.selectionEnd : null
+  }
+  fieldSelections.set(header, selection)
+  // A delayed blur/select from the previous field must not retarget mobile input.
+  if (mobile.value && header !== currentField.value) return
+  activeField.value = header
+  activeSelection.value = selection
+  if (!mobile.value) {
+    const index = rowHeaders.value.indexOf(header)
+    if (index >= 0) selectField(index)
   }
 }
 
@@ -404,6 +445,7 @@ async function restoreField(header) {
 }
 
 async function openSubmitReview() {
+  if (mobile.value && !overview.value) { overview.value = true; return }
   if (saving.value || loadingPage.value || !page.value || leaseLost.value || !leaseToken.value) return
   flushDraft()
   reviewingSubmission.value = true

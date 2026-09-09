@@ -1,6 +1,8 @@
 <template>
   <DocumentReviewWorkspace
     :page="casePage"
+    :keyboard-available="keyboardAvailable"
+    :suspended="(mobile && overview) || reviewingSubmission"
     :loading="loading"
     :watermark-user-id="currentUserId"
     :return-to="`/admin/projects/${projectId}?status=arbitration`"
@@ -15,6 +17,7 @@
           <strong id="arbitration-panel-title">第 {{ casePage?.page_number || '—' }} 条</strong>
         </div>
         <div class="editor-toolbar">
+          <RouterLink v-if="mobile" :to="`/admin/projects/${projectId}?status=arbitration`" class="btn btn-quiet">返回列表</RouterLink>
           <span v-if="casePage" class="task-position">{{ resolvedCount }} / {{ differingHeaders.length }} 项差异</span>
           <button
             class="btn btn-success btn-sm"
@@ -25,6 +28,7 @@
       </header>
     </template>
 
+    <template #default="{ inputMode }">
     <div v-if="loading" class="panel-loading" aria-live="polite">正在加载校对结果与原文…</div>
     <div v-else-if="error" class="alert alert-error" role="alert">{{ error }}</div>
 
@@ -50,7 +54,7 @@
         <header class="arbitration-toolbar">
           <div>
             <h2>校对结果对比</h2>
-            <p>对照左侧 PDF，采用任一版本或直接编辑最终内容。</p>
+            <p>对照 PDF，采用任一版本或直接编辑最终内容。</p>
           </div>
           <div class="arbitration-toolbar__view" role="group" aria-label="字段显示范围">
             <button type="button" :class="{ active: !showAllFields }" @click="showAllFields = false">
@@ -62,6 +66,7 @@
           </div>
         </header>
 
+        <details :open="!mobile" class="bulk-actions-menu"><summary>批量处理</summary>
         <div v-if="differingHeaders.length" class="bulk-source-actions" aria-label="批量采用来源">
           <span>批量处理差异项</span>
           <button type="button" class="btn btn-secondary btn-sm" @click="applySourceToDifferences('original')">全部采用原文</button>
@@ -74,17 +79,20 @@
           >全部采用{{ item.label }}</button>
         </div>
 
+        </details>
         <div v-if="visibleHeaders.length" class="arbitration-fields">
           <article
             v-for="header in visibleHeaders"
             :key="header"
             class="arbitration-field"
+            v-show="!mobile || overview || currentField === header"
             :class="{
               'arbitration-field--resolved': isResolved(header),
               'arbitration-field--matching': !differs(header)
             }"
           >
             <header class="arbitration-field__header">
+              <button v-if="mobile && overview" class="btn btn-secondary" @click="selectField(visibleHeaders.indexOf(header))">修改此字段</button>
               <h3>{{ header }}</h3>
               <span v-if="!differs(header)" class="resolution-state resolution-state--matching">结果一致</span>
               <span v-else-if="isResolved(header)" class="resolution-state resolution-state--resolved">已确认 · {{ resolutionLabel(header) }}</span>
@@ -110,12 +118,15 @@
               <label class="final-value" :class="{ selected: sourceIs(header, 'custom') }">
                 <span>最终结果</span>
                 <textarea
+                :inputmode="inputMode"
+                :readonly="mobile && overview"
                   :ref="(element) => setTextareaRef(header, element)"
                   v-model="finalRow[header]"
                   class="form-control"
                   :aria-label="`${header}的最终仲裁结果`"
                   @focus="rememberSelection(header, $event)"
-                  @select="rememberSelection(header, $event)"
+                  @blur="rememberSelection(header, $event)"
+                @select="rememberSelection(header, $event)"
                   @keyup="rememberSelection(header, $event)"
                   @click="rememberSelection(header, $event)"
                   @input="onFinalInput(header)"
@@ -128,13 +139,12 @@
         <div v-else class="empty-state">
           <div class="empty-state-mark" aria-hidden="true">同</div>
           <div class="empty-state-text">所有校对结果一致</div>
-          <p>可切换到“全部字段”并结合左侧原文复核。</p>
+          <p>可切换到“全部字段”并结合原文复核。</p>
         </div>
       </section>
 
-      <ProjectKeyboard :project-id="projectId" @insert="insertText" />
 
-      <section class="arbitration-submit-card">
+      <section v-show="!mobile || overview" class="arbitration-submit-card">
         <div class="form-group">
           <label class="form-label" for="arbitration-note">仲裁说明 <span class="text-muted">（可选）</span></label>
           <textarea
@@ -161,6 +171,11 @@
         </div>
       </section>
     </template>
+    </template>
+    <template #navigation><FieldNavigation :headers="visibleHeaders" :index="fieldIndex" :overview="overview" @select="selectField" @next="nextField">
+      <template #submit><button class="btn btn-success" @click="openSubmitReview">检查并提交</button></template>
+    </FieldNavigation></template>
+    <template #keyboard><ProjectKeyboard v-if="casePage" :project-id="casePage.project" @availability="keyboardAvailable = $event" @insert="insertText" /></template>
   </DocumentReviewWorkspace>
 
   <div v-if="reviewingSubmission" class="modal-backdrop" role="presentation" @click.self="closeSubmitReview">
@@ -184,9 +199,11 @@
 
 <script setup>
 import RareCharacterNotice from '@/components/editor/RareCharacterNotice.vue'
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { RouterLink, onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import DocumentReviewWorkspace from '@/components/editor/DocumentReviewWorkspace.vue'
+import FieldNavigation from '@/components/editor/FieldNavigation.vue'
+import { useFieldNavigation } from '@/composables/useFieldNavigation'
 import ProjectKeyboard from '@/components/editor/ProjectKeyboard.vue'
 import { composeRowText, safeParseRowJson } from '@/composables/useStructuredRow'
 import { getDifferingHeadersForRows, getUnresolvedHeaders } from '@/lib/workspaceInsights'
@@ -341,32 +358,54 @@ function setTextareaRef(header, element) {
   else textareaRefs.delete(header)
 }
 
+const keyboardAvailable = ref(false)
+const { index: fieldIndex, overview, mobile, current: currentField, select: selectField, next: nextField } = useFieldNavigation(visibleHeaders, () => casePage.value?.id)
+const fieldSelections = new Map()
+watch(() => casePage.value?.id, () => { fieldSelections.clear(); keyboardAvailable.value = false })
+watch([currentField, mobile], ([field]) => {
+  if (field) activeSelection.value = fieldSelections.get(field) || { field, start: null, end: null }
+})
+
 function rememberSelection(header, event) {
   const target = event?.target
-  activeSelection.value = {
+  const selection = {
     field: header,
     start: Number.isInteger(target?.selectionStart) ? target.selectionStart : null,
     end: Number.isInteger(target?.selectionEnd) ? target.selectionEnd : null
   }
+  fieldSelections.set(header, selection)
+  if (mobile.value && header !== currentField.value) return
+  activeSelection.value = selection
+  if (!mobile.value) {
+    const index = visibleHeaders.value.indexOf(header)
+    if (index >= 0) selectField(index)
+  }
 }
 
 async function insertText(text) {
-  const header = activeSelection.value.field || visibleHeaders.value[0] || headers.value[0]
+  if (mobile.value && overview.value) return
+  const header = mobile.value ? currentField.value : activeSelection.value.field || visibleHeaders.value[0] || headers.value[0]
   if (!header) return
   const current = String(finalRow[header] ?? '')
-  const start = Number.isInteger(activeSelection.value.start) ? activeSelection.value.start : current.length
-  const end = Number.isInteger(activeSelection.value.end) ? activeSelection.value.end : start
+  const selection = activeSelection.value.field === header
+    ? activeSelection.value
+    : fieldSelections.get(header) || {}
+  const start = Number.isInteger(selection.start) ? selection.start : current.length
+  const end = Number.isInteger(selection.end) ? selection.end : start
   finalRow[header] = `${current.slice(0, start)}${text}${current.slice(end)}`
   onFinalInput(header)
   const cursor = start + text.length
   await nextTick()
   const target = textareaRefs.get(header)
-  target?.focus()
+  target?.focus({ preventScroll: true })
+  if (mobile.value) target?.scrollIntoView({ block: 'nearest' })
   target?.setSelectionRange(cursor, cursor)
   activeSelection.value = { field: header, start: cursor, end: cursor }
+  fieldSelections.set(header, { ...activeSelection.value })
 }
 
 async function openSubmitReview() {
+  if (mobile.value && !overview.value) { overview.value = true; return }
   if (unresolvedHeaders.value.length || submitting.value) {
     submitError.value = unresolvedHeaders.value.length
       ? `请先确认以下差异字段：${unresolvedHeaders.value.join('、')}`
