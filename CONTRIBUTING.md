@@ -50,6 +50,20 @@ go test ./...
 
 涉及导入、权限、盲校、仲裁或迁移时，应运行相应集成测试，并使用临时数据目录，不能覆盖真实 `pb_data`。
 
+CI 的 `Core workflow` 矩阵与本地使用同一入口：
+
+```bash
+python3 backend/tests/run_integration.py upload_jobs_integration.mjs
+python3 backend/tests/run_integration.py core_logic_integration.mjs
+python3 backend/tests/run_integration.py proofreading_quorum_integration.mjs
+python3 backend/tests/run_integration.py task_leases_integration.mjs
+```
+
+每个命令会构建后端、在新临时目录按数字顺序执行全部迁移、启动测试服务，并在成功或失败后停止服务、删除数据。
+失败时输出测试名称和后端日志尾部；测试身份均为临时身份。Go 缓存按 `backend/go.sum`、npm 缓存按锁文件管理；数据库不缓存。
+这些检查和现有 Frontend、Containers、Backend Unicode workflow 及其他集成检查均须通过后才能合并。
+main 已启用分支保护，现有 7 项 CI 为 required checks；本 PR 的 Core workflow 合并进入 main 后，将新矩阵检查加入 required checks。
+
 提交前执行 `git diff --check`（暂存后使用 `git diff --cached --check`）。
 `.gitattributes` 仅对 `frontend/public/fonts/rare-han/OFL.txt`、
 `frontend/public/pdfjs/cmaps/LICENSE` 和
@@ -77,7 +91,7 @@ PR 应当：
 
 ## 当前合并政策
 
-仓库当前无法依赖分支保护强制 required checks，因此由维护者执行人工门禁：
+main 已启用严格状态检查、至少一次批准、解决讨论以及禁止强推/删除，管理员同样受限制。维护者还需执行以下人工门禁：
 
 1. PR 必须基于当前目标分支，所有可用 checks 通过。
 2. `REQUEST_CHANGES` 和未解决的阻断讨论必须先处理。
