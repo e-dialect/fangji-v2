@@ -34,6 +34,30 @@ jobs:
           node-version: "24"
       - run: python3 backend/tests/run_integration.py ${{ matrix.suite }}_integration.mjs
 
+  core-workflows:
+    name: Core workflow (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - upload_jobs_integration.mjs
+          - core_logic_integration.mjs
+          - proofreading_quorum_integration.mjs
+          - task_leases_integration.mjs
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Run against a freshly migrated disposable database
+        run: python3 backend/tests/run_integration.py ${{ matrix.suite }}
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -77,6 +101,8 @@ jobs:
       - name: Run backend tests
         working-directory: backend
         run: go test ./...
+      - name: Verify offline backup and restore
+        run: python3 -m unittest discover -s backend/tests -p test_backup.py
       - name: Test keyboard CSV coverage audit
         run: python3 -m unittest discover -s backend/tests -p test_keyboard_audit.py
       - name: Verify Unicode import, proofreading, arbitration and restart persistence

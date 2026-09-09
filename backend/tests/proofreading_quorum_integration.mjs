@@ -153,8 +153,10 @@ async function assertNativeProgressIsHidden(projectId, pageId, user) {
   assert.equal(task.id, pageId)
   assertBlindFieldsConcealed(task, 'proofreader task endpoint')
   if (task.project_file) {
+    // Source records are manager-only after task-scoped PDF access was added.
     await request(`/api/collections/project_files/records/${task.project_file}?expand=project`, {
-      token: user.token, expected: 404
+      token: user.token,
+      expected: 404
     })
   }
 }
