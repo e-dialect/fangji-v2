@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func newSchemaTestApp(t *testing.T) *pocketbase.PocketBase {
+func newSchemaTestApp(t testing.TB) *pocketbase.PocketBase {
 	t.Helper()
 	app := pocketbase.NewWithConfig(pocketbase.Config{DefaultDataDir: t.TempDir()})
 	if err := app.Bootstrap(); err != nil {

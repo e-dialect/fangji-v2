@@ -153,56 +153,6 @@ routerAdd("GET", `${FANGJI_API}/projects/{projectId}/tasks/mine`, (c) => {
   })))
 }, $apis.requireAuth("users"))
 
-routerAdd("GET", `${FANGJI_API}/proofreading-queues`, (c) => {
-  const { capabilities: proofCapabilities } = require(`${__hooks}/lib/project_access.js`)
-  const { leaseForPage: proofLeaseForPage, leaseExpired: proofLeaseExpired } = require(`${__hooks}/lib/task_leases.js`)
-  const { proofreadAttempts: proofAttempts } = require(`${__hooks}/lib/proofreading_workflow.js`)
-  const auth = c.auth
-  if (!auth) throw new ForbiddenError("无权执行此操作")
-  const dao = $app
-  const result = []
-  for (const project of dao.findRecordsByFilter("projects", 'id != ""', "name", 1000000, 0)) {
-    if (!proofCapabilities(dao, project, auth).canProofread) continue
-    const queue = {
-      project: {
-        id: project.id,
-        name: project.getString("name"),
-        description: project.getString("description")
-      },
-      total: 0,
-      claimable: 0,
-      activeMine: 0,
-      activePage: null,
-      completed: 0,
-      nextPage: null
-    }
-    const required = Math.max(2, project.getInt("required_proofreads") || 2)
-    const pages = dao.findRecordsByFilter("pages", `project = "${project.id}" && status != "importing"`, "page_number", 100000, 0)
-    for (const page of pages) {
-      queue.total += 1
-      if (page.getString("status") === "approved") {
-        queue.completed += 1
-        continue
-      }
-      const summary = { id: page.id, page_number: page.getInt("page_number"), pdf_page: page.getInt("pdf_page") }
-      const active = ["claimed", "proofreading"].includes(page.getString("status"))
-      if (active && page.getString("proofreader") === auth.id) {
-        queue.activeMine += 1
-        if (!queue.activePage) queue.activePage = summary
-        continue
-      }
-      const attempts = proofAttempts(dao, page)
-      if (attempts.some((attempt) => attempt.getString("proofreader") === auth.id)) continue
-      let claimable = page.getString("status") === "pending" || page.getString("status") === "proofread"
-      if (active) claimable = proofLeaseExpired(proofLeaseForPage(dao, page.id))
-      if (!claimable || attempts.length >= required) continue
-      queue.claimable += 1
-      if (!queue.nextPage) queue.nextPage = summary
-    }
-    result.push(queue)
-  }
-  return c.json(200, result)
-}, $apis.requireAuth("users"))
 
 routerAdd("POST", `${FANGJI_API}/pages/{pageId}/lease/renew`, (c) => {
   const { canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)

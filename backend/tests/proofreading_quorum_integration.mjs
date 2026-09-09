@@ -246,7 +246,7 @@ try {
   assert.equal(matchingFinal.proofread_count, 3)
   assert.equal(matchingFinal.status, 'approved')
 
-  const queues = await request('/api/fangji/proofreading-queues', { token: users[0].token })
+  const { items: queues } = await request('/api/fangji/proofreading-queues', { token: users[0].token })
   const serializedQueues = JSON.stringify(queues)
   for (const concealed of blindFields) {
     assert.equal(serializedQueues.includes(concealed), false, `queue leaked ${concealed}`)
