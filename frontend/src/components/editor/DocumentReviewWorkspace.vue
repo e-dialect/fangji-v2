@@ -1,5 +1,5 @@
 <template>
-  <main ref="workspace" class="editor-layout" :class="{ 'has-keyboard': keyboardAvailable, 'keyboard-open': keyboardOpen && !suspended, 'pdf-collapsed': sourceCollapsed, 'pdf-unavailable': !loading && !pdfUrl }" :style="viewportStyle" @pointerdown="onOutsidePointer">
+  <main ref="workspace" class="editor-layout" :class="{ 'has-keyboard': keyboardAvailable, 'keyboard-open': keyboardOpen && !suspended, 'pdf-collapsed': sourceCollapsed, 'pdf-unavailable': !loading && !pdfLoading && !pdfUrl && !pdfError }" :style="viewportStyle" @pointerdown="onOutsidePointer">
     <div class="mobile-source-toggle">
       <button class="btn btn-secondary" @click="toggleSource">{{ sourceCollapsed ? '查看原文' : '收起原文' }}</button>
     </div>
@@ -40,7 +40,7 @@
         </details>
       </header>
       <div class="editor-panel-body editor-panel-body--pdf">
-        <div v-if="loading" class="panel-loading" aria-live="polite">正在加载原文…</div>
+        <div v-if="loading || pdfLoading" class="panel-loading" aria-live="polite">正在加载原文…</div>
         <div v-else-if="!page" class="alert alert-error">页面不存在</div>
         <div v-else-if="pdfError" class="alert alert-error editor-inline-alert">{{ pdfError }}</div>
         <template v-else>
@@ -48,8 +48,9 @@
           <PdfSinglePageViewer
             v-if="pdfUrl"
             :src="pdfUrl"
-            :page-number="currentPdfPage"
-            :watermark-user-id="watermarkUserId"
+            :page-number="localPdfPage"
+            :source-page-number="currentPdfPage"
+            :source-total-pages="totalPdfPages"
           />
           <div v-else class="empty-state">
             <div class="empty-state-mark" aria-hidden="true">PDF</div>
@@ -144,10 +145,13 @@ const pdfPageInput = ref(1)
 const pageRef = toRef(props, 'page')
 const {
   pdfError,
+  pdfLoading,
   currentPdfPage,
   pdfPageWarning,
   allowedPdfPages,
   pdfUrl,
+  localPdfPage,
+  totalPdfPages,
   resetPdf,
   resolveProjectPdf,
   clampPdfPage,
@@ -166,6 +170,8 @@ watch(() => props.page?.id, async (pageId) => {
   pdfPageInput.value = currentPdfPage.value
   await resolveProjectPdf()
 }, { immediate: true })
+
+onBeforeUnmount(resetPdf)
 
 function applyPdfPageInput() {
   currentPdfPage.value = clampPdfPage(pdfPageInput.value)

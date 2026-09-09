@@ -8,7 +8,7 @@
         <button type="button" class="pdf-tool" @click="resetView">适合宽度</button>
       </div>
       <div class="pdf-toolbar-group">
-        <span class="pdf-page-label">第 {{ safePageLabel }} / {{ totalPages || '—' }} 页</span>
+        <span class="pdf-page-label">第 {{ sourcePageNumber || safePageLabel }} / {{ sourceTotalPages || totalPages || '—' }} 页</span>
         <button type="button" class="pdf-tool" @click="rotateClockwise">旋转 90°</button>
         <button type="button" class="pdf-tool" @click="toggleFullscreen">
           {{ isFullscreen ? '退出全屏' : '全屏' }}
@@ -23,14 +23,8 @@
         :style="{ width: `${canvasCssWidth}px`, height: `${canvasCssHeight}px` }"
       >
         <canvas ref="canvasRef" class="pdf-canvas"></canvas>
-        <div v-if="loading" class="pdf-loading-mask">PDF 加载中...</div>
-        <div v-if="watermarkText" class="pdf-watermark-layer">
-          <span
-            v-for="n in 18"
-            :key="n"
-            class="pdf-watermark-item"
-          >{{ watermarkText }}</span>
-        </div>
+        <div v-if="loading || rendering" class="pdf-loading-mask">PDF 加载中...</div>
+
       </div>
     </div>
   </div>
@@ -42,13 +36,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 const props = defineProps({
   src: { type: String, default: '' },
   pageNumber: { type: Number, default: 1 },
-  watermarkUserId: { type: String, default: '' }
+  sourcePageNumber: { type: Number, default: 0 },
+  sourceTotalPages: { type: Number, default: 0 }
 })
 
 const viewerRef = ref(null)
 const wrapRef = ref(null)
 const canvasRef = ref(null)
 const loading = ref(false)
+const rendering = ref(false)
 const error = ref('')
 const zoom = ref(1)
 const rotation = ref(0)
@@ -62,12 +58,9 @@ let pdfDoc = null
 let renderTask = null
 let resizeObserver = null
 let pdfjsLib = null
+let loadGeneration = 0
+let renderGeneration = 0
 
-const today = new Date()
-const watermarkDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-const watermarkText = computed(() => {
-  return props.watermarkUserId ? `${props.watermarkUserId} ${watermarkDate}` : ''
-})
 const safePageLabel = computed(() => {
   const max = totalPages.value || 1
   return Math.max(1, Math.min(max, Number(props.pageNumber) || 1))
@@ -93,6 +86,7 @@ onMounted(() => {
 })
 
 async function loadPdf(src) {
+  const generation = ++loadGeneration
   cleanupRenderOnly()
   error.value = ''
   totalPages.value = 0
@@ -108,22 +102,26 @@ async function loadPdf(src) {
   rotation.value = 0
   try {
     const lib = await ensurePdfJsLib()
+    if (generation !== loadGeneration) return
     lib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.js'
 
     if (pdfDocTask) {
       try { await pdfDocTask.destroy() } catch {}
     }
-    pdfDocTask = lib.getDocument({ url: src })
-    pdfDoc = await pdfDocTask.promise
+    pdfDocTask = lib.getDocument({ url: src, cMapUrl: '/pdfjs/cmaps/', cMapPacked: true, standardFontDataUrl: '/pdfjs/standard_fonts/', isEvalSupported: false })
+    const document = await pdfDocTask.promise
+    if (generation !== loadGeneration) { await document.destroy(); return }
+    pdfDoc = document
     totalPages.value = pdfDoc.numPages || 0
     await nextTick()
     await renderCurrentPage()
     attachResizeObserver()
   } catch (e) {
+    if (generation !== loadGeneration) return
     pdfDoc = null
     error.value = e?.message || 'PDF 加载失败'
   } finally {
-    loading.value = false
+    if (generation === loadGeneration) loading.value = false
   }
 }
 
@@ -154,6 +152,8 @@ function loadScript(src, type = 'text/javascript') {
 
 async function renderCurrentPage() {
   if (!pdfDoc || !canvasRef.value || !wrapRef.value) return
+  rendering.value = true
+  const generation = ++renderGeneration
   const safePage = safePageLabel.value
 
   if (renderTask) {
@@ -163,12 +163,13 @@ async function renderCurrentPage() {
 
   try {
     const page = await pdfDoc.getPage(safePage)
-    const baseViewport = page.getViewport({ scale: 1, rotation: rotation.value })
+    if (generation !== renderGeneration) return
+    const baseViewport = page.getViewport({ scale: 1, rotation: (page.rotate + rotation.value) % 360 })
     const availableWidth = Math.max(1, wrapRef.value.clientWidth - 16)
     const fitScale = availableWidth / baseViewport.width
     const viewport = page.getViewport({
       scale: fitScale * zoom.value,
-      rotation: rotation.value
+      rotation: (page.rotate + rotation.value) % 360
     })
 
     const canvas = canvasRef.value
@@ -189,11 +190,13 @@ async function renderCurrentPage() {
       transform: dpr === 1 ? null : [dpr, 0, 0, dpr, 0, 0]
     })
     await renderTask.promise
-    renderTask = null
+    if (generation === renderGeneration) renderTask = null
   } catch (e) {
-    if (e?.name !== 'RenderingCancelledException') {
+    if (generation === renderGeneration && e?.name !== 'RenderingCancelledException') {
       error.value = e?.message || '渲染失败'
     }
+  } finally {
+    if (generation === renderGeneration) rendering.value = false
   }
 }
 
@@ -241,6 +244,8 @@ function attachResizeObserver() {
 }
 
 function cleanupRenderOnly() {
+  renderGeneration++
+  rendering.value = false
   if (renderTask) {
     try { renderTask.cancel() } catch {}
     renderTask = null
@@ -248,6 +253,7 @@ function cleanupRenderOnly() {
 }
 
 onBeforeUnmount(async () => {
+  loadGeneration++
   cleanupRenderOnly()
   document.removeEventListener('fullscreenchange', syncFullscreenState)
   if (resizeObserver) {
@@ -346,26 +352,6 @@ onBeforeUnmount(async () => {
   color: #475569;
   font-size: 14px;
   pointer-events: none;
-}
-
-.pdf-watermark-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  align-content: space-evenly;
-  justify-items: center;
-  overflow: hidden;
-}
-
-.pdf-watermark-item {
-  color: rgba(30, 41, 59, 0.16);
-  font-size: 14px;
-  letter-spacing: 0.5px;
-  transform: rotate(-28deg);
-  user-select: none;
-  white-space: nowrap;
 }
 
 @media (max-width: 700px) {

@@ -1,0 +1,1 @@
+PDF.js 3.11.174 from the official pdfjs-dist npm package. Worker, library, CMaps and standard fonts must be updated together. The viewer disables eval and preserves the document's native page rotation. See LICENSE and the license notices in standard_fonts.
