@@ -42,3 +42,5 @@ passed, every stamp was visible, and the final task contained only one page.
 The source and outputs remain local and are not checked in. No production PDF
 change was indicated by this run. The local browser was Chrome using the shipped
 PDF.js assets; CI separately verifies the synthetic source in Chromium.
+
+私有预切页、临时水印缓存与清理/回滚配置见 [任务 PDF 缓存](../task-pdf-cache.md)。
