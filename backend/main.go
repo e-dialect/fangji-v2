@@ -3,10 +3,8 @@ package main
 import (
 	"log"
 	"os"
-	"time"
 
 	"github.com/pocketbase/pocketbase"
-	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/plugins/jsvm"
 	"github.com/pocketbase/pocketbase/plugins/migratecmd"
 )
@@ -29,9 +27,6 @@ func main() {
 	var automigrate bool
 	app.RootCmd.PersistentFlags().BoolVar(&automigrate, "automigrate", true, "enable automatic migrations")
 
-	var queryTimeout int
-	app.RootCmd.PersistentFlags().IntVar(&queryTimeout, "queryTimeout", 30, "default SELECT timeout in seconds")
-
 	app.RootCmd.ParseFlags(os.Args[1:])
 
 	jsvm.MustRegister(app, jsvm.Config{
@@ -46,17 +41,17 @@ func main() {
 		Dir:          migrationsDir,
 	})
 	registerTrustedClientIP(app)
+	registerProfile(app)
+	registerJoinAttemptCleanup(app)
 
-	app.OnAfterBootstrap().PreAdd(func(_ *core.BootstrapEvent) error {
-		app.Dao().ModelQueryTimeout = time.Duration(queryTimeout) * time.Second
-		return nil
-	})
 	if err := registerKeyboardPresets(app); err != nil {
 		log.Fatal(err)
 	}
 
 	importer := newImportService(app)
 	importer.register()
+	importer.registerPDFPreview()
+	importer.registerPagination()
 
 	identityProviders := make([]externalIdentityProvider, 0, 1)
 	if hinghwaBaseURL := os.Getenv("HINGHWA_IDENTITY_BASE_URL"); hinghwaBaseURL != "" {

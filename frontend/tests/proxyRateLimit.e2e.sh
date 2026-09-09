@@ -18,6 +18,9 @@ docker run -d \
   --name "$backend_name" \
   --network "$network_name" \
   --network-alias backend \
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,noexec,nosuid,size=512m \
+  --tmpfs /pb/pb_data:rw,uid=10001,gid=10001,mode=0700 \
   -e HINGHWA_IDENTITY_BASE_URL=https://127.0.0.1:1 \
   -e TRUSTED_PROXY_CIDRS="$proxy_network_cidr" \
   fangji-backend:ci >/dev/null
@@ -38,8 +41,9 @@ fi
 
 docker run -d \
   --name "$frontend_name" \
+  --cap-drop ALL --security-opt no-new-privileges:true \
   --network "$network_name" \
-  -p 127.0.0.1:18080:80 \
+  -p 127.0.0.1:18080:8080 \
   -e TRUSTED_PROXY_CIDRS="$proxy_network_cidr" \
   fangji-frontend:ci >/dev/null
 
@@ -56,6 +60,11 @@ if [ "$frontend_ready" != true ]; then
   echo "Frontend did not become ready." >&2
   exit 1
 fi
+
+test "$(docker exec "$backend_name" id -u)" = 10001
+test "$(docker exec "$frontend_name" id -u)" != 0
+# Verify the runtime font files are served as fonts, with cache/security headers.
+FRONTEND_URL=http://127.0.0.1:18080 node frontend/scripts/test-font-cache.mjs
 
 login_status() {
   client_ip="$1"
@@ -92,3 +101,38 @@ if [ "$status" != 502 ]; then
 fi
 
 echo "Nginx trusted-proxy rate-limit integration test passed."
+
+# Disabled UI must also cover the no-slash URL (not the Vue application).
+for admin_path in /_ /_/; do
+  status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:18080${admin_path}")"
+  test "$status" = 404 || { echo "Disabled admin path returned $status: $admin_path" >&2; exit 1; }
+done
+
+docker rm -f "$frontend_name" >/dev/null
+docker run -d --name "$frontend_name" --cap-drop ALL --security-opt no-new-privileges:true --network "$network_name" \
+  -p 127.0.0.1:18080:8080 -e ENABLE_POCKETBASE_ADMIN_UI=true \
+  -e TRUSTED_PROXY_CIDRS="$proxy_network_cidr" fangji-frontend:ci >/dev/null
+for _ in $(seq 1 30); do
+  if curl --fail --silent http://127.0.0.1:18080/healthz >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+
+node --input-type=module <<'NODE'
+import assert from 'node:assert/strict'
+const base = 'http://127.0.0.1:18080'
+const redirect = await fetch(`${base}/_`, { redirect: 'manual', headers: { Host: 'fangji.example.com', 'X-Forwarded-Proto': 'https' } })
+assert.equal(redirect.status, 308)
+assert.equal(redirect.headers.get('location'), '/_/')
+const ui = await fetch(`${base}/_/`)
+assert.equal(ui.status, 200)
+const html = await ui.text()
+assert.match(html, /PocketBase/)
+const script = html.match(/<script[^>]+src="([^"]+)"/)
+assert(script, 'PocketBase UI must reference a script')
+const asset = await fetch(new URL(script[1], `${base}/_/`))
+assert.equal(asset.status, 200)
+assert.match(asset.headers.get('content-type'), /javascript/)
+const protectedApi = await fetch(`${base}/api/settings`)
+assert([401, 403].includes(protectedApi.status), 'Enabling UI must not bypass administrator authentication')
+console.log('PocketBase administrator UI: disabled paths, relative HTTPS-safe redirect, UI/assets and protected API checks passed.')
+NODE

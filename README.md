@@ -52,6 +52,12 @@
 - 页面运行异常会显示可恢复的错误界面，管理员列表加载和批量操作均提供页面内反馈。
 - 浏览器保存的登录身份会在应用启动时向后端刷新；账号失效时自动回到登录页。
 
+## PocketBase 0.40 重建升级
+
+当前后端使用 PocketBase 0.40.3 / Go 1.27，前端使用 Node 24 LTS / PocketBase SDK 0.28.1。
+旧版本尚无正式运营数据，本次采用新目录重建；不要直接复用旧 pb_data。
+部署切换、回滚及验证证据见 [升级决策](docs/dependency-upgrades.md)。
+
 ## 快速启动
 
 ### Docker Compose 本地生产模式
@@ -74,7 +80,7 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up -d --
 
 - `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD`：方辑业务管理员账号。
 - `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`：需要创建 PocketBase 管理员时再改；生产入口默认不会公开 Admin UI。
-- `ENABLE_POCKETBASE_ADMIN_UI`：默认 `false`。仅在受控维护窗口临时设为 `true`。
+- `ENABLE_POCKETBASE_ADMIN_UI`：Traefik 模式默认 `true`，本地生产入口默认 `false`；可显式设置 `false` 关闭后台入口。后台始终要求独立的 PocketBase 管理员登录。
 
 启动后访问：
 
@@ -103,7 +109,7 @@ docker compose down
 
 - `docker-compose.yml` 是本机生产镜像入口，不使用 Vite dev server，因此不需要维护 Vite `allowedHosts`。
 - `frontend` 内置 Nginx 会把 `/api/` 转发到 Docker 内部地址 `backend:8090`；backend 不发布宿主机端口。
-- 生产入口默认隐藏 PocketBase Admin UI。确需维护时，将 `ENABLE_POCKETBASE_ADMIN_UI=true` 后执行 `docker compose up -d --force-recreate frontend`；完成后改回 `false` 并再次重建前端容器。
+- 本地生产入口默认隐藏 PocketBase Admin UI。需要访问时，将 `ENABLE_POCKETBASE_ADMIN_UI=true` 后执行 `docker compose up -d --force-recreate frontend`；完成后改回 `false` 并再次重建前端容器。
 - `TRUSTED_PROXY_CIDRS` 必须限制为实际 Traefik、内置 Nginx 与后端共享的 Docker network。Nginx 只信任这些来源提供的 `X-Real-IP`，并会覆盖浏览器传入的 `X-Forwarded-For`；后端也只解析该网段转发的地址。不要把 backend 端口直接暴露到公网。
 - `BACKEND_URL` 留空时，前端自动使用 `window.location.origin`，适合同域名或同端口反向代理部署。
 - `BACKEND_URL` 设置为完整后端地址时，前端容器会把构建产物里的 `VITE_BACKEND_URL_RUNTIME_REPLACEMENT` 替换成该地址，适合前后端不同域名部署。
@@ -240,7 +246,7 @@ APP_ADMIN_PASSWORD=请换成强密码
 APP_ADMIN_NAME=管理员
 PB_ADMIN_EMAIL=pb-admin@example.com
 PB_ADMIN_PASSWORD=请换成另一个强密码
-ENABLE_POCKETBASE_ADMIN_UI=false
+ENABLE_POCKETBASE_ADMIN_UI=true
 BACKEND_URL=
 PB_ALLOWED_ORIGINS=
 ```
@@ -271,7 +277,10 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 7. 首次登录应用：
 
 - 使用 `.env` 里的 `APP_ADMIN_EMAIL` 和 `APP_ADMIN_PASSWORD` 登录网站。
-- 如果需要进入 PocketBase Admin UI，先在受控维护窗口设置 `ENABLE_POCKETBASE_ADMIN_UI=true`，再执行 `docker compose -f docker-compose.traefik.yml up -d --force-recreate frontend`。完成后立即改回 `false` 并再次重建前端。
+- Traefik 模式默认开放 **`https://你的域名/_/`** 的 PocketBase 管理员登录页；输入 `/_` 会相对跳转到 `/_/`，不会跳向容器地址或降级为 HTTP。
+- 这里使用 **`PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`** 对应的 PocketBase 管理员账号，与方辑的 `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD` 账号不同。
+- 如果旧 `.env` 中有 `ENABLE_POCKETBASE_ADMIN_UI=false`，它会继续覆盖默认值并返回 404。改为 `true` 后执行 `docker compose -f docker-compose.traefik.yml up -d --build --force-recreate frontend`（仅 restart 不会更新容器环境变量）。
+- 要关闭后台，显式设置 `ENABLE_POCKETBASE_ADMIN_UI=false` 并重新创建 frontend。backend 仍不发布宿主机端口，不需要给 Traefik 新增 backend 路由。
 - PocketBase collections、字段和 API rules 会由迁移自动应用，不需要进后台手动配置业务规则。
 
 如果服务器前面是宿主机上的 Nginx/Caddy/宝塔而不是 Traefik，请使用默认 `docker-compose.yml`，并把域名代理到 `${FRONTEND_PORT:-8080}`。backend 始终不直接发布宿主机端口。
@@ -309,11 +318,11 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 - 所有用户登录后进入 `/workspace`，入口按当前项目能力显示。
 - 平台管理员可进入“创建权限”，向普通用户授权、设置额度或撤销授权。
 - 获得项目管理能力的用户可进入 `/admin`；项目校对员可进入 `/tasks`。
-- 旧的全局 `admin` 会迁移为 `platform_admin`，旧的全局 `proofreader` 会迁移为 `user` 并保留为现有项目的校对成员。
+- 新数据库直接使用 `platform_admin` / `user` 及项目成员职责；历史角色转换仅保留在旧迁移参考目录中，不在本次重建时运行。
 
 #### 外部统一身份
 
-在 `.env` 设置 `HINGHWA_IDENTITY_BASE_URL=https://identity.example.com` 后，登录页会显示“兴化语记”入口，方辑后端向该地址的 `/login` 发送 `username`、`password`。首次验证成功时系统创建一个没有项目权限的本地 `user` 并保存 provider subject 映射；已登录用户也可在个人主页显式绑定。系统不会按邮箱或姓名自动合并账号，也不会同步外部资料、密码或项目权限。
+在 `.env` 设置 `HINGHWA_IDENTITY_BASE_URL=https://identity.example.com` 后，登录页会显示“兴化语记”入口，方辑后端向该地址的 `/login` 发送 `username`、`password`。首次验证成功时系统创建一个没有项目权限的本地 `user` 并保存 provider subject 映射；已登录用户也可在个人主页显式绑定。系统不会按邮箱或姓名自动合并账号，首次创建本地账号时会从公开 `/users/{id}` 详情读取昵称（失败时仍允许登录）；后续登录和绑定不会覆盖本地资料，也不会同步邮箱、密码或项目权限。
 
 远端返回的 HS256 token 只在单次后端请求内读取后立即丢弃，不写数据库、日志或浏览器响应，也不需要共享远端签名密钥。适配器强制 HTTPS、5 秒超时、禁止重定向、限制响应为 64 KiB，并按来源地址执行登录限流；日志只记录 provider 与脱敏后的结果类别。`HINGHWA_IDENTITY_BASE_URL` 为空时该入口不会显示。
 
@@ -326,7 +335,7 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 
 创建者自动成为项目唯一所有者。所有者和项目管理员可在项目设置中添加成员、批量生成志愿者账号、配置至少 2 人的校对人数、配置启用键盘和默认键盘，并在“公开加入”“指定成员”“口令加入”之间切换；切换方式或修改口令不会移除已有成员。删除项目或转移所有权会立即释放原所有者占用的创建额度。新旧项目默认采用 2 人校对并启用“莆仙方言键盘”。
 
-口令加入的失败尝试同时按“项目 + 账号”和“项目 + 可信客户端来源”限速；可信来源由 `TRUSTED_PROXY_CIDRS` 控制，客户端自行提交的转发头不参与身份判定。失效记录保留 24 小时后由小时任务分批清理，加入请求也会以五分钟节流周期执行小批量机会清理。
+口令加入的失败尝试同时按“项目 + 账号”和“项目 + 可信客户端来源”限速；可信来源由 `TRUSTED_PROXY_CIDRS` 控制，客户端自行提交的转发头不参与身份判定。限制窗口和封禁均结束满 24 小时后，每小时由进程级定时任务原子清理，每个集合最多删除 250 条。清理不在加入请求中运行；即使没有请求也会执行。并发刷新后的有效记录不会被删除。
 
 ### 3. 批量生成志愿者账号
 
@@ -345,6 +354,8 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 1. 进入项目详情页。
 2. 在“上传 PDF 文件”区域选择 PDF。
 3. 点击“上传 PDF”。
+
+单个 PDF 最大 100 MiB（104,857,600 字节），CSV 仍为 50 MiB。后端 PDF 请求和内置 Nginx 请求上限为 101 MiB，为 multipart 编码预留空间。升级时需同时重新部署后端和前端 Nginx；后端启动迁移会更新已有数据库的 PDF 字段限制。若部署了额外网关，也需允许至少 101 MiB 的请求体。
 
 PDF 用于校对员编辑时预览原文。文件只上传一次，后端会检查大小、扩展名、文件签名并使用 pdfcpu 深度解析 PDF 结构；校验成功后记录页数、校验器和校验时间。每个项目只有一个主 PDF，新文件成功后会原子替换主文件，旧文件保留为历史记录；只有状态为 `ready` 且标记为主文件的 PDF 才会用于预览。PDF 不会自动 OCR 或生成条目，待校对文本主要通过 CSV 导入。
 
@@ -634,14 +645,14 @@ PB_SUPER_PASSWORD=your-password \
 node backend/tests/volunteer_accounts_integration.mjs
 ```
 
-外部身份测试完全使用本机 mock HTTPS provider，不访问真实统一身份服务；覆盖成功、失败、超时、禁止重定向、畸形/超大响应、重复映射、绑定冲突、无资料同步、默认无项目权限、可信代理取址和客户端/全局双层限流：
+外部身份测试完全使用本机 mock HTTPS provider，不访问真实统一身份服务；覆盖成功、失败、超时、禁止重定向、畸形/超大响应、重复映射、绑定冲突、仅首次继承昵称、默认无项目权限、可信代理取址和客户端/全局双层限流：
 
 ```bash
 cd backend
 go test ./...
 ```
 
-部署环境只在获得一次性测试账号时进行人工联调，CI 不依赖外部服务。适配行为依据上游 Django [`/login` 接口](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/user/views.py)及其[令牌实现](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/utils/token.py)；方辑只使用响应中的稳定用户 ID，不消费远端 token。
+部署环境只在获得一次性测试账号时进行人工联调，CI 不依赖外部服务。适配行为依据上游 Django [`/login` 接口](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/user/views.py)及其[令牌实现](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/utils/token.py)；方辑使用响应中的稳定用户 ID，不消费远端 token；首次注册另外读取公开用户详情中的昵称并核对 ID。
 
 容器 CI 还会经过实际 Nginx 代理轮换伪造的 `X-Forwarded-For`，确认同一可信 `X-Real-IP` 仍共享客户端额度，并确认另一客户端不会被该额度连带封锁。
 
@@ -702,6 +713,8 @@ node backend/tests/upload_jobs_integration.mjs
 ```
 
 可通过 `REAL_PDF_PATH` 和 `REAL_CSV_PATH` 传入本地真实文件；脚本只读取文件，并会创建和清理临时项目。较大的 PDF 会获得 300 秒的异步校验等待预算。
+
+设置 `TEST_LARGE_PDF=1` 可额外验证 80 MiB、100 MiB PDF 上传并完成深度校验，以及 100 MiB + 1 字节文件被拒绝；使用合成文件和临时项目，需要预留足够的内存与临时磁盘空间。将 `PB_URL` 指向前端 Nginx 地址可同时验证代理限制。
 
 上传服务输出单行 JSON 结构化日志，包含 `request_id`、项目/作业/文件标识、哈希、计数、耗时和稳定错误码。可使用 `docker compose logs -f backend` 查看，并用响应头 `X-Request-ID` 关联一次请求的接收、排队、处理和终态事件。
 
@@ -766,3 +779,46 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up --bui
 ### 上传 PDF 后没有自动生成校对条目
 
 当前实现中 PDF 只用于原文预览。请通过 CSV 导入待校对文本条目。
+
+### 个人中心
+
+点击导航头像进入个人中心，可修改当前账号的昵称和邮箱。保存后导航即时更新。邮箱是选填项，修改或清空邮箱会撤销原验证状态；不会修改外部身份的邮箱，也不会改变角色或项目权限。`PATCH /api/fangji/profile` 仅接受当前登录用户的 `name`、`email`，使用 PocketBase 校验邮箱格式和唯一性，保存成功返回新的认证令牌与用户记录，前端同步刷新会话。
+
+### 生僻字与 Unicode 验证
+
+网页字体链包含自托管的 Fangji Rare Han 补充字体（思源黑体及遍黑体 OFL 子集），覆盖源字体包含的扩展 A–J 及兼容汉字，共 82,007 个码位。283 个 WOFF2 分片总计约 13.6 MB，使用精确 `unicode-range` 按需下载；常用汉字/ASCII 页面不请求这些字体。字体声明增加约 24 KB gzip CSS，不预加载整套字体。字体来源、许可证、覆盖清单和可复现构建方式见 [字体说明](frontend/public/fonts/rare-han/README.md)。
+
+UTF-8、SQLite 和 PocketBase 能存储四字节生僻字，不需要 schema 迁移。差异高亮、头像/列表截断及后端仲裁说明按 Unicode 码位处理；输入光标仍使用浏览器规定的 UTF-16 偏移。校对/仲裁中的生僻字补充字体加载失败时显示码位提示，原始内容保持不变。PDF 字形仍取决于原始 PDF。
+
+全链路测试使用 `𢶀𠮷㙟𰻞䲠`，包含扩展字字段名、CSV 预检/导入、Go 入库、JS hooks 校对提交、仲裁/说明、自动通过和 UTF-8 导出。仅对临时数据库执行：
+
+```sh
+PB_URL=http://127.0.0.1:18095 \
+APP_ADMIN_EMAIL=test-admin@example.com APP_ADMIN_PASSWORD='<test password>' \
+PB_SUPER_EMAIL=test-super@example.com PB_SUPER_PASSWORD='<test password>' \
+node backend/tests/rare_characters_integration.mjs
+```
+
+脚本默认清理创建的项目和用户；设置 `RARE_BROWSER_FIXTURE=/tmp/fangji-rare-fixture.json` 可保留临时测试数据及认证信息供浏览器后续验收，此文件不能提交。前端单元测试另覆盖差异片段不产生孤立代理码元、键盘插入光标、JSON/CSV 与字体失败提示；Go 测试覆盖 SQLite 持久化读取。
+
+可一键建立全新临时数据库、按部署顺序迁移、执行上述链路、重启后检查持久化并清理：
+
+```sh
+python3 backend/tests/run_rare_characters_integration.py
+```
+
+该测试已加入 CI 的 `Backend Unicode workflow`。浏览器测试脚本位于 `frontend/scripts/test-rare-fonts.cjs`（Chrome、Firefox、WebKit 字形与失败提示）和 `test-rare-workflow.cjs`（真实编辑/草稿/校对/仲裁/CSV 下载）。可在临时目录安装 Playwright，通过 `NODE_PATH` 指向其 `node_modules`；设置 `FRONTEND_URL`、`SCREENSHOT_DIR`，后者还需要 `RARE_BROWSER_FIXTURE` 指向前述测试保留的临时数据。每次完整浏览器流程需要一套新 fixture。普通 `npm test` 无需安装浏览器。
+
+### 生产容器权限
+
+生产后端以 UID/GID `10001:10001` 运行，根文件系统只读，仅数据卷和 512 MiB 的 `/tmp` 可写；
+前端以 Nginx 普通用户运行，容器内端口为 `8080`，本机访问仍为 `http://localhost:8080`。
+两个生产入口都移除全部 Linux capabilities，并设置 no-new-privileges。
+绑定已有 `pb_data` 时先停止服务，再由宿主机管理员将完整目录的读写权限交给 UID/GID 10001；
+例如 Linux 上执行 `sudo chown -R 10001:10001 ./pb_data`。命名卷首次创建会继承镜像内的数据目录权限。
+不要通过 `chmod 777` 解决权限问题，也不要在新版 PocketBase 中直接使用不兼容的旧数据目录。
+
+前端为支持运行时 BACKEND_URL 和 Admin UI 配置，需要写静态资源、Nginx snippets/conf.d 及缓存目录，
+因此未设整个前端根文件系统只读；其他目录仍归 root 所有。开发镜像保留现有开发用户行为。
+Traefik 的 TLS router 增加一年 HSTS，关闭强制 HTTP HSTS；本机 HTTP 入口不发送 HSTS。
+当前 Traefik Admin UI 默认开启是既有维护入口策略，正式运营应显式设置 `ENABLE_POCKETBASE_ADMIN_UI=false`。

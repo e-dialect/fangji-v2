@@ -57,14 +57,12 @@ export async function listPendingProofreadTasks(page, perPage) {
   })
 }
 
-export async function listProjectQueueSummaries() {
-  const queues = await pb.send('/api/fangji/proofreading-queues', { requestKey: null })
-  return (Array.isArray(queues) ? queues : [])
-    .sort((a, b) => {
-      if (b.activeMine !== a.activeMine) return b.activeMine - a.activeMine
-      if (b.claimable !== a.claimable) return b.claimable - a.claimable
-      return String(a.project.name || '').localeCompare(String(b.project.name || ''), 'zh-Hans-CN')
-    })
+export async function listProjectQueueSummaries(page = 1, perPage = 12) {
+  return pb.send('/api/fangji/proofreading-queues', { query: { page, perPage }, requestKey: null })
+}
+
+export async function listAdminProjectPages(projectId, query) {
+  return pb.send(`/api/fangji/projects/${encodeURIComponent(projectId)}/pages`, { query, requestKey: null })
 }
 
 export async function listProofreaderTasks(userId, page, perPage) {

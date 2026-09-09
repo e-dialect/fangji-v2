@@ -14,13 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/echo/v5"
-	"github.com/labstack/echo/v5/middleware"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/daos"
-	"github.com/pocketbase/pocketbase/models"
+
 	"github.com/pocketbase/pocketbase/tools/security"
 )
 
@@ -40,7 +37,8 @@ var (
 )
 
 // externalIdentityProvider deliberately exposes only the provider-local stable
-// subject. Remote tokens and profile fields never cross this boundary.
+// subject. Remote tokens never cross this boundary; an optional public nickname
+// is read separately only when creating a local user.
 type externalIdentityProvider interface {
 	ID() string
 	Name() string
@@ -71,20 +69,16 @@ func newExternalIdentityService(app core.App, providers ...externalIdentityProvi
 }
 
 func (s *externalIdentityService) register() {
-	s.app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
+	s.app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.GET("/api/fangji/auth/providers", s.listProviders)
 		e.Router.POST(
-			"/api/fangji/auth/external/:provider/login",
-			s.login,
-			middleware.BodyLimit(externalCredentialBodyLimit),
-		)
+			"/api/fangji/auth/external/{provider}/login",
+			s.login).Bind(apis.BodyLimit(externalCredentialBodyLimit))
 		e.Router.POST(
-			"/api/fangji/auth/external/:provider/bind",
-			s.bind,
-			middleware.BodyLimit(externalCredentialBodyLimit),
-			apis.RequireRecordAuth("users"),
-		)
-		return nil
+			"/api/fangji/auth/external/{provider}/bind",
+			s.bind).Bind(apis.BodyLimit(externalCredentialBodyLimit),
+			apis.RequireAuth("users"))
+		return e.Next()
 	})
 }
 
@@ -94,8 +88,8 @@ type externalProviderView struct {
 	Bound bool   `json:"bound"`
 }
 
-func (s *externalIdentityService) listProviders(c echo.Context) error {
-	auth, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (s *externalIdentityService) listProviders(c *core.RequestEvent) error {
+	auth := c.Auth
 	views := make([]externalProviderView, 0, len(s.providers))
 	for _, provider := range s.providers {
 		view := externalProviderView{ID: provider.ID(), Name: provider.Name()}
@@ -108,27 +102,35 @@ func (s *externalIdentityService) listProviders(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"providers": views})
 }
 
-func (s *externalIdentityService) login(c echo.Context) error {
+func (s *externalIdentityService) login(c *core.RequestEvent) error {
 	provider, subject, err := s.authenticateRequest(c)
 	if err != nil {
 		return err
 	}
 
-	user, created, err := s.resolveOrCreateUser(provider.ID(), subject)
+	name := ""
+	if _, lookupErr := findMappedUser(s.app, provider.ID(), subject); errors.Is(lookupErr, sql.ErrNoRows) {
+		if profile, ok := provider.(interface {
+			Nickname(context.Context, string) string
+		}); ok {
+			name = profile.Nickname(c.Request.Context(), subject)
+		}
+	}
+	user, created, err := s.resolveOrCreateUserWithName(provider.ID(), subject, name)
 	if err != nil {
 		s.logAuthResult(provider.ID(), "mapping_error")
 		return apis.NewApiError(http.StatusInternalServerError, "外部账号登录暂时不可用，请稍后重试。", nil)
 	}
 
 	s.logAuthResult(provider.ID(), "success")
-	return apis.RecordAuthResponse(s.app, c, user, map[string]any{
+	return apis.RecordAuthResponse(c, user, "external", map[string]any{
 		"provider": provider.ID(),
 		"created":  created,
 	})
 }
 
-func (s *externalIdentityService) bind(c echo.Context) error {
-	auth, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (s *externalIdentityService) bind(c *core.RequestEvent) error {
+	auth := c.Auth
 	if auth == nil {
 		return apis.NewUnauthorizedError("登录状态已失效，请重新登录。", nil)
 	}
@@ -160,25 +162,29 @@ func (s *externalIdentityService) bind(c echo.Context) error {
 	})
 }
 
-func (s *externalIdentityService) authenticateRequest(c echo.Context) (externalIdentityProvider, string, error) {
-	providerID := strings.TrimSpace(c.PathParam("provider"))
+func (s *externalIdentityService) authenticateRequest(c *core.RequestEvent) (externalIdentityProvider, string, error) {
+	providerID := strings.TrimSpace(c.Request.PathValue("provider"))
 	provider, ok := s.providers[providerID]
 	if !ok {
 		return nil, "", apis.NewNotFoundError("该外部身份来源未启用。", nil)
 	}
 
-	data := apis.RequestInfo(c).Data
+	info, err := c.RequestInfo()
+	if err != nil {
+		return nil, "", err
+	}
+	data := info.Body
 	identity := strings.TrimSpace(stringValue(data["identity"]))
 	password := stringValue(data["password"])
 	if identity == "" || len(identity) > 200 || password == "" || len(password) > 1024 {
 		return nil, "", apis.NewBadRequestError("请输入有效的外部账号和密码。", nil)
 	}
-	if !s.allowAttempt(providerID, c.RealIP()) {
+	if !s.allowAttempt(providerID, c.Get("fangjiClientIP").(string)) {
 		s.logAuthResult(providerID, "rate_limited")
 		return nil, "", apis.NewApiError(http.StatusTooManyRequests, "登录尝试过于频繁，请稍后再试。", nil)
 	}
 
-	subject, err := provider.Authenticate(c.Request().Context(), identity, password)
+	subject, err := provider.Authenticate(c.Request.Context(), identity, password)
 	if errors.Is(err, errExternalCredentials) {
 		s.logAuthResult(providerID, "rejected")
 		return nil, "", apis.NewUnauthorizedError("外部账号或密码不正确。", nil)
@@ -202,16 +208,20 @@ func stringValue(value any) string {
 	return text
 }
 
-func (s *externalIdentityService) resolveOrCreateUser(provider, subject string) (*models.Record, bool, error) {
-	if user, err := findMappedUser(s.app.Dao(), provider, subject); err == nil {
+func (s *externalIdentityService) resolveOrCreateUser(provider, subject string) (*core.Record, bool, error) {
+	return s.resolveOrCreateUserWithName(provider, subject, "")
+}
+
+func (s *externalIdentityService) resolveOrCreateUserWithName(provider, subject, name string) (*core.Record, bool, error) {
+	if user, err := findMappedUser(s.app, provider, subject); err == nil {
 		return user, false, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, false, err
 	}
 
-	var user *models.Record
+	var user *core.Record
 	created := false
-	err := s.app.Dao().RunInTransaction(func(txDao *daos.Dao) error {
+	err := s.app.RunInTransaction(func(txDao core.App) error {
 		mapped, err := findMappedUser(txDao, provider, subject)
 		if err == nil {
 			user = mapped
@@ -231,25 +241,22 @@ func (s *externalIdentityService) resolveOrCreateUser(provider, subject string) 
 		}
 
 		username := availableExternalUsername(txDao, users.Id, provider, subject)
-		user = models.NewRecord(users)
+		user = core.NewRecord(users)
 		user.Set("username", username)
+		user.Set("name", name)
 		user.Set("role", "user")
 		user.Set("must_change_password", false)
-		if err := user.SetPassword(security.RandomString(64)); err != nil {
-			return err
-		}
-		if err := user.SetVerified(true); err != nil {
-			return err
-		}
-		if err := txDao.SaveRecord(user); err != nil {
+		user.SetPassword(security.RandomString(64))
+		user.SetVerified(true)
+		if err := txDao.Save(user); err != nil {
 			return err
 		}
 
-		mapping := models.NewRecord(mappings)
+		mapping := core.NewRecord(mappings)
 		mapping.Set("user", user.Id)
 		mapping.Set("provider", provider)
 		mapping.Set("subject", subject)
-		if err := txDao.SaveRecord(mapping); err != nil {
+		if err := txDao.Save(mapping); err != nil {
 			return err
 		}
 		created = true
@@ -259,7 +266,7 @@ func (s *externalIdentityService) resolveOrCreateUser(provider, subject string) 
 		// A concurrent first login may win the unique mapping race after our
 		// transaction started. Reuse that committed mapping instead of surfacing a
 		// transient failure or creating a second local account.
-		if mapped, lookupErr := findMappedUser(s.app.Dao(), provider, subject); lookupErr == nil {
+		if mapped, lookupErr := findMappedUser(s.app, provider, subject); lookupErr == nil {
 			return mapped, false, nil
 		}
 	}
@@ -268,7 +275,7 @@ func (s *externalIdentityService) resolveOrCreateUser(provider, subject string) 
 
 func (s *externalIdentityService) bindIdentity(userID, provider, subject string) (bool, error) {
 	created := false
-	err := s.app.Dao().RunInTransaction(func(txDao *daos.Dao) error {
+	err := s.app.RunInTransaction(func(txDao core.App) error {
 		mapping, err := findIdentityMapping(txDao, provider, subject)
 		if err == nil {
 			if mapping.GetString("user") == userID {
@@ -292,24 +299,24 @@ func (s *externalIdentityService) bindIdentity(userID, provider, subject string)
 		if err != nil {
 			return err
 		}
-		mapping = models.NewRecord(collection)
+		mapping = core.NewRecord(collection)
 		mapping.Set("user", userID)
 		mapping.Set("provider", provider)
 		mapping.Set("subject", subject)
-		if err := txDao.SaveRecord(mapping); err != nil {
+		if err := txDao.Save(mapping); err != nil {
 			return err
 		}
 		created = true
 		return nil
 	})
 	if err != nil {
-		if mapping, lookupErr := findIdentityMapping(s.app.Dao(), provider, subject); lookupErr == nil {
+		if mapping, lookupErr := findIdentityMapping(s.app, provider, subject); lookupErr == nil {
 			if mapping.GetString("user") == userID {
 				return false, nil
 			}
 			return false, errIdentityOwned
 		}
-		if _, lookupErr := findUserProviderMapping(s.app.Dao(), userID, provider); lookupErr == nil {
+		if _, lookupErr := findUserProviderMapping(s.app, userID, provider); lookupErr == nil {
 			return false, errProviderBound
 		}
 	}
@@ -317,7 +324,7 @@ func (s *externalIdentityService) bindIdentity(userID, provider, subject string)
 }
 
 func (s *externalIdentityService) userHasProvider(userID, provider string) bool {
-	_, err := s.app.Dao().FindFirstRecordByFilter(
+	_, err := s.app.FindFirstRecordByFilter(
 		"external_identity_mappings",
 		"user = {:user} && provider = {:provider}",
 		dbx.Params{"user": userID, "provider": provider},
@@ -325,7 +332,7 @@ func (s *externalIdentityService) userHasProvider(userID, provider string) bool 
 	return err == nil
 }
 
-func findMappedUser(dao *daos.Dao, provider, subject string) (*models.Record, error) {
+func findMappedUser(dao core.App, provider, subject string) (*core.Record, error) {
 	mapping, err := findIdentityMapping(dao, provider, subject)
 	if err != nil {
 		return nil, err
@@ -333,7 +340,7 @@ func findMappedUser(dao *daos.Dao, provider, subject string) (*models.Record, er
 	return dao.FindRecordById("users", mapping.GetString("user"))
 }
 
-func findIdentityMapping(dao *daos.Dao, provider, subject string) (*models.Record, error) {
+func findIdentityMapping(dao core.App, provider, subject string) (*core.Record, error) {
 	return dao.FindFirstRecordByFilter(
 		"external_identity_mappings",
 		"provider = {:provider} && subject = {:subject}",
@@ -341,7 +348,7 @@ func findIdentityMapping(dao *daos.Dao, provider, subject string) (*models.Recor
 	)
 }
 
-func findUserProviderMapping(dao *daos.Dao, userID, provider string) (*models.Record, error) {
+func findUserProviderMapping(dao core.App, userID, provider string) (*core.Record, error) {
 	return dao.FindFirstRecordByFilter(
 		"external_identity_mappings",
 		"user = {:user} && provider = {:provider}",
@@ -349,15 +356,15 @@ func findUserProviderMapping(dao *daos.Dao, userID, provider string) (*models.Re
 	)
 }
 
-func availableExternalUsername(dao *daos.Dao, usersCollectionID, provider, subject string) string {
+func availableExternalUsername(dao core.App, usersCollectionID, provider, subject string) string {
 	hash := sha256.Sum256([]byte(provider + "\x00" + subject))
 	base := fmt.Sprintf("ext_%s_%s", provider, hex.EncodeToString(hash[:12]))
-	if dao.IsRecordValueUnique(usersCollectionID, "username", base) {
+	if usernameAvailable(dao, usersCollectionID, base) {
 		return base
 	}
 	for {
 		candidate := base + "_" + strings.ToLower(security.RandomString(8))
-		if dao.IsRecordValueUnique(usersCollectionID, "username", candidate) {
+		if usernameAvailable(dao, usersCollectionID, candidate) {
 			return candidate
 		}
 	}
@@ -427,4 +434,9 @@ func (l *externalAttemptLimiter) Allow(key string) bool {
 func externalLimitKey(provider, ip string) string {
 	hash := sha256.Sum256([]byte(provider + "\x00" + ip))
 	return hex.EncodeToString(hash[:])
+}
+
+func usernameAvailable(app core.App, collectionID, username string) bool {
+	_, err := app.FindFirstRecordByFilter(collectionID, "username = {:username}", dbx.Params{"username": username})
+	return errors.Is(err, sql.ErrNoRows)
 }

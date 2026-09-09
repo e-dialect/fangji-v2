@@ -118,6 +118,7 @@
                 >
                   {{ item.summary.arbitration ? '处理仲裁' : '管理项目' }}
                 </RouterLink>
+                <RouterLink :to="`/admin/projects/${item.project.id}/settings`" class="btn btn-quiet btn-sm">项目设置</RouterLink>
               </td>
             </tr>
           </tbody>

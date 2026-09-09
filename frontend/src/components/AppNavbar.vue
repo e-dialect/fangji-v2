@@ -9,10 +9,10 @@
       <div class="navbar-nav">
         <slot name="nav-links" />
         <span class="navbar-divider" aria-hidden="true"></span>
-        <span class="navbar-user" :title="auth.user?.email">
+        <RouterLink to="/tasks/profile" class="navbar-user" aria-label="个人中心" :title="auth.user?.email">
           <span class="navbar-avatar" aria-hidden="true">{{ userInitial }}</span>
-          <span>{{ auth.user?.name || auth.user?.email }}</span>
-        </span>
+          <span>{{ auth.user?.name || auth.user?.email || auth.user?.username }}</span>
+        </RouterLink>
         <button class="btn btn-quiet btn-sm" @click="handleLogout">退出</button>
       </div>
     </div>
@@ -26,7 +26,7 @@ import { useRouter } from 'vue-router'
 
 const auth = useAuthStore()
 const router = useRouter()
-const userInitial = computed(() => String(auth.user?.name || auth.user?.email || '校').slice(0, 1).toLocaleUpperCase('zh-CN'))
+const userInitial = computed(() => Array.from(String(auth.user?.name || auth.user?.email || '校'))[0].toLocaleUpperCase('zh-CN'))
 
 function handleLogout() {
   auth.logout()

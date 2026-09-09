@@ -15,6 +15,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pocketbase-compatibility:
+    name: PocketBase compatibility (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [core_logic, upload_jobs, proofreading_quorum, task_leases, project_access, phase1, pdf_access, keyboards, column_order, volunteer_accounts]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: python3 backend/tests/run_integration.py ${{ matrix.suite }}_integration.mjs
+
+  core-workflows:
+    name: Core workflow (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - upload_jobs_integration.mjs
+          - core_logic_integration.mjs
+          - proofreading_quorum_integration.mjs
+          - task_leases_integration.mjs
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Run against a freshly migrated disposable database
+        run: python3 backend/tests/run_integration.py ${{ matrix.suite }}
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -42,6 +85,29 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+  backend-unicode:
+    name: Backend Unicode workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Run backend tests
+        working-directory: backend
+        run: go test ./...
+      - name: Verify offline backup and restore
+        run: python3 -m unittest discover -s backend/tests -p test_backup.py
+      - name: Test keyboard CSV coverage audit
+        run: python3 -m unittest discover -s backend/tests -p test_keyboard_audit.py
+      - name: Verify Unicode import, proofreading, arbitration and restart persistence
+        run: python3 backend/tests/run_rare_characters_integration.py
+
   containers:
     name: Containers
     runs-on: ubuntu-latest
@@ -49,12 +115,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          package-manager-cache: false
 
       - name: Validate Compose entry points
         env:
@@ -68,6 +128,14 @@ jobs:
           docker compose -f docker-compose.dev.yml -f docker-compose.named-volume.yml config --quiet
           docker compose -f docker-compose.traefik.yml -f docker-compose.named-volume.yml config --quiet
 
+      - name: Verify administrator UI entrypoint defaults and explicit override
+        env:
+          TRAEFIK_HOST: fangji.example.com
+        run: |
+          env -u ENABLE_POCKETBASE_ADMIN_UI docker compose -f docker-compose.traefik.yml config --format json | jq -e '.services.frontend.environment.ENABLE_POCKETBASE_ADMIN_UI == "true"'
+          ENABLE_POCKETBASE_ADMIN_UI=false docker compose -f docker-compose.traefik.yml config --format json | jq -e '.services.frontend.environment.ENABLE_POCKETBASE_ADMIN_UI == "false"'
+          env -u ENABLE_POCKETBASE_ADMIN_UI docker compose config --format json | jq -e '.services.frontend.environment.ENABLE_POCKETBASE_ADMIN_UI == "false"'
+
       - name: Verify Compose entry point behavior
         env:
           TRAEFIK_HOST: fangji.example.com
@@ -75,7 +143,7 @@ jobs:
           docker compose config --format json | jq -e '
             (.services.frontend.ports | length == 1) and
             (.services.frontend.ports[0].published == "8080") and
-            (.services.frontend.ports[0].target == 80) and
+            (.services.frontend.ports[0].target == 8080) and
             ((.services.frontend.labels // {}) | length == 0) and
             ((.services.backend.ports // []) | length == 0)
           '
@@ -97,8 +165,22 @@ jobs:
             (.networks.traefik.name == "traefik-global-proxy") and
             (.services.frontend.labels["traefik.docker.network"] == "traefik-global-proxy") and
             (.services.frontend.labels["traefik.http.routers.fangji.rule"] == "Host(`fangji.example.com`)") and
-            (.services.frontend.labels["traefik.http.services.fangji.loadbalancer.server.port"] == "80")
+            (.services.frontend.labels["traefik.http.services.fangji.loadbalancer.server.port"] == "8080")
           '
+
+      - name: Verify production privilege restrictions
+        env:
+          TRAEFIK_HOST: fangji.example.com
+        run: |
+          for config in docker-compose.yml docker-compose.traefik.yml; do
+            docker compose -f "$config" config --format json | jq -e '
+              (.services.backend.read_only == true) and
+              (.services.backend.cap_drop == ["ALL"]) and
+              (.services.frontend.cap_drop == ["ALL"]) and
+              (.services.backend.security_opt | index("no-new-privileges:true") != null) and
+              (.services.frontend.security_opt | index("no-new-privileges:true") != null)
+            '
+          done
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -126,5 +208,66 @@ jobs:
       - name: Verify trusted proxy rate limiting
         run: sh frontend/tests/proxyRateLimit.e2e.sh
 
-      - name: Verify project join attempt retention
-        run: node --test backend/tests/project_access_rate_limits.test.cjs
+  profile-stats:
+    name: profile-stats integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: python3 backend/tests/run_integration.py phase1_integration.mjs
+
+  project-management:
+    name: project-management integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: python3 backend/tests/run_integration.py project_access_integration.mjs
+
+  column-order:
+    name: column-order integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: go test ./...
+        working-directory: backend
+      - run: python3 backend/tests/run_integration.py column_order_integration.mjs
+
+  pdf-access:
+    name: pdf-access integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - run: go test ./...
+        working-directory: backend
+      - run: python3 backend/tests/run_integration.py pdf_access_integration.mjs

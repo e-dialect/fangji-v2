@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/pocketbase/pocketbase/core"
 	"log"
 	"strings"
 	"testing"
 
-	"github.com/pocketbase/pocketbase/daos"
-	"github.com/pocketbase/pocketbase/models"
-	"github.com/pocketbase/pocketbase/models/schema"
 	"github.com/pocketbase/pocketbase/tests"
 )
 
@@ -176,13 +174,13 @@ func TestPersistBeforeCleanupKeepsPersistedStateWhenCleanupFails(t *testing.T) {
 }
 
 func TestWalkRecordBatchesCrossesBatchBoundary(t *testing.T) {
-	records := make([]*models.Record, 7)
+	records := make([]*core.Record, 7)
 	var visited int
 	var offsets []int
 	err := walkRecordBatches(
 		3,
 		true,
-		func(limit, offset int) ([]*models.Record, error) {
+		func(limit, offset int) ([]*core.Record, error) {
 			offsets = append(offsets, offset)
 			if offset >= len(records) {
 				return nil, nil
@@ -193,7 +191,7 @@ func TestWalkRecordBatchesCrossesBatchBoundary(t *testing.T) {
 			}
 			return records[offset:end], nil
 		},
-		func(batch []*models.Record) error {
+		func(batch []*core.Record) error {
 			visited += len(batch)
 			return nil
 		},
@@ -248,7 +246,7 @@ func TestRecoveryCleanupRollsBackWhenPublishedPageExists(t *testing.T) {
 	assertRecordCount(t, dao, "import_job_errors", fmt.Sprintf("job = %q", jobID), stagedCount+1)
 }
 
-func newArtifactCleanupTestDao(t *testing.T) (*daos.Dao, map[string]*models.Collection) {
+func newArtifactCleanupTestDao(t *testing.T) (core.App, map[string]*core.Collection) {
 	t.Helper()
 	app, err := tests.NewTestApp()
 	if err != nil {
@@ -256,63 +254,63 @@ func newArtifactCleanupTestDao(t *testing.T) (*daos.Dao, map[string]*models.Coll
 	}
 	t.Cleanup(app.Cleanup)
 
-	collections := map[string]*models.Collection{
+	collections := map[string]*core.Collection{
 		"pages": {
 			Name: "pages",
-			Type: models.CollectionTypeBase,
-			Schema: schema.NewSchema(
-				&schema.SchemaField{Name: "import_job", Type: schema.FieldTypeText},
-				&schema.SchemaField{Name: "status", Type: schema.FieldTypeText},
-				&schema.SchemaField{Name: "proofreader", Type: schema.FieldTypeText},
-				&schema.SchemaField{Name: "first_proofreader", Type: schema.FieldTypeText},
-				&schema.SchemaField{Name: "second_proofreader", Type: schema.FieldTypeText},
+			Type: core.CollectionTypeBase,
+			Fields: core.NewFieldsList(
+				&core.TextField{Name: "import_job"},
+				&core.TextField{Name: "status"},
+				&core.TextField{Name: "proofreader"},
+				&core.TextField{Name: "first_proofreader"},
+				&core.TextField{Name: "second_proofreader"},
 			),
 		},
 		"proofreading_attempts": {
 			Name: "proofreading_attempts",
-			Type: models.CollectionTypeBase,
-			Schema: schema.NewSchema(
-				&schema.SchemaField{Name: "page", Type: schema.FieldTypeText},
+			Type: core.CollectionTypeBase,
+			Fields: core.NewFieldsList(
+				&core.TextField{Name: "page"},
 			),
 		},
 		"import_job_errors": {
 			Name: "import_job_errors",
-			Type: models.CollectionTypeBase,
-			Schema: schema.NewSchema(
-				&schema.SchemaField{Name: "job", Type: schema.FieldTypeText},
+			Type: core.CollectionTypeBase,
+			Fields: core.NewFieldsList(
+				&core.TextField{Name: "job"},
 			),
 		},
 	}
 	for _, name := range []string{"pages", "proofreading_attempts", "import_job_errors"} {
-		if err := app.Dao().SaveCollection(collections[name]); err != nil {
+		if err := app.Save(collections[name]); err != nil {
 			t.Fatalf("create %s test collection: %v", name, err)
 		}
 	}
 
-	return app.Dao(), collections
+	return app, collections
 }
 
 func seedCleanupArtifacts(
 	t *testing.T,
-	dao *daos.Dao,
-	collections map[string]*models.Collection,
+	dao core.App,
+	collections map[string]*core.Collection,
 	jobID string,
 	count int,
 	status string,
 ) {
 	t.Helper()
-	if err := dao.RunInTransaction(func(txDao *daos.Dao) error {
+	if err := dao.RunInTransaction(func(txDao core.App) error {
 		for index := 0; index < count; index++ {
-			page := models.NewRecord(collections["pages"])
+			page := core.NewRecord(collections["pages"])
 			page.Set("import_job", jobID)
 			page.Set("status", status)
-			if err := txDao.SaveRecord(page); err != nil {
+			if err := txDao.Save(page); err != nil {
 				return err
 			}
 
-			jobError := models.NewRecord(collections["import_job_errors"])
+			jobError := core.NewRecord(collections["import_job_errors"])
 			jobError.Set("job", jobID)
-			if err := txDao.SaveRecord(jobError); err != nil {
+			if err := txDao.Save(jobError); err != nil {
 				return err
 			}
 		}
@@ -322,7 +320,7 @@ func seedCleanupArtifacts(
 	}
 }
 
-func assertRecordCount(t *testing.T, dao *daos.Dao, collection, filter string, want int) {
+func assertRecordCount(t *testing.T, dao core.App, collection, filter string, want int) {
 	t.Helper()
 	records, err := dao.FindRecordsByFilter(collection, filter, "id", 1000000, 0)
 	if err != nil {
@@ -479,5 +477,18 @@ func TestBuildCSVPage(t *testing.T) {
 	)
 	if validationErr == nil || validationErr.code != "PDF_PAGE_OUT_OF_RANGE" || validationErr.rawValue != "3" {
 		t.Fatalf("unexpected page-range validation error: %#v", validationErr)
+	}
+}
+
+func TestCSVPreservesExplicitColumnOrder(t *testing.T) {
+	row, err := buildCSVPage([]string{"词条", "10", "PDF页码", "释义", "2"}, []string{"𢶀", "十", "1", "意思", "二"}, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.headersJSON != `["词条","10","释义","2"]` {
+		t.Fatalf("order lost: %s", row.headersJSON)
+	}
+	if row.entryText != "𢶀 十 意思 二" {
+		t.Fatalf("text reordered: %s", row.entryText)
 	}
 }

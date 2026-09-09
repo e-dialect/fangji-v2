@@ -168,6 +168,29 @@ try {
   assert.equal(members.find((item) => item.user === manager.id).role, 'manager')
   assert.equal(members.find((item) => item.user === proofreader.id).role, 'proofreader')
 
+  const detailsPath = `/api/fangji/projects/${privateProject.id}`
+  const rareName = '项目𠮷𰻞𱁬'
+  let updated = await request(detailsPath, { method: 'PATCH', token: manager.token, body: { name: rareName } })
+  assert.equal(updated.name, rareName)
+  assert.equal(updated.description, privateProject.description, 'omitted description must be preserved')
+  updated = await request(detailsPath, { method: 'PATCH', token: manager.token, body: { description: '简介𠮷𰻞𱁬' } })
+  assert.equal(updated.name, rareName)
+  updated = await request(detailsPath, { method: 'PATCH', token: creator.token, body: { requiredProofreads: 3 } })
+  assert.equal(updated.description, '简介𠮷𰻞𱁬', 'rule updates must preserve project metadata')
+  assert.equal(updated.access_mode, 'members_only')
+  for (const body of [{ name: '   ' }, { name: '𠮷'.repeat(501) }, { description: '𠮷'.repeat(2001) }, { requiredProofreads: 0 }, { requiredProofreads: '3' }, { description: null }, { accessMode: '' }]) {
+    await request(detailsPath, { method: 'PATCH', token: manager.token, body, expected: 400 })
+  }
+  await request(detailsPath, { method: 'PATCH', token: proofreader.token, body: { name: 'Unauthorized' }, expected: 403 })
+  await request(detailsPath, { method: 'PATCH', token: outsider.token, body: { name: 'Unauthorized' }, expected: 403 })
+  updated = await request(detailsPath, { method: 'PATCH', token: manager.token, body: { description: '' } })
+  assert.equal(updated.description, '', 'explicit empty description must clear it')
+  assert.equal(updated.name, rareName)
+  updated = await request(detailsPath, { token: creator.token })
+  assert.equal(updated.name, rareName, 'name must survive a fresh read')
+  assert.equal(updated.description, '')
+  await request(detailsPath, { method: 'PATCH', token: creator.token, body: { requiredProofreads: 2 } })
+
   const emptyClaim = await request(`/api/fangji/projects/${privateProject.id}/claim`, {
     method: 'POST',
     token: proofreader.token

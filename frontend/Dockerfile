@@ -1,4 +1,4 @@
-FROM node:26.8-alpine AS dependencies
+FROM node:24-alpine AS dependencies
 
 WORKDIR /app
 
@@ -28,4 +28,9 @@ RUN mkdir -p /etc/nginx/snippets \
   && chmod +x /docker-entrypoint.d/40-runtime-config.sh
 COPY --from=build /app/dist /usr/share/nginx/html
 
-EXPOSE 80
+# Runtime configuration is intentionally writable only by the application user.
+RUN sed -i 's@/var/run/nginx.pid@/tmp/nginx.pid@; s@/run/nginx.pid@/tmp/nginx.pid@; /^user /d' /etc/nginx/nginx.conf \
+  && grep -Eq '^pid[[:space:]]+/tmp/nginx.pid;' /etc/nginx/nginx.conf \
+  && chown -R nginx:nginx /etc/nginx/conf.d /etc/nginx/snippets /var/cache/nginx /usr/share/nginx/html
+USER nginx
+EXPOSE 8080

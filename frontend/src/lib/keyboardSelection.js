@@ -2,6 +2,11 @@ export function keyboardPreferenceKey(userId, projectId) {
   return `fangji:keyboard:${encodeURIComponent(userId || 'anonymous')}:${encodeURIComponent(projectId || '')}`
 }
 
+// Shortcut groups intentionally repeat complete insertion values.
+export function countKeyboardValues(sections = []) {
+  return new Set(sections.flatMap(section => section.keys.map(key => key.value))).size
+}
+
 export function chooseProjectKeyboard(items, defaultKeyboardId, rememberedKeyboardId) {
   if (!Array.isArray(items) || items.length === 0) return null
   const remembered = items.find((item) => item.keyboardId === rememberedKeyboardId)

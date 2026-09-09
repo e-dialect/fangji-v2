@@ -55,7 +55,7 @@ try {
   assert.equal(library[0].keyboardId, 'hinghwa-dialect')
   assert.equal(library[0].name, '莆仙方言键盘')
   assert.equal(library[0].definition.schemaVersion, 1)
-  assert.equal(library[0].definition.sections.length, 7)
+  assert.equal(library[0].definition.sections.length, 12)
 
   const project = await request('/api/fangji/projects', {
     method: 'POST',

@@ -1,3 +1,6 @@
+@import "./rare-fonts.css";
+@import "./phonetic-fonts.css";
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -25,7 +28,7 @@
   --radius: 10px;
   --shadow: 0 1px 2px rgba(36, 52, 58, .08), 0 8px 28px rgba(36, 52, 58, .05);
   --shadow-lg: 0 18px 45px rgba(36, 52, 58, .16);
-  font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Fangji Phonetic', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Fangji Rare Han', sans-serif;
   font-size: 15px;
   color: var(--gray-800);
   background: var(--paper);
@@ -40,7 +43,7 @@ body {
 
 h1, h2, h3, h4 {
   color: var(--ink);
-  font-family: 'Noto Serif SC', 'Songti SC', STSong, serif;
+  font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif;
 }
 
 a { color: var(--primary); text-decoration: none; }
@@ -121,10 +124,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   position: sticky; top: 0; z-index: 100;
 }
 .navbar .container { display: flex; align-items: center; justify-content: space-between; width: 100%; }
-.navbar-brand { font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-size: 1.18rem; font-weight: 700; color: var(--ink); display: flex; align-items: center; gap: .45rem; }
+.navbar-brand { font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-size: 1.18rem; font-weight: 700; color: var(--ink); display: flex; align-items: center; gap: .45rem; }
 .navbar-brand span.sub { font-size: .8rem; font-weight: 400; color: var(--gray-500); }
 .navbar-brand:hover { color: var(--primary); text-decoration: none; }
-.navbar-seal { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; background: var(--accent); color: #fff; font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-size: .82rem; }
+.navbar-seal { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; background: var(--accent); color: #fff; font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-size: .82rem; }
 .navbar-nav { display: flex; align-items: center; gap: .5rem; }
 .nav-link { padding: .35rem .75rem; border-radius: 6px; font-size: .9rem; color: var(--gray-600); }
 .nav-link:hover { background: var(--gray-100); color: var(--gray-800); text-decoration: none; }
@@ -150,7 +153,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   transition: transform .15s, border-color .15s, box-shadow .15s;
 }
 .capability-card:hover { transform: translateY(-2px); border-color: var(--primary); box-shadow: var(--shadow-lg); text-decoration: none; }
-.capability-card__mark { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 9px; background: var(--paper-deep); color: var(--accent); font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-weight: 700; }
+.capability-card__mark { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 9px; background: var(--paper-deep); color: var(--accent); font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-weight: 700; }
 .capability-card h2 { margin-bottom: .4rem; font-size: 1.2rem; }
 .capability-card p { color: var(--gray-500); line-height: 1.65; }
 .capability-card > strong { grid-column: 2; align-self: end; color: var(--primary); font-size: .82rem; }
@@ -284,7 +287,7 @@ tr:hover td { background: var(--gray-50); }
 .ipa-key {
   padding: .3rem .5rem; border-radius: 4px; font-size: .9rem;
   background: #fff; border: 1px solid var(--gray-300);
-  cursor: pointer; transition: all .1s; font-family: 'Noto Sans', serif;
+  cursor: pointer; transition: all .1s; font-family: 'Fangji Phonetic', 'Noto Sans', 'Fangji Rare Han', serif;
   min-width: 32px; text-align: center;
 }
 .ipa-key:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
@@ -321,7 +324,7 @@ tr:hover td { background: var(--gray-50); }
   border-radius: 50%;
   background: var(--primary-light);
   color: var(--primary);
-  font-family: 'Noto Serif SC', 'Songti SC', STSong, serif;
+  font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif;
   font-size: 1rem;
   font-weight: 700;
 }
@@ -385,7 +388,7 @@ tr:hover td { background: var(--gray-50); }
 }
 .workspace-stat--accent { border-top: 3px solid var(--accent); }
 .workspace-stat > span { color: var(--gray-600); font-size: .82rem; font-weight: 600; }
-.workspace-stat strong { align-self: center; color: var(--ink); font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-size: 2.15rem; line-height: 1; }
+.workspace-stat strong { align-self: center; color: var(--ink); font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-size: 2.15rem; line-height: 1; }
 .workspace-stat strong em { margin-left: .15rem; color: var(--gray-400); font-family: inherit; font-size: 1rem; font-style: normal; }
 .workspace-stat small { align-self: end; color: var(--gray-500); }
 .section-heading {
@@ -428,7 +431,7 @@ tr:hover td { background: var(--gray-50); }
 .work-state--active { background: #e3f2e9; color: #276241; }
 .work-state--available { background: var(--primary-light); color: var(--primary-dark); }
 .work-state--complete { background: #edf1ef; color: #52665f; }
-.project-progress-number { color: var(--primary); font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-size: 1.5rem; font-weight: 700; }
+.project-progress-number { color: var(--primary); font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-size: 1.5rem; font-weight: 700; }
 .project-description { min-height: 2.8em; color: var(--gray-500); font-size: .86rem; line-height: 1.55; }
 .project-progress { height: 6px; }
 .queue-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-block: 1px solid var(--gray-100); }
@@ -452,7 +455,7 @@ tr:hover td { background: var(--gray-50); }
 /* Proofreading editor */
 .editor-context { display: grid; gap: .15rem; }
 .editor-context > span { color: var(--gray-500); font-size: .72rem; font-weight: 500; }
-.editor-context > strong { color: var(--ink); font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-size: 1rem; }
+.editor-context > strong { color: var(--ink); font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-size: 1rem; }
 .editor-toolbar { display: flex; align-items: center; gap: .4rem; }
 .pdf-page-control { display: inline-flex; }
 .task-position {
@@ -519,13 +522,13 @@ tr:hover td { background: var(--gray-50); }
 .field-change-label { color: var(--accent) !important; }
 .source-value { display: grid; gap: .3rem; padding: .65rem .85rem; background: #f7f5ef; }
 .source-value > span { color: var(--gray-500); font-size: .68rem; font-weight: 600; }
-.source-value p { color: var(--gray-700); font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-size: .88rem; line-height: 1.65; white-space: pre-wrap; }
+.source-value p { color: var(--gray-700); font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-size: .88rem; line-height: 1.65; white-space: pre-wrap; }
 .proofread-textarea.form-control {
   min-height: 104px;
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  font-family: 'Noto Sans', 'Noto Sans SC', sans-serif;
+  font-family: 'Fangji Phonetic', 'Noto Sans', 'Noto Sans SC', 'Fangji Rare Han', sans-serif;
   font-size: .96rem;
   line-height: 1.7;
 }
@@ -558,7 +561,7 @@ tr:hover td { background: var(--gray-50); }
   border-radius: 50%;
   background: var(--primary-light);
   color: var(--primary);
-  font-family: 'Noto Serif SC', 'Songti SC', STSong, serif;
+  font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif;
   font-weight: 700;
 }
 .confirmation-dialog h2 { margin: .25rem 0 .7rem; font-size: 1.25rem; }
@@ -663,7 +666,7 @@ tr:hover td { background: var(--gray-50); }
 .admin-project-table td { vertical-align: middle; }
 .admin-project-row--urgent td { background: #fffaf5; }
 .admin-project-row--urgent:hover td { background: #fff7ed; }
-.project-name-link { color: var(--ink); font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-size: 1rem; font-weight: 700; }
+.project-name-link { color: var(--ink); font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-size: 1rem; font-weight: 700; }
 .project-name-link:hover { color: var(--primary); }
 .admin-project-table td:first-child p { max-width: 270px; margin-top: .3rem; overflow: hidden; color: var(--gray-500); font-size: .76rem; text-overflow: ellipsis; white-space: nowrap; }
 .project-pipeline { display: grid; min-width: 260px; grid-template-columns: repeat(4, minmax(52px, 1fr)); }
@@ -716,12 +719,12 @@ tr:hover td { background: var(--gray-50); }
 .project-status-actions button:hover { transform: translateY(-1px); border-color: var(--primary); background: var(--primary-light); }
 .project-status-actions button.is-selected { border-color: var(--primary); background: var(--primary-light); box-shadow: inset 0 -3px var(--primary); }
 .project-status-actions button > span { font-size: .72rem; }
-.project-status-actions button > strong { color: var(--ink); font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-size: 1.35rem; }
+.project-status-actions button > strong { color: var(--ink); font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-size: 1.35rem; }
 .project-status-actions button > small { color: var(--gray-400); font-size: .64rem; }
 .project-status-actions .project-status-action--urgent:not(.is-empty) { border-color: #fdba74; background: #fff7ed; }
 .project-status-actions .project-status-action--urgent:not(.is-empty) strong { color: #9a3412; }
 .project-section { scroll-margin-top: 76px; }
-.project-section > .card-title { font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-size: 1.05rem; }
+.project-section > .card-title { font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-size: 1.05rem; }
 .admin-entry-heading { margin-bottom: 1rem; }
 .admin-table-actions--selected { padding: .75rem; border: 1px solid #b9d2d5; border-radius: var(--radius); background: var(--primary-light); }
 .selection-summary { display: flex; align-items: center; gap: .6rem; color: var(--gray-600); font-size: .78rem; }
@@ -732,7 +735,7 @@ tr:hover td { background: var(--gray-50); }
 .arbitration-summary { display: grid; grid-template-columns: 220px 1fr; align-items: center; gap: 1.25rem; }
 .arbitration-summary > div:first-child { display: grid; grid-template-columns: auto 1fr; column-gap: .65rem; align-items: baseline; }
 .arbitration-summary .page-eyebrow { grid-column: 1 / -1; margin-bottom: .25rem; }
-.arbitration-summary strong { color: var(--ink); font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-size: 1.8rem; }
+.arbitration-summary strong { color: var(--ink); font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-size: 1.8rem; }
 .arbitration-summary span { color: var(--gray-500); font-size: .78rem; }
 .arbitration-progress p { margin-top: .45rem; color: var(--gray-500); font-size: .76rem; }
 .arbitration-workspace { padding: 0; overflow: hidden; }
@@ -758,11 +761,11 @@ tr:hover td { background: var(--gray-50); }
 .comparison-option, .final-value { position: relative; display: grid; align-content: start; min-width: 0; min-height: 150px; padding: .75rem; border-right: 1px solid var(--gray-100); background: #fff; }
 .comparison-option.selected, .final-value.selected { background: #f0f8f4; box-shadow: inset 0 3px var(--success); }
 .comparison-option > span, .final-value > span { color: var(--gray-500); font-size: .68rem; font-weight: 700; }
-.comparison-option p { margin: .55rem 0 .85rem; overflow-wrap: anywhere; color: var(--gray-700); font-family: 'Noto Serif SC', 'Songti SC', STSong, serif; font-size: .85rem; line-height: 1.65; white-space: pre-wrap; }
+.comparison-option p { margin: .55rem 0 .85rem; overflow-wrap: anywhere; color: var(--gray-700); font-family: 'Fangji Phonetic', 'Noto Serif SC', 'Songti SC', STSong, 'Fangji Rare Han', serif; font-size: .85rem; line-height: 1.65; white-space: pre-wrap; }
 .comparison-option button { align-self: end; justify-self: start; margin-top: auto; padding: .25rem .5rem; border: 1px solid var(--gray-300); border-radius: 5px; background: #fff; color: var(--primary); cursor: pointer; font-size: .7rem; }
 .comparison-option button:hover { border-color: var(--primary); background: var(--primary-light); }
 .final-value { border-right: 0; }
-.final-value textarea { min-height: 108px; margin-top: .45rem; font-family: 'Noto Sans SC', sans-serif; font-size: .85rem; line-height: 1.65; }
+.final-value textarea { min-height: 108px; margin-top: .45rem; font-family: 'Fangji Phonetic', 'Noto Sans SC', 'Fangji Rare Han', sans-serif; font-size: .85rem; line-height: 1.65; }
 .arbitration-submit-card { margin-bottom: 1rem; }
 .arbitration-submit-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-top: 1rem; border-top: 1px solid var(--gray-100); }
 .arbitration-submit-actions p { display: grid; gap: .2rem; }
@@ -789,7 +792,7 @@ tr:hover td { background: var(--gray-50); }
   border-radius: var(--radius);
   background: #fef2f2;
   color: #991b1b;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: 'Fangji Phonetic', ui-monospace, SFMono-Regular, Consolas, 'Fangji Rare Han', monospace;
   font-size: .8rem;
   overflow-wrap: anywhere;
 }
@@ -832,4 +835,84 @@ tr:hover td { background: var(--gray-50); }
   .navbar-nav { max-width: calc(100vw - 105px); gap: .15rem; overflow-x: auto; }
   .navbar-nav .btn-quiet, .navbar-nav .navbar-user { flex: 0 0 auto; }
   .nav-link { padding-inline: .45rem; font-size: .78rem; }
+}
+
+button, input, select, textarea { font-family: inherit; }
+/* Review workspace: source and persistent keyboard share the left column. */
+.editor-layout { grid-template-columns: minmax(0, 45fr) minmax(0, 55fr); grid-template-rows: minmax(0, 1fr); height: calc(100dvh - 56px); }
+.editor-layout.has-keyboard { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+.source-panel { grid-column: 1; grid-row: 1 / -1; }
+.has-keyboard .source-panel { grid-row: 1; }
+.fields-panel { grid-column: 2; grid-row: 1 / -1; }
+.editor-layout .editor-panel, .editor-panel-body { min-height: 0; min-width: 0; }
+.editor-panel-header, .editor-toolbar { flex-wrap: wrap; gap: .4rem; }
+.keyboard-panel { grid-column: 1; grid-row: 2; min-height: 0; min-width: 0; overflow: hidden; background: white; border-radius: var(--radius); display: flex; flex-direction: column; }
+.keyboard-dock-content { min-height: 0; overflow: auto; flex: 1; }
+.keyboard-panel .ipa-keyboard { margin: 0; border: 0; }
+.keyboard-panel .ipa-keyboard-heading { position: sticky; top: -.85rem; background: white; z-index: 2; padding-block: .5rem; }
+.keyboard-dock-controls, .mobile-source-toggle, .mobile-field-navigation { display: none; }
+@media (max-width: 1100px) {
+  .editor-layout, .editor-layout.has-keyboard { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; gap: .5rem; padding: .5rem; }
+  .editor-layout .source-panel { grid-column: 1; grid-row: 1; height: 25dvh; }
+  .editor-layout .fields-panel { grid-column: 1; grid-row: 2; }
+  .editor-layout .keyboard-panel { grid-column: 1; grid-row: 3; }
+  .keyboard-dock-controls { display: flex; gap: .4rem; padding: .4rem; flex-wrap: wrap; }
+  .keyboard-dock-content { display: none; }
+  .keyboard-open .keyboard-dock-content { display: block; max-height: 30dvh; }
+  .keyboard-panel { max-height: 35%; max-height: 35dvh; padding-bottom: env(safe-area-inset-bottom); }
+  .editor-layout.pdf-collapsed .source-panel, .editor-layout.pdf-unavailable .source-panel { display: none; }
+  .editor-layout.pdf-collapsed, .editor-layout.pdf-unavailable { grid-template-rows: auto minmax(0, 1fr) auto; }
+  .mobile-source-toggle { display: flex; grid-row: 1; grid-column: 1; align-self: start; justify-self: end; z-index: 5; }
+  .source-panel .editor-panel-header { padding-right: 7rem; }
+  .pdf-collapsed .mobile-source-toggle { position: static; }
+  .pdf-unavailable .mobile-source-toggle { display: none; }
+  .editor-layout .panel-loading { min-height: 0; }
+}
+@media (max-width: 768px) {
+  .mobile-field-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; position: sticky; top: 0; z-index: 9; background: var(--paper, #fff); padding: .5rem 0; }
+  .mobile-field-navigation label { flex: 1; min-width: 100px; }
+  .editor-layout button, .editor-layout select { min-height: 44px; }
+  .editor-layout textarea { font-size: 16px; }
+  .editor-layout .proofread-textarea { min-height: 72px; }
+  .editor-layout .shortcut-hint, .editor-layout .field-progress-summary, .editor-layout .arbitration-summary { display: none; }
+  .editor-layout .editor-meta { position: static; padding: .3rem; margin-bottom: .3rem; }
+  .editor-layout .editor-panel-body--fields { padding: .5rem; }
+  .editor-layout .arbitration-source-grid { grid-template-columns: minmax(0, 1fr); }
+  .editor-layout .arbitration-submit-card { margin-top: .5rem; }
+}
+.workspace-navigation { display: none; }
+@media (max-width: 768px) {
+  .editor-layout, .editor-layout.has-keyboard, .editor-layout.pdf-collapsed, .editor-layout.pdf-unavailable { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+  .workspace-navigation { display: block; grid-column: 1; grid-row: 3; }
+  .editor-layout .keyboard-panel { grid-row: 4; }
+  .mobile-field-navigation { padding: .25rem; position: static; }
+  .editor-panel-header--task .editor-context > span { display: none; }
+  .editor-panel-header--task { padding: .4rem; }
+  .editor-panel-header--task .editor-toolbar { font-size: .8rem; }
+  .keyboard-dock-controls .btn { font-size: .85rem; }
+}
+.task-actions-menu > summary, .bulk-actions-menu > summary { display: none; }
+@media (max-width: 768px) {
+  .task-actions-menu > summary, .bulk-actions-menu > summary { display: list-item; cursor: pointer; padding: .65rem; min-height: 44px; }
+  .task-actions-menu .editor-toolbar { padding: .4rem; }
+  .editor-layout .arbitration-toolbar { padding: .5rem; }
+  .editor-layout .arbitration-toolbar p { display: none; }
+}
+.source-actions-menu > summary { display: none; }
+@media (max-width: 1100px) {
+  .source-actions-menu > summary { display: list-item; cursor: pointer; padding: .5rem; }
+  .source-panel .editor-panel-header { position: relative; min-height: 48px; padding-block: .2rem; }
+  .source-panel .editor-context > span { display: none; }
+  .source-actions-menu[open] .editor-toolbar { position: absolute; left: 0; top: 100%; z-index: 10; padding: .5rem; background: white; box-shadow: var(--shadow); }
+  .source-panel .editor-panel-body--pdf { overflow: hidden; }
+}
+.keyboard-section-switcher { display: flex; gap: .35rem; overflow-x: auto; padding-bottom: .4rem; position: sticky; top: 2.75rem; background: white; z-index: 2; }
+.keyboard-section-switcher button { flex: 0 0 auto; padding: .4rem .65rem; border: 1px solid var(--gray-200); border-radius: 6px; background: white; color: var(--ink); }
+.keyboard-section-switcher button[aria-pressed="true"] { background: var(--primary); border-color: var(--primary); color: white; }
+.keyboard-section-switcher span { opacity: .7; font-size: .75rem; }
+@media (max-width: 768px) {
+  .keyboard-panel .ipa-section-label { display: none; }
+  .keyboard-panel .ipa-keyboard-heading p { display: none; }
+  .keyboard-panel .ipa-keyboard-heading { min-height: 2.75rem; align-items: center; margin-bottom: .2rem; }
+  .keyboard-panel .ipa-section { margin: 0; }
 }

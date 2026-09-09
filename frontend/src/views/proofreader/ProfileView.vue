@@ -2,34 +2,56 @@
   <div class="container page">
     <div class="flex items-center justify-between mb-6">
       <div>
-        <h2 class="font-bold" style="font-size:1.5rem">个人主页</h2>
-        <p class="text-sm text-muted mt-1">查看你的校对参与情况与当前排行</p>
+        <h2 class="font-bold" style="font-size:1.5rem">个人中心</h2>
+        <p class="text-sm text-muted mt-1">管理个人资料，查看校对参与情况与当前排行</p>
       </div>
       <button class="btn btn-secondary btn-sm" @click="loadStats" :disabled="loading">
         {{ loading ? '刷新中...' : '刷新' }}
       </button>
     </div>
 
-    <div v-if="error" class="alert alert-error mb-4">{{ error }}</div>
-    <div v-if="loading" class="text-muted">加载中...</div>
+    <section class="card mb-6" aria-labelledby="profile-details-title">
+      <h3 id="profile-details-title" class="card-title">个人资料</h3>
+      <form @submit.prevent="saveProfile">
+        <div class="form-group">
+          <label for="profile-name" class="form-label">昵称</label>
+          <input id="profile-name" v-model="profile.name" class="form-control" autocomplete="nickname" required :disabled="savingProfile" />
+        </div>
+        <div class="form-group">
+          <label for="profile-email" class="form-label">邮箱（选填）</label>
+          <input id="profile-email" v-model.trim="profile.email" class="form-control" type="email" autocomplete="email" maxlength="255" :disabled="savingProfile" />
+          <p class="text-sm text-muted mt-1">修改邮箱后将标记为未验证。个人资料仅保存在方辑，不会修改外部账号。</p>
+        </div>
+        <div v-if="profileError" class="alert alert-error mb-4" role="alert">{{ profileError }}</div>
+        <div v-if="profileSuccess" class="alert alert-success mb-4" role="status">{{ profileSuccess }}</div>
+        <button type="submit" class="btn btn-primary" :disabled="savingProfile || !profile.name.trim()">{{ savingProfile ? '保存中...' : '保存资料' }}</button>
+      </form>
+    </section>
 
-    <template v-else>
+    <div v-if="error" class="alert alert-error mb-4" role="alert">
+      <p>{{ error }}</p>
+      <p v-if="stats" class="text-sm">下方保留上次成功加载的统计，可能不是最新结果。</p>
+      <p v-else class="text-sm">暂时无法显示统计；这不代表你的校对记录为零。</p>
+      <button class="btn btn-secondary btn-sm mt-3" :disabled="loading" @click="loadStats">重试统计</button>
+    </div>
+    <div v-if="loading && !stats" class="text-muted" role="status">正在加载统计…</div>
+
       <section class="profile-hero mb-6">
         <div>
           <div class="text-sm text-muted">账户名称</div>
           <div class="profile-name">{{ displayName }}</div>
         </div>
-        <div class="profile-rank">
+        <div v-if="stats" class="profile-rank">
           <span>一致率排行</span>
           <strong>{{ rankLabel(stats.accuracyRank) }}</strong>
         </div>
-        <div class="profile-rank">
+        <div v-if="stats" class="profile-rank">
           <span>条目排行</span>
           <strong>{{ rankLabel(stats.proofreadRank) }}</strong>
         </div>
       </section>
 
-      <section class="profile-stats">
+      <section v-if="stats" class="profile-stats" aria-label="校对统计">
         <div class="stat-card">
           <div class="stat-value">{{ stats.projectCount }}</div>
           <div class="stat-label">参加项目数</div>
@@ -50,7 +72,7 @@
 
       <section v-if="providers.length" class="card mt-6">
         <div class="card-title">统一身份绑定</div>
-        <p class="profile-note mb-4">绑定后可以使用外部账号登录方辑。方辑不会同步外部账号的姓名、邮箱或密码。</p>
+        <p class="profile-note mb-4">绑定后可以使用外部账号登录方辑。绑定不会覆盖你的方辑资料；新用户首次通过外部账号登录时会继承可用的昵称，邮箱与密码不会同步。</p>
         <div class="identity-list">
           <div v-for="provider in providers" :key="provider.id" class="identity-card">
             <div class="identity-heading">
@@ -93,35 +115,53 @@
           一致率按已完成系统比对的校对尝试计算；仍在等待其他独立结果的提交暂不进入分母。不一致记录会永久保留并计入统计。
         </div>
       </div>
-    </template>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
-import { bindExternalIdentity, currentUserId, listExternalProviders } from '@/services/authService'
+import { bindExternalIdentity, currentUserId, listExternalProviders, updateProfile } from '@/services/authService'
 import { getProofreaderProfileStats } from '@/services/proofreaderStatsService'
 import { formatPbError } from '@/utils/pbErrors'
 
 const auth = useAuthStore()
-const loading = ref(true)
+const profile = reactive({ name: auth.user?.name || '', email: auth.user?.email || '' })
+const savingProfile = ref(false)
+const profileError = ref('')
+const profileSuccess = ref('')
+
+async function saveProfile() {
+  if (savingProfile.value) return
+  profileError.value = ''
+  profileSuccess.value = ''
+  if (!profile.name.trim() || Array.from(profile.name.trim()).length > 255) {
+    profileError.value = '昵称不能为空且不能超过 255 个字符'
+    return
+  }
+  savingProfile.value = true
+  try {
+    const record = await updateProfile({ name: profile.name.trim(), email: profile.email.trim() })
+    profile.name = record.name || ''
+    profile.email = record.email || ''
+    profileSuccess.value = '个人资料已保存'
+  } catch (e) {
+    profileError.value = formatPbError('保存个人资料失败', e)
+  } finally {
+    savingProfile.value = false
+  }
+}
+
+const loading = ref(false)
 const error = ref('')
 const providers = ref([])
 const credentials = reactive({})
 const bindingProvider = ref('')
 const bindingError = reactive({})
-const stats = ref({
-  projectCount: 0,
-  proofreadCount: 0,
-  correctCount: 0,
-  accuracy: 0,
-  accuracyRank: null,
-  proofreadRank: null
-})
+const stats = ref(null)
 
 const displayName = computed(() => auth.user?.name || auth.user?.email || auth.user?.username || '校对员')
-const accuracyLabel = computed(() => `${stats.value.accuracy}%`)
+const accuracyLabel = computed(() => stats.value?.evaluatedCount ? `${stats.value.accuracy}%` : '暂无已评估结果')
 
 onMounted(async () => {
   await Promise.all([loadStats(), loadProviders()])
@@ -162,6 +202,7 @@ async function bindProvider(provider) {
 }
 
 async function loadStats() {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -169,7 +210,7 @@ async function loadStats() {
     if (!userId) throw new Error('登录状态已失效，请重新登录')
     stats.value = await getProofreaderProfileStats(userId)
   } catch (e) {
-    error.value = formatPbError('加载个人主页失败', e)
+    error.value = formatPbError('统计暂时无法加载', e)
   } finally {
     loading.value = false
   }

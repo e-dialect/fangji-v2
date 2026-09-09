@@ -1,0 +1,3 @@
+# Issue 57: profile statistics
+
+The 503 screenshot in #56 was an intentionally mocked failure, not evidence of a production outage. Verify the actual endpoint with a fresh database. Distinguish successful zero activity, no evaluated submissions, initial failure, refresh failure with stale data, and recovery. Keep account identity and external binding available independently. Do not rank users with zero submissions or unevaluated accuracy. Extend the existing phase1 integration test and exercise the Vue page with controlled responses and explicit failure injection; verify real statistics separately through the full backend workflow.

@@ -1,11 +1,16 @@
 <template>
-  <main class="editor-layout">
-    <section class="editor-panel" aria-labelledby="source-panel-title">
+  <main ref="workspace" class="editor-layout" :class="{ 'has-keyboard': keyboardAvailable, 'keyboard-open': keyboardOpen && !suspended, 'pdf-collapsed': sourceCollapsed, 'pdf-unavailable': !loading && !pdfLoading && !pdfUrl && !pdfError }" :style="viewportStyle" @pointerdown="onOutsidePointer">
+    <div class="mobile-source-toggle">
+      <button class="btn btn-secondary" @click="toggleSource">{{ sourceCollapsed ? '查看原文' : '收起原文' }}</button>
+    </div>
+    <section class="editor-panel source-panel" aria-labelledby="source-panel-title">
       <header class="editor-panel-header editor-panel-header--source">
         <div class="editor-context">
           <span>原文定位</span>
           <strong id="source-panel-title">PDF 第 {{ currentPdfPage }} 页</strong>
         </div>
+        <details class="source-actions-menu" :open="!compact">
+          <summary>页码</summary>
         <div class="editor-toolbar" aria-label="PDF 页码导航">
           <button
             class="btn btn-secondary btn-sm"
@@ -32,9 +37,10 @@
           >下一页</button>
           <RouterLink v-if="returnTo" :to="returnTo" class="btn btn-quiet btn-sm">{{ returnLabel }}</RouterLink>
         </div>
+        </details>
       </header>
       <div class="editor-panel-body editor-panel-body--pdf">
-        <div v-if="loading" class="panel-loading" aria-live="polite">正在加载原文…</div>
+        <div v-if="loading || pdfLoading" class="panel-loading" aria-live="polite">正在加载原文…</div>
         <div v-else-if="!page" class="alert alert-error">页面不存在</div>
         <div v-else-if="pdfError" class="alert alert-error editor-inline-alert">{{ pdfError }}</div>
         <template v-else>
@@ -42,8 +48,9 @@
           <PdfSinglePageViewer
             v-if="pdfUrl"
             :src="pdfUrl"
-            :page-number="currentPdfPage"
-            :watermark-user-id="watermarkUserId"
+            :page-number="localPdfPage"
+            :source-page-number="currentPdfPage"
+            :source-total-pages="totalPdfPages"
           />
           <div v-else class="empty-state">
             <div class="empty-state-mark" aria-hidden="true">PDF</div>
@@ -54,22 +61,35 @@
       </div>
     </section>
 
-    <section class="editor-panel" :aria-labelledby="contentLabelledBy">
+    <section class="editor-panel fields-panel" :aria-labelledby="contentLabelledBy">
       <slot name="panel-header"></slot>
       <div class="editor-panel-body editor-panel-body--fields">
-        <slot></slot>
+        <slot :input-mode="compact && keyboardOpen && !suspended ? 'none' : 'text'"></slot>
       </div>
     </section>
+    <div class="workspace-navigation"><slot name="navigation"></slot></div>
+    <aside v-show="keyboardAvailable" class="keyboard-panel" aria-label="项目字符键盘">
+      <div class="keyboard-dock-controls">
+        <button class="btn btn-secondary" :aria-expanded="keyboardOpen && !suspended" @click="openKeyboard">字符键盘</button>
+        <template v-if="keyboardOpen && !suspended">
+          <button class="btn btn-secondary" :aria-pressed="pinned" @click="pinned = !pinned">{{ pinned ? '取消钉住' : '钉住' }}</button>
+          <button class="btn btn-quiet" @click="closeKeyboard">系统输入 / 收起</button>
+        </template>
+      </div>
+      <div class="keyboard-dock-content"><slot name="keyboard"></slot></div>
+    </aside>
   </main>
 </template>
 
 <script setup>
-import { ref, toRef, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, toRef, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import PdfSinglePageViewer from '@/components/editor/PdfSinglePageViewer.vue'
 import { useProjectPdf } from '@/composables/useProjectPdf'
 
 const props = defineProps({
+  keyboardAvailable: { type: Boolean, default: false },
+  suspended: { type: Boolean, default: false },
   page: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   watermarkUserId: { type: String, default: '' },
@@ -82,14 +102,56 @@ const props = defineProps({
   }
 })
 
+const workspace = ref(null)
+const keyboardOpen = ref(false)
+const pinned = ref(false)
+const pdfCollapsed = ref(false)
+const compact = ref(false)
+const systemKeyboardOpen = ref(false)
+const viewportHeight = ref(0)
+const sourceCollapsed = computed(() => pdfCollapsed.value || ((keyboardOpen.value || systemKeyboardOpen.value) && !props.suspended))
+function toggleSource() {
+  const show = sourceCollapsed.value
+  keyboardOpen.value = false
+  if (show && document.activeElement?.tagName === 'TEXTAREA') document.activeElement.blur()
+  pdfCollapsed.value = !show
+}
+const viewportStyle = computed(() => compact.value && viewportHeight.value ? { height: `${viewportHeight.value}px` } : {})
+function updateViewport() {
+  compact.value = window.innerWidth <= 1100
+  const viewport = window.visualViewport
+  systemKeyboardOpen.value = Boolean(viewport && window.innerHeight - viewport.height > 150)
+  viewportHeight.value = Math.max(160, (viewport?.height || window.innerHeight) - Math.max(0, workspace.value?.getBoundingClientRect().top || 0))
+}
+function openKeyboard() {
+  if (props.suspended) return
+  if (document.activeElement?.tagName === 'TEXTAREA') document.activeElement.blur()
+  keyboardOpen.value = true
+}
+function closeKeyboard() { keyboardOpen.value = false; pinned.value = false }
+function onOutsidePointer(event) {
+  if (compact.value && !pinned.value && !event.target.closest('.keyboard-panel')) keyboardOpen.value = false
+}
+onMounted(() => {
+  updateViewport()
+  window.addEventListener('resize', updateViewport)
+  window.visualViewport?.addEventListener('resize', updateViewport)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewport)
+  window.visualViewport?.removeEventListener('resize', updateViewport)
+})
 const pdfPageInput = ref(1)
 const pageRef = toRef(props, 'page')
 const {
   pdfError,
+  pdfLoading,
   currentPdfPage,
   pdfPageWarning,
   allowedPdfPages,
   pdfUrl,
+  localPdfPage,
+  totalPdfPages,
   resetPdf,
   resolveProjectPdf,
   clampPdfPage,
@@ -108,6 +170,8 @@ watch(() => props.page?.id, async (pageId) => {
   pdfPageInput.value = currentPdfPage.value
   await resolveProjectPdf()
 }, { immediate: true })
+
+onBeforeUnmount(resetPdf)
 
 function applyPdfPageInput() {
   currentPdfPage.value = clampPdfPage(pdfPageInput.value)

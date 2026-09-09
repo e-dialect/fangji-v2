@@ -38,7 +38,7 @@ async function waitFor(path, token, terminalStatuses, timeoutMs = 20_000) {
   throw new Error(`Timed out waiting for ${path}`)
 }
 
-function minimalPdf(pageCount = 1) {
+function minimalPdf(pageCount = 1, paddingBytes = 0) {
   const objects = []
   objects[1] = '<< /Type /Catalog /Pages 2 0 R >>'
   const pageIds = Array.from({ length: pageCount }, (_, index) => 3 + index)
@@ -47,7 +47,8 @@ function minimalPdf(pageCount = 1) {
     const pageId = 3 + index
     const contentId = 3 + pageCount + index
     objects[pageId] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> /Contents ${contentId} 0 R >>`
-    objects[contentId] = '<< /Length 0 >>\nstream\n\nendstream'
+    const content = index === 0 ? ' '.repeat(paddingBytes) : ''
+    objects[contentId] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`
   }
 
   let output = '%PDF-1.4\n'
@@ -399,6 +400,35 @@ try {
   )
   assert.equal(corruptPdf.status, 'error')
   assert.equal(corruptPdf.error_code, 'PDF_DEEP_VALIDATION_FAILED')
+
+  if (process.env.TEST_LARGE_PDF === '1') {
+    // Pad a valid page content stream and recalculate xref offsets. Adjust
+    // for the variable-width PDF length/offset numbers to hit exact sizes.
+    for (const size of [80 * 1024 * 1024, 100 * 1024 * 1024, 100 * 1024 * 1024 + 1]) {
+      let padding = size - 1024
+      let source = minimalPdf(1, padding)
+      while (Buffer.byteLength(source) !== size) {
+        padding += size - Buffer.byteLength(source)
+        source = minimalPdf(1, padding)
+      }
+      const body = new FormData()
+      body.set('file', new Blob([source], { type: 'application/pdf' }), `large-${size}.pdf`)
+      const accepted = size <= 100 * 1024 * 1024
+      const record = await request(`/api/fangji/projects/${project.id}/files/pdf`, {
+        method: 'POST', token, body, expected: accepted ? 202 : 400
+      })
+      if (accepted) {
+        const pdf = await waitFor(`/api/collections/project_files/records/${record.id}`, token, ['ready', 'error'], 300_000)
+        assert.equal(pdf.status, 'ready', pdf.error_message)
+        assert.equal(pdf.file_size, size)
+        assert.equal(pdf.page_count, 1)
+        assert.equal(pdf.is_primary, true)
+      } else {
+        assert.match(record.message, /100 MB/)
+      }
+      console.log(`PDF size ${size} bytes: ${accepted ? 'ready' : 'rejected'} as expected`)
+    }
+  }
 
   const realPdfPath = process.env.REAL_PDF_PATH
   const realCsvPath = process.env.REAL_CSV_PATH
