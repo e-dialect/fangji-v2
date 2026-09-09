@@ -43,3 +43,10 @@ test('preserves useful server messages', () => {
     response: { message: '该条目已被其他校对员处理', data: {} }
   }, '提交失败'), '该条目已被其他校对员处理')
 })
+
+ test('proxy disconnects explain upload timeouts without masking PDF validation', () => {
+  for (const status of [400, 408, 502, 504]) {
+    assert.match(getUploadErrorMessage({status}, 'pdf'), /超时/)
+  }
+  assert.equal(getUploadErrorMessage({status:400,response:{message:'PDF 结构损坏'}}, 'pdf'), 'PDF 结构损坏')
+})

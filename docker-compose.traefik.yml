@@ -1,3 +1,5 @@
+# Large uploads also require the shared Traefik entrypoint readTimeout=600s.
+# See docs/operations.md and ops/prepare_upload_timeout.py; router labels cannot set it.
 services:
   backend:
     build: ./backend

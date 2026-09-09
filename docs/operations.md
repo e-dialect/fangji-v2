@@ -64,3 +64,41 @@ python3 backend/ops/backup.py restore /secure-backups/fangji-20260909 ./pb_data-
 验证数据库记录和全部文件 SHA-256 一致；损坏备份、软链接及覆盖现有数据均被拒绝。
 这是可重复的离线工具演练，不等同于实际服务器的容量、异地传输及通知链路验收。
 部署者仍须测量实际 RPO/RTO，验证容器非 root/最小权限和异地恢复。
+
+## 大 PDF 首次上传在 60 秒附近失败
+
+100 MiB 的容量上限不代表允许传输足够久。Traefik 的入口
+`transport.respondingTimeouts.readTimeout` 默认 60 秒，计时包含整个请求体。
+慢速上传会在到达 PocketBase 前断开；Nginx 常记录空响应的 400，后端没有对应
+`upload_received`。同一文件重试若恰好在 60 秒以内传完就会成功。
+
+在 **Traefik 自身的静态配置**中保留其他设置并合入：
+
+```yaml
+entryPoints:
+  websecure:
+    transport:
+      respondingTimeouts:
+        readTimeout: 600s
+```
+
+JSON 部署可生成待审查文件（不要将输出重定向到输入文件）：
+
+```sh
+python3 ops/prepare_upload_timeout.py /path/to/traefik.json > /tmp/traefik-upload.json
+diff -u /path/to/traefik.json /tmp/traefik-upload.json
+```
+
+备份原配置后替换为生成文件，并按基础设施的启动方式重建/重启 Traefik。
+如果基础设施有配置生成器，同时修改生成源，避免下次部署覆盖。
+这个入口可能由多个站点共享，变更会允许它们的上传连接占用至多 10 分钟；
+不使用无限超时。回滚为备份文件并重启 Traefik 即可，无数据库迁移。
+仅重建方辑容器或设置 router 的 `serversTransport` **不能**改变入口读取超时。
+
+验证：在测试项目以约 1 MiB/s 上传一份 80 MiB PDF，确认耗时超过 60 秒仍返回
+202，随后文件状态为 ready；并验证超限文件仍返回 413、无权限用户仍被拒绝。
+部署后的日志应同时出现 Nginx 202 和后端 upload_accepted/pdf_ready。
+生产故障证据：首次约 60 秒中断且后端无记录，第二次约 55 秒传输成功；
+校验本身不到一秒。无需重复上传来“预热”PDF 校验器。
+
+参考：[Traefik 入口 respondingTimeouts](https://doc.traefik.io/traefik/v3.3/routing/entrypoints/#respondingtimeouts)。
