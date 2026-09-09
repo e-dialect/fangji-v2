@@ -39,7 +39,7 @@ import (
 
 const (
 	maxCSVBytes          = 50 * 1024 * 1024
-	maxPDFBytes          = 50 * 1024 * 1024
+	maxPDFBytes          = 100 * 1024 * 1024
 	batchSize            = 250
 	artifactCleanupBatch = 500
 	pdfValidator         = "pdfcpu v0.8.1"
@@ -138,7 +138,7 @@ func (s *importService) register() {
 		e.Router.POST(
 			"/api/fangji/projects/:projectId/files/pdf",
 			s.uploadPDF,
-			middleware.BodyLimit(51*1024*1024),
+			middleware.BodyLimit(maxPDFBytes+1024*1024), // Allow multipart framing.
 			apis.RequireRecordAuth("users"),
 		)
 
