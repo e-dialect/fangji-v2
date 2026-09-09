@@ -42,6 +42,7 @@ func main() {
 	})
 	registerTrustedClientIP(app)
 	registerProfile(app)
+	registerJoinAttemptCleanup(app)
 
 	if err := registerKeyboardPresets(app); err != nil {
 		log.Fatal(err)
