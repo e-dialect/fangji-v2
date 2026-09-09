@@ -6,10 +6,19 @@ const assert = require('node:assert/strict');
  const type=process.env.BROWSER||'chromium';
  const browser=await ({chromium,firefox,webkit}[type]).launch(type==='chromium'?{channel:'chrome',headless:true}:{headless:true});
  const page=await browser.newPage({viewport:{width:1100,height:800}});
- const requests=[];page.on('request',r=>{if(r.url().endsWith('.woff2'))requests.push(r.url())});
+ const phoneticRequests=[];
+ page.on('request',r=>{if(new URL(r.url()).pathname.startsWith('/fonts/phonetic/') && new URL(r.url()).pathname.endsWith('.woff2'))phoneticRequests.push(r.url())});
+ const requests=[];page.on('request',r=>{if(new URL(r.url()).pathname.startsWith('/fonts/rare-han/') && new URL(r.url()).pathname.endsWith('.woff2'))requests.push(r.url())});
  await page.goto(`${origin}/login`);
  await page.evaluate(()=>document.fonts.ready);
- assert.equal(requests.length,0,'ordinary login requested fallback fonts');
+ assert.equal(requests.length,0,'ordinary login requested Han fallback fonts');
+ await page.evaluate(async()=>{
+  await document.fonts.load('24px "Fangji Phonetic"','ɑ');
+  await document.fonts.load('24px "Fangji Phonetic"','①');
+ });
+ assert(phoneticRequests.some(url=>/\/phonetic-[a-f0-9]{12}\.woff2$/.test(url)), 'phonetic subset was not requested');
+ assert(phoneticRequests.some(url=>/\/symbols-[a-f0-9]{12}\.woff2$/.test(url)), 'symbols subset was not requested');
+ assert.equal(requests.length,0,'phonetic specimen requested Han shards');
  // Use the actual compiled app stylesheet; force its fallback family in the
  // specimen so installed system fonts cannot hide missing fallback glyphs.
  await page.evaluate(()=>{
@@ -33,7 +42,7 @@ const assert = require('node:assert/strict');
  await page.screenshot({path:`${output}/rare-characters-${type}-mobile.png`,fullPage:true});
  // Test the real Vue notice using Vite's modules and failed network requests.
  const blocked=await browser.newPage();
- await blocked.route('**/*.woff2',r=>r.abort());
+ await blocked.route('**/fonts/rare-han/*.woff2',r=>r.abort());
  await blocked.goto(`${origin}/login`);
  await blocked.evaluate(async()=>{
   const {createApp}=await import('/node_modules/.vite/deps/vue.js');
@@ -44,5 +53,5 @@ const assert = require('node:assert/strict');
  await blocked.getByRole('status').waitFor();
  assert.match(await blocked.getByRole('status').innerText(),/U\+22D80/);
  await blocked.screenshot({path:`${output}/rare-characters-${type}-failure.png`,fullPage:true});
- await browser.close();console.log(type+': ordinary-page zero requests, 5 glyphs/5 subsets, editable text, mobile and failure notice passed.');
+ await browser.close();console.log(type+': ordinary-page zero Han requests, 5 glyphs/5 subsets, editable text, mobile and failure notice passed.');
 })().catch(e=>{console.error(e);process.exit(1)});
