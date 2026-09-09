@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "hinghwa-dialect",
   "name": "莆仙方言键盘",
-  "description": "合并莆仙方言 IPA、大词典拼音方案与平话字（BUC）字符。",
+  "description": "莆仙方言 IPA、大词典拼音、平话字（BUC）、汉语拼音补充与词典特殊符号。",
   "sections": [
     {
       "id": "consonants",
@@ -11,7 +11,7 @@
       "keys": [
         { "value": "ʰ" }, { "value": "ʦ" }, { "value": "ɬ" }, { "value": "θ" },
         { "value": "ŋ" }, { "value": "β" }, { "value": "ɣ" }, { "value": "ʔ" },
-        { "value": "Ø" }
+        { "value": "Ø" }, { "value": "Ǿ" }, { "value": "ɡ" }
       ]
     },
     {
@@ -21,7 +21,7 @@
       "keys": [
         { "value": "ɛ" }, { "value": "ø" }, { "value": "ɒ" }, { "value": "œ" },
         { "value": "ɵ" }, { "value": "ə" }, { "value": "ɯ" }, { "value": "ɐ" },
-        { "value": "æ" }, { "value": "ᴇ" }, { "value": "ɤ" }
+        { "value": "æ" }, { "value": "ᴇ" }, { "value": "ɤ" }, { "value": "ɑ" }, { "value": "ɔ" }
       ]
     },
     {
@@ -86,6 +86,86 @@
         { "value": "O̤" }, { "value": "Ó̤" }, { "value": "Ô̤" }, { "value": "O̤̍" }, { "value": "Ō̤" },
         { "value": "Ṳ" }, { "value": "Ṳ́" }, { "value": "Ṳ̂" }, { "value": "Ṳ̍" }, { "value": "Ṳ̄" },
         { "value": "Ń" }, { "value": "N̂" }, { "value": "N̍" }, { "value": "N̄" }
+      ]
+    },
+    {
+      "id": "mandarin-tones",
+      "label": "汉语拼音补充",
+      "defaultOpen": false,
+      "keys": [
+        {"value": "à"},
+        {"value": "è"},
+        {"value": "ì"},
+        {"value": "ò"},
+        {"value": "ù"},
+        {"value": "ě"},
+        {"value": "ǎ"},
+        {"value": "ǐ"},
+        {"value": "ǒ"},
+        {"value": "ǔ"},
+        {"value": "ǘ"},
+        {"value": "ǚ"},
+        {"value": "ǜ"}
+      ]
+    },
+    {
+      "id": "combining-marks",
+      "label": "组合附标",
+      "defaultOpen": false,
+      "keys": [
+        {"value": "̃", "label": "◌̃", "hint": "插入组合附标 U+0303（仅附标，不含虚线圆）"},
+        {"value": "̆", "label": "◌̆", "hint": "插入组合附标 U+0306（仅附标，不含虚线圆）"},
+        {"value": "̌", "label": "◌̌", "hint": "插入组合附标 U+030C（仅附标，不含虚线圆）"},
+        {"value": "̣", "label": "◌̣", "hint": "插入组合附标 U+0323（仅附标，不含虚线圆）"},
+        {"value": "̩", "label": "◌̩", "hint": "插入组合附标 U+0329（仅附标，不含虚线圆）"}
+      ]
+    },
+    {
+      "id": "dictionary-symbols",
+      "label": "词典符号",
+      "defaultOpen": false,
+      "keys": [
+        {"value": "〔"},
+        {"value": "〕"},
+        {"value": "‖"},
+        {"value": "∣"},
+        {"value": "■"},
+        {"value": "▲"},
+        {"value": "◆"},
+        {"value": "●"},
+        {"value": "×"},
+        {"value": "·"},
+        {"value": "〈"},
+        {"value": "〉"},
+        {"value": "［"},
+        {"value": "］"},
+        {"value": "﹑"},
+        {"value": "－"},
+        {"value": "―"},
+        {"value": "—"},
+        {"value": "～"},
+        {"value": "５"}
+      ]
+    },
+    {
+      "id": "sense-numbers",
+      "label": "义项圈号",
+      "defaultOpen": false,
+      "keys": [
+        {"value": "①"},
+        {"value": "②"},
+        {"value": "③"},
+        {"value": "④"},
+        {"value": "⑤"},
+        {"value": "⑥"},
+        {"value": "⑦"},
+        {"value": "⑧"},
+        {"value": "⑨"},
+        {"value": "⑩"},
+        {"value": "⑪"},
+        {"value": "⑫"},
+        {"value": "⑬"},
+        {"value": "⑭"}
       ]
     }
   ]
