@@ -62,7 +62,7 @@ python3 backend/tests/run_integration.py task_leases_integration.mjs
 每个命令会构建后端、在新临时目录按数字顺序执行全部迁移、启动测试服务，并在成功或失败后停止服务、删除数据。
 失败时输出测试名称和后端日志尾部；测试身份均为临时身份。Go 缓存按 `backend/go.sum`、npm 缓存按锁文件管理；数据库不缓存。
 这些检查和现有 Frontend、Containers、Backend Unicode workflow 及其他集成检查均须通过后才能合并。
-仓库允许分支保护后，将相同检查设为 required checks；当前无保护时继续执行下文的人工合并门禁。
+main 已启用分支保护，现有 7 项 CI 为 required checks；本 PR 的 Core workflow 合并进入 main 后，将新矩阵检查加入 required checks。
 
 ## PocketBase 与数据迁移
 
@@ -84,7 +84,7 @@ PR 应当：
 
 ## 当前合并政策
 
-仓库当前无法依赖分支保护强制 required checks，因此由维护者执行人工门禁：
+main 已启用严格状态检查、至少一次批准、解决讨论以及禁止强推/删除，管理员同样受限制。维护者还需执行以下人工门禁：
 
 1. PR 必须基于当前目标分支，所有可用 checks 通过。
 2. `REQUEST_CHANGES` 和未解决的阻断讨论必须先处理。
