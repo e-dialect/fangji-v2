@@ -2,7 +2,7 @@
 
 The built-in `hinghwa-dialect` preset includes IPA additions (Ǿ, ɑ, ɡ, ɔ), missing
 Mandarin tone letters, standalone combining marks, dictionary punctuation and
-circled sense numbers. New groups are collapsed by default. Existing project
+circled sense numbers. Only the 24-key common-proofreading group opens by default; other groups are collapsed. Existing project
 links and keyboard IDs are unchanged; preset synchronization updates the definition
 on server start without a migration. Dotted circles appear only in mark labels.
 
@@ -32,3 +32,24 @@ Frontend tests check exact insertion and JSON/UTF-8 CSV round trips; backend
 Unicode integration checks import, proofreading, arbitration, export and restart
 persistence using synthetic symbol sequences. Browser tests use the real preset
 in both proofreading and arbitration, on desktop and mobile viewports.
+
+## Group order and correction workflow
+
+The fixed order is common proofreading, nasalized vowels, IPA vowels, consonants
+and notation, dictionary romanization, dictionary marks, circled sense numbers,
+superscript tones, combining marks, Mandarin pinyin, BUC lowercase and BUC uppercase.
+The mobile initial tab and the sole initially expanded desktop group are both
+common proofreading. This prioritizes frequent correction tasks without moving
+keys around as a person types.
+
+Frequency comes from the two local CSVs; likely OCR difficulty comes from the
+maintainer's experience. Frequency is not an estimated OCR error rate. Nasalized
+letters are prominent, while Mandarin and BUC remain available by category.
+Mandarin pinyin is organized by a/e/i/o/u/ü and tones 1–4, plus standalone ü.
+
+All previous insertion values are preserved byte-for-byte. The shortcut group
+reuses full-category values, and the total counts distinct insertion values.
+Precomposed and decomposed spellings are not normalized. The only added value in
+the regrouping is ǖ. Font rebuilding includes it. Similar glyphs have explicit
+identification hints; combining-mark labels use a dotted circle but insert only
+the mark after the preceding letter.

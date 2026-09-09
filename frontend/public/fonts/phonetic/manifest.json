@@ -2,8 +2,8 @@
   "upstream": "Charis 7.000",
   "source": "https://github.com/silnrsi/font-charis/releases/tag/v7.000",
   "sha256": "c03738834bd3a43c3e4a59b11878bd6ede3ee505998242ae649ed1f9cd2edcf6",
-  "file": "phonetic-35fcaec95d01.woff2",
-  "bytes": 24984,
+  "file": "phonetic-93215b527a9b.woff2",
+  "bytes": 25004,
   "codepoints": [
     32,
     33,
@@ -158,6 +158,7 @@
     464,
     466,
     468,
+    470,
     472,
     474,
     476,

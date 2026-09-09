@@ -2,149 +2,71 @@
   "schemaVersion": 1,
   "id": "hinghwa-dialect",
   "name": "莆仙方言键盘",
-  "description": "莆仙方言 IPA、大词典拼音、平话字（BUC）、汉语拼音补充与词典特殊符号。",
+  "description": "常用校对优先收录鼻化、易混音标与词典标记；其他字符按类别查找。",
   "sections": [
     {
-      "id": "consonants",
-      "label": "辅音",
+      "id": "common-proofreading",
+      "label": "常用校对",
       "defaultOpen": true,
       "keys": [
-        { "value": "ʰ" }, { "value": "ʦ" }, { "value": "ɬ" }, { "value": "θ" },
-        { "value": "ŋ" }, { "value": "β" }, { "value": "ɣ" }, { "value": "ʔ" },
-        { "value": "Ø" }, { "value": "Ǿ" }, { "value": "ɡ" }
-      ]
-    },
-    {
-      "id": "vowels",
-      "label": "元音",
-      "defaultOpen": true,
-      "keys": [
-        { "value": "ɛ" }, { "value": "ø" }, { "value": "ɒ" }, { "value": "œ" },
-        { "value": "ɵ" }, { "value": "ə" }, { "value": "ɯ" }, { "value": "ɐ" },
-        { "value": "æ" }, { "value": "ᴇ" }, { "value": "ɤ" }, { "value": "ɑ" }, { "value": "ɔ" }
+        {"value": "ã"}, {"value": "ĩ"}, {"value": "ũ"}, {"value": "ɒ̃"},
+        {"value": "ỹ"}, {"value": "ñ"}, {"value": "ɑ", "hint": "插入 ɑ（音标，区别于普通 a；U+0251）"}, {"value": "ɒ"},
+        {"value": "ɔ"}, {"value": "ɛ"}, {"value": "ø"}, {"value": "œ"},
+        {"value": "ɬ"}, {"value": "ŋ"}, {"value": "ʔ"}, {"value": "Ǿ", "hint": "插入 Ǿ（比 Ø 多一个上方锐音符；U+01FE）"},
+        {"value": "ɡ", "hint": "插入 ɡ（音标，区别于普通 g；U+0261）"}, {"value": "〔"}, {"value": "〕"}, {"value": "‖"},
+        {"value": "∣", "hint": "插入 ∣（区别于键盘竖线 |；U+2223）"}, {"value": "①"}, {"value": "②"}, {"value": "～"}
       ]
     },
     {
       "id": "nasalized",
-      "label": "鼻化",
+      "label": "鼻化韵母",
       "defaultOpen": false,
       "keys": [
-        { "value": "ã" }, { "value": "ẽ" }, { "value": "ĩ" }, { "value": "ø̃" },
-        { "value": "ỹ" }, { "value": "ɒ̃" }, { "value": "ũ" }, { "value": "ɔ̃" },
-        { "value": "ɛ̃" }, { "value": "œ̃" }, { "value": "ɐ̃" }, { "value": "õ" }
+        {"value": "ã"}, {"value": "ĩ"}, {"value": "ũ"}, {"value": "ɒ̃"},
+        {"value": "ỹ"}, {"value": "ø̃"}, {"value": "ɛ̃"}, {"value": "œ̃"},
+        {"value": "ɔ̃"}, {"value": "ẽ"}, {"value": "õ"}, {"value": "ɐ̃"}
       ]
     },
     {
-      "id": "superscript-digits",
-      "label": "数字上标",
-      "defaultOpen": true,
+      "id": "vowels",
+      "label": "元音音标",
+      "defaultOpen": false,
       "keys": [
-        { "value": "⁰" }, { "value": "¹" }, { "value": "²" }, { "value": "³" },
-        { "value": "⁴" }, { "value": "⁵" }, { "value": "⁶" }, { "value": "⁷" },
-        { "value": "⁸" }
+        {"value": "ɑ", "hint": "插入 ɑ（音标，区别于普通 a；U+0251）"}, {"value": "ɒ"}, {"value": "ɔ"}, {"value": "ø"},
+        {"value": "œ"}, {"value": "ɛ"}, {"value": "ə"}, {"value": "ɐ"},
+        {"value": "æ"}, {"value": "ɵ"}, {"value": "ɯ"}, {"value": "ᴇ"},
+        {"value": "ɤ"}
+      ]
+    },
+    {
+      "id": "consonants",
+      "label": "辅音与记号",
+      "defaultOpen": false,
+      "keys": [
+        {"value": "ŋ"}, {"value": "ɬ"}, {"value": "ʔ"}, {"value": "ɡ", "hint": "插入 ɡ（音标，区别于普通 g；U+0261）"},
+        {"value": "ʦ"}, {"value": "ʰ"}, {"value": "β"}, {"value": "ɣ"},
+        {"value": "θ"}, {"value": "Ø", "hint": "插入 Ø（上方无锐音符，与 Ǿ 区分；U+00D8）"}, {"value": "Ǿ", "hint": "插入 Ǿ（比 Ø 多一个上方锐音符；U+01FE）"}
       ]
     },
     {
       "id": "dictionary-romanization",
-      "label": "大词典拼音方案",
+      "label": "大词典拼音",
       "defaultOpen": false,
       "keys": [
-        { "value": "ü" }, { "value": "ñ" }, { "value": "ệ" },
-        { "value": "ẹ" }, { "value": "ê" }, { "value": "ô" }
-      ]
-    },
-    {
-      "id": "buc-lowercase",
-      "label": "平话字 (BUC) — 小写",
-      "defaultOpen": false,
-      "keys": [
-        { "value": "á" }, { "value": "â" }, { "value": "a̍" }, { "value": "ā" },
-        { "value": "é" }, { "value": "ê" }, { "value": "e̍" }, { "value": "ē" },
-        { "value": "í" }, { "value": "î" }, { "value": "i̍" }, { "value": "ī" },
-        { "value": "ó" }, { "value": "ô" }, { "value": "o̍" }, { "value": "ō" },
-        { "value": "ú" }, { "value": "û" }, { "value": "u̍" }, { "value": "ū" },
-        { "value": "a̤" }, { "value": "á̤" }, { "value": "â̤" }, { "value": "a̤̍" }, { "value": "ā̤" },
-        { "value": "e̤" }, { "value": "é̤" }, { "value": "ê̤" }, { "value": "e̤̍" }, { "value": "ē̤" },
-        { "value": "o̤" }, { "value": "ó̤" }, { "value": "ô̤" }, { "value": "o̤̍" }, { "value": "ō̤" },
-        { "value": "ṳ" }, { "value": "ṳ́" }, { "value": "ṳ̂" }, { "value": "ṳ̍" }, { "value": "ṳ̄" },
-        { "value": "ń" }, { "value": "n̂" }, { "value": "n̍" }, { "value": "n̄" },
-        { "value": "ⁿ" }, { "value": "ᴺ" }
-      ]
-    },
-    {
-      "id": "buc-uppercase",
-      "label": "平话字 (BUC) — 大写",
-      "defaultOpen": false,
-      "keys": [
-        { "value": "Á" }, { "value": "Â" }, { "value": "A̍" }, { "value": "Ā" },
-        { "value": "É" }, { "value": "Ê" }, { "value": "E̍" }, { "value": "Ē" },
-        { "value": "Í" }, { "value": "Î" }, { "value": "I̍" }, { "value": "Ī" },
-        { "value": "Ó" }, { "value": "Ô" }, { "value": "O̍" }, { "value": "Ō" },
-        { "value": "Ú" }, { "value": "Û" }, { "value": "U̍" }, { "value": "Ū" },
-        { "value": "A̤" }, { "value": "Á̤" }, { "value": "Â̤" }, { "value": "A̤̍" }, { "value": "Ā̤" },
-        { "value": "E̤" }, { "value": "É̤" }, { "value": "Ê̤" }, { "value": "E̤̍" }, { "value": "Ē̤" },
-        { "value": "O̤" }, { "value": "Ó̤" }, { "value": "Ô̤" }, { "value": "O̤̍" }, { "value": "Ō̤" },
-        { "value": "Ṳ" }, { "value": "Ṳ́" }, { "value": "Ṳ̂" }, { "value": "Ṳ̍" }, { "value": "Ṳ̄" },
-        { "value": "Ń" }, { "value": "N̂" }, { "value": "N̍" }, { "value": "N̄" }
-      ]
-    },
-    {
-      "id": "mandarin-tones",
-      "label": "汉语拼音补充",
-      "defaultOpen": false,
-      "keys": [
-        {"value": "à"},
-        {"value": "è"},
-        {"value": "ì"},
-        {"value": "ò"},
-        {"value": "ù"},
-        {"value": "ě"},
-        {"value": "ǎ"},
-        {"value": "ǐ"},
-        {"value": "ǒ"},
-        {"value": "ǔ"},
-        {"value": "ǘ"},
-        {"value": "ǚ"},
-        {"value": "ǜ"}
-      ]
-    },
-    {
-      "id": "combining-marks",
-      "label": "组合附标",
-      "defaultOpen": false,
-      "keys": [
-        {"value": "̃", "label": "◌̃", "hint": "插入组合附标 U+0303（仅附标，不含虚线圆）"},
-        {"value": "̆", "label": "◌̆", "hint": "插入组合附标 U+0306（仅附标，不含虚线圆）"},
-        {"value": "̌", "label": "◌̌", "hint": "插入组合附标 U+030C（仅附标，不含虚线圆）"},
-        {"value": "̣", "label": "◌̣", "hint": "插入组合附标 U+0323（仅附标，不含虚线圆）"},
-        {"value": "̩", "label": "◌̩", "hint": "插入组合附标 U+0329（仅附标，不含虚线圆）"}
+        {"value": "ñ"}, {"value": "ü"}, {"value": "ệ"}, {"value": "ẹ"},
+        {"value": "ê"}, {"value": "ô"}
       ]
     },
     {
       "id": "dictionary-symbols",
-      "label": "词典符号",
+      "label": "词典标记",
       "defaultOpen": false,
       "keys": [
-        {"value": "〔"},
-        {"value": "〕"},
-        {"value": "‖"},
-        {"value": "∣"},
-        {"value": "■"},
-        {"value": "▲"},
-        {"value": "◆"},
-        {"value": "●"},
-        {"value": "×"},
-        {"value": "·"},
-        {"value": "〈"},
-        {"value": "〉"},
-        {"value": "［"},
-        {"value": "］"},
-        {"value": "﹑"},
-        {"value": "－"},
-        {"value": "―"},
-        {"value": "—"},
-        {"value": "～"},
-        {"value": "５"}
+        {"value": "〔"}, {"value": "〕"}, {"value": "〈"}, {"value": "〉"},
+        {"value": "［"}, {"value": "］"}, {"value": "‖"}, {"value": "∣", "hint": "插入 ∣（区别于键盘竖线 |；U+2223）"},
+        {"value": "～"}, {"value": "■"}, {"value": "▲"}, {"value": "◆"},
+        {"value": "●"}, {"value": "×"}, {"value": "·"}, {"value": "﹑"},
+        {"value": "－"}, {"value": "―"}, {"value": "—"}, {"value": "５"}
       ]
     },
     {
@@ -152,20 +74,80 @@
       "label": "义项圈号",
       "defaultOpen": false,
       "keys": [
-        {"value": "①"},
-        {"value": "②"},
-        {"value": "③"},
-        {"value": "④"},
-        {"value": "⑤"},
-        {"value": "⑥"},
-        {"value": "⑦"},
-        {"value": "⑧"},
-        {"value": "⑨"},
-        {"value": "⑩"},
-        {"value": "⑪"},
-        {"value": "⑫"},
-        {"value": "⑬"},
-        {"value": "⑭"}
+        {"value": "①"}, {"value": "②"}, {"value": "③"}, {"value": "④"},
+        {"value": "⑤"}, {"value": "⑥"}, {"value": "⑦"}, {"value": "⑧"},
+        {"value": "⑨"}, {"value": "⑩"}, {"value": "⑪"}, {"value": "⑫"},
+        {"value": "⑬"}, {"value": "⑭"}
+      ]
+    },
+    {
+      "id": "superscript-digits",
+      "label": "声调上标",
+      "defaultOpen": false,
+      "keys": [
+        {"value": "⁰"}, {"value": "¹"}, {"value": "²"}, {"value": "³"},
+        {"value": "⁴"}, {"value": "⁵"}, {"value": "⁶"}, {"value": "⁷"},
+        {"value": "⁸"}
+      ]
+    },
+    {
+      "id": "combining-marks",
+      "label": "组合附标",
+      "defaultOpen": false,
+      "keys": [
+        {"value": "̃", "label": "◌̃", "hint": "插入组合附标，加在前一个字母上（U+0303；不含虚线圆）"}, {"value": "̆", "label": "◌̆", "hint": "插入组合附标，加在前一个字母上（U+0306；不含虚线圆）"}, {"value": "̌", "label": "◌̌", "hint": "插入组合附标，加在前一个字母上（U+030C；不含虚线圆）"}, {"value": "̣", "label": "◌̣", "hint": "插入组合附标，加在前一个字母上（U+0323；不含虚线圆）"},
+        {"value": "̩", "label": "◌̩", "hint": "插入组合附标，加在前一个字母上（U+0329；不含虚线圆）"}
+      ]
+    },
+    {
+      "id": "mandarin-tones",
+      "label": "汉语拼音",
+      "defaultOpen": false,
+      "keys": [
+        {"value": "ā"}, {"value": "á"}, {"value": "ǎ"}, {"value": "à"},
+        {"value": "ē"}, {"value": "é"}, {"value": "ě"}, {"value": "è"},
+        {"value": "ī"}, {"value": "í"}, {"value": "ǐ"}, {"value": "ì"},
+        {"value": "ō"}, {"value": "ó"}, {"value": "ǒ"}, {"value": "ò"},
+        {"value": "ū"}, {"value": "ú"}, {"value": "ǔ"}, {"value": "ù"},
+        {"value": "ǖ"}, {"value": "ǘ"}, {"value": "ǚ"}, {"value": "ǜ"},
+        {"value": "ü"}
+      ]
+    },
+    {
+      "id": "buc-lowercase",
+      "label": "平话字·小写",
+      "defaultOpen": false,
+      "keys": [
+        {"value": "á"}, {"value": "â"}, {"value": "a̍"}, {"value": "ā"},
+        {"value": "é"}, {"value": "ê"}, {"value": "e̍"}, {"value": "ē"},
+        {"value": "í"}, {"value": "î"}, {"value": "i̍"}, {"value": "ī"},
+        {"value": "ó"}, {"value": "ô"}, {"value": "o̍"}, {"value": "ō"},
+        {"value": "ú"}, {"value": "û"}, {"value": "u̍"}, {"value": "ū"},
+        {"value": "a̤"}, {"value": "á̤"}, {"value": "â̤"}, {"value": "a̤̍"},
+        {"value": "ā̤"}, {"value": "e̤"}, {"value": "é̤"}, {"value": "ê̤"},
+        {"value": "e̤̍"}, {"value": "ē̤"}, {"value": "o̤"}, {"value": "ó̤"},
+        {"value": "ô̤"}, {"value": "o̤̍"}, {"value": "ō̤"}, {"value": "ṳ"},
+        {"value": "ṳ́"}, {"value": "ṳ̂"}, {"value": "ṳ̍"}, {"value": "ṳ̄"},
+        {"value": "ń"}, {"value": "n̂"}, {"value": "n̍"}, {"value": "n̄"},
+        {"value": "ⁿ"}, {"value": "ᴺ"}
+      ]
+    },
+    {
+      "id": "buc-uppercase",
+      "label": "平话字·大写",
+      "defaultOpen": false,
+      "keys": [
+        {"value": "Á"}, {"value": "Â"}, {"value": "A̍"}, {"value": "Ā"},
+        {"value": "É"}, {"value": "Ê"}, {"value": "E̍"}, {"value": "Ē"},
+        {"value": "Í"}, {"value": "Î"}, {"value": "I̍"}, {"value": "Ī"},
+        {"value": "Ó"}, {"value": "Ô"}, {"value": "O̍"}, {"value": "Ō"},
+        {"value": "Ú"}, {"value": "Û"}, {"value": "U̍"}, {"value": "Ū"},
+        {"value": "A̤"}, {"value": "Á̤"}, {"value": "Â̤"}, {"value": "A̤̍"},
+        {"value": "Ā̤"}, {"value": "E̤"}, {"value": "É̤"}, {"value": "Ê̤"},
+        {"value": "E̤̍"}, {"value": "Ē̤"}, {"value": "O̤"}, {"value": "Ó̤"},
+        {"value": "Ô̤"}, {"value": "O̤̍"}, {"value": "Ō̤"}, {"value": "Ṳ"},
+        {"value": "Ṳ́"}, {"value": "Ṳ̂"}, {"value": "Ṳ̍"}, {"value": "Ṳ̄"},
+        {"value": "Ń"}, {"value": "N̂"}, {"value": "N̍"}, {"value": "N̄"}
       ]
     }
   ]

@@ -25,8 +25,8 @@ func TestEmbeddedKeyboardPresetsAreValid(t *testing.T) {
 	if preset.Definition.Name != "莆仙方言键盘" {
 		t.Fatalf("unexpected preset name %q", preset.Definition.Name)
 	}
-	if len(preset.Definition.Sections) != 11 {
-		t.Fatalf("expected 11 sections, got %d", len(preset.Definition.Sections))
+	if len(preset.Definition.Sections) != 12 {
+		t.Fatalf("expected 12 sections, got %d", len(preset.Definition.Sections))
 	}
 }
 
