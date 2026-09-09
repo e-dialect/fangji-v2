@@ -362,26 +362,36 @@ const keyboardAvailable = ref(false)
 const { index: fieldIndex, overview, mobile, current: currentField, select: selectField, next: nextField } = useFieldNavigation(visibleHeaders, () => casePage.value?.id)
 const fieldSelections = new Map()
 watch(() => casePage.value?.id, () => { fieldSelections.clear(); keyboardAvailable.value = false })
-watch(currentField, (field, previous) => {
-  if (previous && activeSelection.value.field === previous) fieldSelections.set(previous, { ...activeSelection.value })
+watch([currentField, mobile], ([field]) => {
   if (field) activeSelection.value = fieldSelections.get(field) || { field, start: null, end: null }
 })
 
 function rememberSelection(header, event) {
   const target = event?.target
-  activeSelection.value = {
+  const selection = {
     field: header,
     start: Number.isInteger(target?.selectionStart) ? target.selectionStart : null,
     end: Number.isInteger(target?.selectionEnd) ? target.selectionEnd : null
   }
+  fieldSelections.set(header, selection)
+  if (mobile.value && header !== currentField.value) return
+  activeSelection.value = selection
+  if (!mobile.value) {
+    const index = visibleHeaders.value.indexOf(header)
+    if (index >= 0) selectField(index)
+  }
 }
 
 async function insertText(text) {
-  const header = activeSelection.value.field || visibleHeaders.value[0] || headers.value[0]
+  if (mobile.value && overview.value) return
+  const header = mobile.value ? currentField.value : activeSelection.value.field || visibleHeaders.value[0] || headers.value[0]
   if (!header) return
   const current = String(finalRow[header] ?? '')
-  const start = Number.isInteger(activeSelection.value.start) ? activeSelection.value.start : current.length
-  const end = Number.isInteger(activeSelection.value.end) ? activeSelection.value.end : start
+  const selection = activeSelection.value.field === header
+    ? activeSelection.value
+    : fieldSelections.get(header) || {}
+  const start = Number.isInteger(selection.start) ? selection.start : current.length
+  const end = Number.isInteger(selection.end) ? selection.end : start
   finalRow[header] = `${current.slice(0, start)}${text}${current.slice(end)}`
   onFinalInput(header)
   const cursor = start + text.length
@@ -391,6 +401,7 @@ async function insertText(text) {
   if (mobile.value) target?.scrollIntoView({ block: 'nearest' })
   target?.setSelectionRange(cursor, cursor)
   activeSelection.value = { field: header, start: cursor, end: cursor }
+  fieldSelections.set(header, { ...activeSelection.value })
 }
 
 async function openSubmitReview() {

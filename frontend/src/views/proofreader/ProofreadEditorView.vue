@@ -290,9 +290,10 @@ const keyboardAvailable = ref(false)
 const { index: fieldIndex, overview, mobile, current: currentField, select: selectField, next: nextField } = useFieldNavigation(rowHeaders, () => page.value?.id)
 const fieldSelections = new Map()
 watch(() => page.value?.id, () => { fieldSelections.clear(); keyboardAvailable.value = false })
-watch(currentField, (field, previous) => {
-  if (previous && activeSelection.value.field === previous) fieldSelections.set(previous, { ...activeSelection.value })
-  if (field) { activeField.value = field; activeSelection.value = fieldSelections.get(field) || { field, start: null, end: null } }
+watch([currentField, mobile], ([field]) => {
+  if (!field) return
+  activeField.value = field
+  activeSelection.value = fieldSelections.get(field) || { field, start: null, end: null }
 })
 
 watch(() => route.params.id, async () => {
@@ -380,11 +381,14 @@ function onTextChange() {
 }
 
 async function insertText(char) {
-  const field = activeField.value || rowHeaders.value[0]
+  if (mobile.value && overview.value) return
+  const field = mobile.value ? currentField.value : activeField.value || rowHeaders.value[0]
+  if (!field) return
+  activeField.value = field
   const textarea = textareaRefs.get(field)
   const selection = activeSelection.value.field === field
     ? activeSelection.value
-    : {
+    : fieldSelections.get(field) || {
         start: textarea?.selectionStart,
         end: textarea?.selectionEnd
       }
@@ -397,6 +401,7 @@ async function insertText(char) {
   if (mobile.value) target?.scrollIntoView({ block: 'nearest' })
   target?.setSelectionRange(cursor, cursor)
   activeSelection.value = { field, start: cursor, end: cursor }
+  fieldSelections.set(field, { ...activeSelection.value })
 }
 
 function setTextareaRef(header, element) {
@@ -405,16 +410,24 @@ function setTextareaRef(header, element) {
 }
 
 function activateField(header, event) {
-  activeField.value = header
   rememberSelection(header, event)
 }
 
 function rememberSelection(header, event) {
   const target = event?.target
-  activeSelection.value = {
+  const selection = {
     field: header,
     start: Number.isInteger(target?.selectionStart) ? target.selectionStart : null,
     end: Number.isInteger(target?.selectionEnd) ? target.selectionEnd : null
+  }
+  fieldSelections.set(header, selection)
+  // A delayed blur/select from the previous field must not retarget mobile input.
+  if (mobile.value && header !== currentField.value) return
+  activeField.value = header
+  activeSelection.value = selection
+  if (!mobile.value) {
+    const index = rowHeaders.value.indexOf(header)
+    if (index >= 0) selectField(index)
   }
 }
 
