@@ -56,3 +56,18 @@ updates:
           - "*"
     commit-message:
       prefix: "ci(deps)"
+
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:20"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 3
+    groups:
+      go-patch:
+        patterns: ["*"]
+        update-types: [patch]
+    commit-message:
+      prefix: "build(deps)"
