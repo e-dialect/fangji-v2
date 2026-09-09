@@ -399,7 +399,7 @@ import { commitCsvImport, createCsvInspection, getImportJob, listImportJobErrors
 import { csvFatalMessage, parseCsvInspection } from '@/lib/csvInspection'
 import { toSafeCsvCell } from '@/lib/csvExport'
 import { getProject } from '@/services/projectsService'
-import { getPbMessage, getPbStatus } from '@/utils/pbErrors'
+import { getPbMessage, getUploadErrorMessage } from '@/utils/pbErrors'
 
 const route = useRoute()
 const router = useRouter()
@@ -647,9 +647,7 @@ async function uploadPdf() {
       pdfError.value = record.error_message || 'PDF 后端校验失败'
     }
   } catch (e) {
-    pdfError.value = getPbStatus(e) === 413
-      ? 'PDF 文件超过 50 MB 上限'
-      : getPbMessage(e, '上传失败，请重试')
+    pdfError.value = getUploadErrorMessage(e, 'pdf')
     pdfProcessing.value = false
   } finally {
     if (generation === pdfPollGeneration) uploadingPdf.value = false
@@ -692,9 +690,7 @@ async function uploadCsv() {
       await loadPages()
     }
   } catch (e) {
-    csvError.value = getPbStatus(e) === 413
-      ? 'CSV 文件超过 50 MB 上限'
-      : getPbMessage(e, '导入失败，请检查文件格式')
+    csvError.value = getUploadErrorMessage(e, 'csv')
   } finally {
     if (generation === csvPollGeneration) uploadingCsv.value = false
   }
