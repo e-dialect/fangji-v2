@@ -25,8 +25,8 @@ func TestEmbeddedKeyboardPresetsAreValid(t *testing.T) {
 	if preset.Definition.Name != "莆仙方言键盘" {
 		t.Fatalf("unexpected preset name %q", preset.Definition.Name)
 	}
-	if len(preset.Definition.Sections) != 7 {
-		t.Fatalf("expected 7 sections, got %d", len(preset.Definition.Sections))
+	if len(preset.Definition.Sections) != 12 {
+		t.Fatalf("expected 12 sections, got %d", len(preset.Definition.Sections))
 	}
 }
 
@@ -111,5 +111,29 @@ func TestKeyboardPresetsSyncDuringSingleServeUpgrade(t *testing.T) {
 	}
 	if len(presets) != 1 || presets[0].GetString("keyboard_id") != defaultKeyboardID {
 		t.Fatalf("single serve upgrade synchronized presets = %#v", presets)
+	}
+}
+
+func TestDictionaryKeyboardExactSymbolsAndCombiningMarks(t *testing.T) {
+	presets, err := loadKeyboardPresets(embeddedKeyboardFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]keyboardKey{}
+	for _, section := range presets[defaultKeyboardID].Definition.Sections {
+		for _, key := range section.Keys {
+			keys[key.Value] = key
+		}
+	}
+	for _, char := range "Ǿɑɡɔàèìòùěǎǐǒǔǘǚǜ〔〕‖∣①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭■▲◆●×·〈〉［］﹑－―—～５" {
+		if _, ok := keys[string(char)]; !ok {
+			t.Errorf("missing exact key U+%04X", char)
+		}
+	}
+	for _, mark := range "̣̩̃̆̌" {
+		key, ok := keys[string(mark)]
+		if !ok || key.Label != "◌"+string(mark) || key.Hint == "" {
+			t.Errorf("combining U+%04X must insert only mark with dotted-circle label and hint", mark)
+		}
 	}
 }
