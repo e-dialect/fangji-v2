@@ -32,5 +32,6 @@ backend/pocketbase
 Thumbs.db
 
 # Local test fixtures
+/local/
 字典/
 词典/
