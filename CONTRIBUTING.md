@@ -64,6 +64,13 @@ python3 backend/tests/run_integration.py task_leases_integration.mjs
 这些检查和现有 Frontend、Containers、Backend Unicode workflow 及其他集成检查均须通过后才能合并。
 main 已启用分支保护，现有 7 项 CI 为 required checks；本 PR 的 Core workflow 合并进入 main 后，将新矩阵检查加入 required checks。
 
+提交前执行 `git diff --check`（暂存后使用 `git diff --cached --check`）。
+`.gitattributes` 仅对 `frontend/public/fonts/rare-han/OFL.txt`、
+`frontend/public/pdfjs/cmaps/LICENSE` 和
+`frontend/public/pdfjs/standard_fonts/LICENSE_LIBERATION` 关闭空白检查，以保留上游许可证的原始字节。
+来源与许可说明仍保留在各资源目录的 README 和许可证中；不要格式化这些文件，也不要扩大到整个第三方目录。
+自有源代码和其他文件继续使用 Git 的正常空白检查。
+
 ## PocketBase 与数据迁移
 
 - 不要修改已发布或可能已经执行的迁移；通过新的迁移文件演进 schema 和数据。
