@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	pdfapi "github.com/pdfcpu/pdfcpu/pkg/api"
 	pdfmodel "github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,6 +24,7 @@ const pdfBookBudget int64 = 256 * 1024 * 1024
 
 // Serialize CPU work, cold misses, cache publication and cleanup across requests.
 var pdfCacheMu sync.Mutex
+var errPDFPageBudget = errors.New("PDF page cache exceeds disk budget")
 
 func (s *importService) pdfCacheDir() string {
 	return filepath.Join(s.app.DataDir(), "pdf-preview-cache-v1")
@@ -55,7 +58,7 @@ func cleanupPDFCache(root string, now time.Time, reserve int64) {
 		}
 		p := filepath.Join(root, e.Name())
 		ttl := pdfPreviewTTL
-		if e.IsDir() {
+		if e.IsDir() || strings.HasPrefix(e.Name(), "oversized-") {
 			ttl = pdfPagesTTL
 		}
 		if !info.ModTime().Add(ttl).After(now) {
@@ -89,6 +92,12 @@ func (s *importService) preparePDFPages(file *core.Record) (string, error) {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return "", err
 	}
+	// Remember expansion failures per immutable source: otherwise every new task
+	// would repeat the same expensive whole-book split before falling back.
+	oversized := filepath.Join(root, "oversized-"+pdfSourceKey(file))
+	if info, err := os.Stat(oversized); err == nil && info.ModTime().Add(pdfPagesTTL).After(time.Now()) {
+		return "", errPDFPageBudget
+	}
 	dir := filepath.Join(root, "pages-"+pdfSourceKey(file))
 	if info, err := os.Stat(filepath.Join(dir, "ready")); err == nil && info.ModTime().Add(pdfPagesTTL).After(time.Now()) {
 		return dir, nil
@@ -106,6 +115,9 @@ func (s *importService) preparePDFPages(file *core.Record) (string, error) {
 	}
 	defer closeFile()
 	if err := splitPDFPages(reader, staging, pdfBookBudget); err != nil {
+		if errors.Is(err, errPDFPageBudget) {
+			_ = os.WriteFile(oversized, nil, 0600)
+		}
 		return "", err
 	}
 	if err := os.WriteFile(filepath.Join(staging, "ready"), nil, 0600); err != nil {
@@ -143,7 +155,7 @@ func splitPDFPages(reader io.ReadSeeker, dir string, budget int64) error {
 			return closeErr
 		}
 		if budget < 0 {
-			return fmt.Errorf("PDF page cache exceeds disk budget")
+			return errPDFPageBudget
 		}
 	}
 	return nil

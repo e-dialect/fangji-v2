@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	pdfapi "github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pocketbase/pocketbase/core"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,5 +71,39 @@ func TestPDFCacheIdentityIsolation(t *testing.T) {
 		if pdfCacheKey(parts...) == base {
 			t.Fatal("cross-identity cache collision")
 		}
+	}
+}
+
+func TestOversizedPDFSkipsRepeatedWholeBookPreparation(t *testing.T) {
+	app := newSchemaTestApp(t)
+	s := newImportService(app)
+	collection, err := app.FindCollectionByNameOrId("project_files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := core.NewRecord(collection)
+	file.Id = "syntheticfile01"
+	file.Set("file", "source.pdf")
+	file.Set("file_hash", "version-one")
+	root := s.pdfCacheDir()
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(root, "oversized-"+pdfSourceKey(file))
+	if err := os.WriteFile(marker, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := s.preparePDFPages(file); !errors.Is(err, errPDFPageBudget) {
+			t.Fatalf("retried oversized source: %v", err)
+		}
+	}
+	cleanupPDFCache(root, time.Now().Add(pdfPreviewTTL+time.Minute), 0)
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("oversize marker expired with watermarks")
+	}
+	cleanupPDFCache(root, time.Now().Add(pdfPagesTTL+time.Second), 0)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("oversize marker did not expire")
 	}
 }
