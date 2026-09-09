@@ -347,6 +347,8 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 2. 在“上传 PDF 文件”区域选择 PDF。
 3. 点击“上传 PDF”。
 
+单个 PDF 最大 100 MiB（104,857,600 字节），CSV 仍为 50 MiB。后端 PDF 请求和内置 Nginx 请求上限为 101 MiB，为 multipart 编码预留空间。升级时需同时重新部署后端和前端 Nginx；后端启动迁移会更新已有数据库的 PDF 字段限制。若部署了额外网关，也需允许至少 101 MiB 的请求体。
+
 PDF 用于校对员编辑时预览原文。文件只上传一次，后端会检查大小、扩展名、文件签名并使用 pdfcpu 深度解析 PDF 结构；校验成功后记录页数、校验器和校验时间。每个项目只有一个主 PDF，新文件成功后会原子替换主文件，旧文件保留为历史记录；只有状态为 `ready` 且标记为主文件的 PDF 才会用于预览。PDF 不会自动 OCR 或生成条目，待校对文本主要通过 CSV 导入。
 
 ### 5. 管理员导入 CSV
@@ -703,6 +705,8 @@ node backend/tests/upload_jobs_integration.mjs
 ```
 
 可通过 `REAL_PDF_PATH` 和 `REAL_CSV_PATH` 传入本地真实文件；脚本只读取文件，并会创建和清理临时项目。较大的 PDF 会获得 300 秒的异步校验等待预算。
+
+设置 `TEST_LARGE_PDF=1` 可额外验证 80 MiB、100 MiB PDF 上传并完成深度校验，以及 100 MiB + 1 字节文件被拒绝；使用合成文件和临时项目，需要预留足够的内存与临时磁盘空间。将 `PB_URL` 指向前端 Nginx 地址可同时验证代理限制。
 
 上传服务输出单行 JSON 结构化日志，包含 `request_id`、项目/作业/文件标识、哈希、计数、耗时和稳定错误码。可使用 `docker compose logs -f backend` 查看，并用响应头 `X-Request-ID` 关联一次请求的接收、排队、处理和终态事件。
 
