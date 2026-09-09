@@ -322,7 +322,7 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 
 #### 外部统一身份
 
-在 `.env` 设置 `HINGHWA_IDENTITY_BASE_URL=https://identity.example.com` 后，登录页会显示“兴化语记”入口，方辑后端向该地址的 `/login` 发送 `username`、`password`。首次验证成功时系统创建一个没有项目权限的本地 `user` 并保存 provider subject 映射；已登录用户也可在个人主页显式绑定。系统不会按邮箱或姓名自动合并账号，首次创建本地账号时会从公开 `/users/{id}` 详情读取昵称（失败时仍允许登录）；后续登录和绑定不会覆盖本地资料，也不会同步邮箱、密码或项目权限。
+在 `.env` 设置 `HINGHWA_IDENTITY_BASE_URL=https://identity.example.com` 后，登录页会显示“兴化语记”入口，方辑后端向该地址的 `/login` 发送 `username`、`password`。首次验证成功时系统创建一个没有项目权限的本地 `user` 并保存 provider subject 映射；已登录用户也可在个人主页显式绑定。系统不会按邮箱或姓名自动合并账号，登录或绑定后会从公开 `/users/{id}` 详情核对 ID 并补齐空缺的昵称、邮箱和头像；已有用户也会补齐，保留已填写的本地资料。邮箱通过本地格式/唯一性校验后保存为未验证，冲突时跳过；头像仅从已知兴化语记存储域读取有效的 PNG/JPEG/GIF/WebP（最多 2 MiB、边长最多 4096 像素），保存到本地头像字段，不转发远端令牌或跟踪图片 URL。资料补齐共用 5 秒超时，失败不阻断登录；密码、角色与项目权限不从远端导入。
 
 远端返回的 HS256 token 只在单次后端请求内读取后立即丢弃，不写数据库、日志或浏览器响应，也不需要共享远端签名密钥。适配器强制 HTTPS、5 秒超时、禁止重定向、限制响应为 64 KiB，并按来源地址执行登录限流；日志只记录 provider 与脱敏后的结果类别。`HINGHWA_IDENTITY_BASE_URL` 为空时该入口不会显示。
 
@@ -645,14 +645,14 @@ PB_SUPER_PASSWORD=your-password \
 node backend/tests/volunteer_accounts_integration.mjs
 ```
 
-外部身份测试完全使用本机 mock HTTPS provider，不访问真实统一身份服务；覆盖成功、失败、超时、禁止重定向、畸形/超大响应、重复映射、绑定冲突、仅首次继承昵称、默认无项目权限、可信代理取址和客户端/全局双层限流：
+外部身份测试完全使用本机 mock HTTPS provider，不访问真实统一身份服务；覆盖成功、失败、超时、禁止重定向、畸形/超大响应、重复映射、绑定冲突、新旧账号资料补齐、已有资料保护、重复邮箱跳过、头像持久化和地址/大小/格式限制、默认无项目权限、可信代理取址和客户端/全局双层限流：
 
 ```bash
 cd backend
 go test ./...
 ```
 
-部署环境只在获得一次性测试账号时进行人工联调，CI 不依赖外部服务。适配行为依据上游 Django [`/login` 接口](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/user/views.py)及其[令牌实现](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/utils/token.py)；方辑使用响应中的稳定用户 ID，不消费远端 token；首次注册另外读取公开用户详情中的昵称并核对 ID。
+部署环境只在获得一次性测试账号时进行人工联调，CI 不依赖外部服务。适配行为依据上游 Django [`/login` 接口](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/user/views.py)及其[令牌实现](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/utils/token.py)；方辑使用响应中的稳定用户 ID，不消费远端 token；登录和绑定后另外读取公开用户详情并核对 ID，补齐本地空缺资料。
 
 容器 CI 还会经过实际 Nginx 代理轮换伪造的 `X-Forwarded-For`，确认同一可信 `X-Real-IP` 仍共享客户端额度，并确认另一客户端不会被该额度连带封锁。
 

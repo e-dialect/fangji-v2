@@ -37,8 +37,8 @@ var (
 )
 
 // externalIdentityProvider deliberately exposes only the provider-local stable
-// subject. Remote tokens never cross this boundary; an optional public nickname
-// is read separately only when creating a local user.
+// subject. Remote tokens never cross this boundary; an optional public profile
+// is read separately after authentication to fill missing local fields.
 type externalIdentityProvider interface {
 	ID() string
 	Name() string
@@ -108,20 +108,13 @@ func (s *externalIdentityService) login(c *core.RequestEvent) error {
 		return err
 	}
 
-	name := ""
-	if _, lookupErr := findMappedUser(s.app, provider.ID(), subject); errors.Is(lookupErr, sql.ErrNoRows) {
-		if profile, ok := provider.(interface {
-			Nickname(context.Context, string) string
-		}); ok {
-			name = profile.Nickname(c.Request.Context(), subject)
-		}
-	}
-	user, created, err := s.resolveOrCreateUserWithName(provider.ID(), subject, name)
+	user, created, err := s.resolveOrCreateUser(provider.ID(), subject)
 	if err != nil {
 		s.logAuthResult(provider.ID(), "mapping_error")
 		return apis.NewApiError(http.StatusInternalServerError, "外部账号登录暂时不可用，请稍后重试。", nil)
 	}
 
+	user = s.syncExternalProfile(c.Request.Context(), provider, subject, user)
 	s.logAuthResult(provider.ID(), "success")
 	return apis.RecordAuthResponse(c, user, "external", map[string]any{
 		"provider": provider.ID(),
@@ -154,11 +147,19 @@ func (s *externalIdentityService) bind(c *core.RequestEvent) error {
 		return apis.NewApiError(http.StatusInternalServerError, "暂时无法绑定外部账号，请稍后重试。", nil)
 	}
 
+	user := s.syncExternalProfile(c.Request.Context(), provider, subject, auth)
+	user.IgnoreEmailVisibility(true)
+	token, err := user.NewAuthToken()
+	if err != nil {
+		return err
+	}
 	s.logAuthResult(provider.ID(), "bound")
 	return c.JSON(http.StatusOK, map[string]any{
 		"provider": provider.ID(),
 		"bound":    true,
 		"created":  created,
+		"record":   user,
+		"token":    token,
 	})
 }
 

@@ -147,50 +147,56 @@ func normalizeHinghwaSubject(raw json.RawMessage) (string, error) {
 // Nickname reads the public user profile without forwarding credentials or tokens.
 // Profile failures must not prevent an otherwise valid external login.
 func (p *hinghwaIdentityProvider) Nickname(ctx context.Context, subject string) string {
+	return p.Profile(ctx, subject).Name
+}
+
+func (p *hinghwaIdentityProvider) Profile(ctx context.Context, subject string) externalProfile {
 	// This upstream route accepts integer IDs only, never arbitrary paths.
 	for _, char := range subject {
 		if char < '0' || char > '9' {
-			return ""
+			return externalProfile{}
 		}
 	}
 	if subject == "" {
-		return ""
+		return externalProfile{}
 	}
 	endpoint := strings.TrimSuffix(p.endpoint, "/login") + "/users/" + subject
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return ""
+		return externalProfile{}
 	}
 	request.Header.Set("Accept", "application/json")
 	response, err := p.client.Do(request)
 	if err != nil {
-		return ""
+		return externalProfile{}
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return ""
+		return externalProfile{}
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, hinghwaMaxResponseBytes+1))
 	defer clear(raw)
 	if err != nil || len(raw) > hinghwaMaxResponseBytes {
-		return ""
+		return externalProfile{}
 	}
 	var result struct {
 		User struct {
 			ID       json.RawMessage `json:"id"`
 			Nickname string          `json:"nickname"`
+			Email    string          `json:"email"`
+			Avatar   string          `json:"avatar"`
 		} `json:"user"`
 	}
 	if json.Unmarshal(raw, &result) != nil {
-		return ""
+		return externalProfile{}
 	}
 	id, err := normalizeHinghwaSubject(result.User.ID)
 	if err != nil || id != subject {
-		return ""
+		return externalProfile{}
 	}
 	name := strings.TrimSpace(result.User.Nickname)
 	if !utf8.ValidString(name) || utf8.RuneCountInString(name) > 255 {
-		return ""
+		name = ""
 	}
-	return name
+	return externalProfile{Name: name, Email: strings.TrimSpace(result.User.Email), AvatarURL: strings.TrimSpace(result.User.Avatar)}
 }
