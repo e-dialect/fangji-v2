@@ -18,6 +18,9 @@ docker run -d \
   --name "$backend_name" \
   --network "$network_name" \
   --network-alias backend \
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,noexec,nosuid,size=512m \
+  --tmpfs /pb/pb_data:rw,uid=10001,gid=10001,mode=0700 \
   -e HINGHWA_IDENTITY_BASE_URL=https://127.0.0.1:1 \
   -e TRUSTED_PROXY_CIDRS="$proxy_network_cidr" \
   fangji-backend:ci >/dev/null
@@ -38,8 +41,9 @@ fi
 
 docker run -d \
   --name "$frontend_name" \
+  --cap-drop ALL --security-opt no-new-privileges:true \
   --network "$network_name" \
-  -p 127.0.0.1:18080:80 \
+  -p 127.0.0.1:18080:8080 \
   -e TRUSTED_PROXY_CIDRS="$proxy_network_cidr" \
   fangji-frontend:ci >/dev/null
 
@@ -57,6 +61,8 @@ if [ "$frontend_ready" != true ]; then
   exit 1
 fi
 
+test "$(docker exec "$backend_name" id -u)" = 10001
+test "$(docker exec "$frontend_name" id -u)" != 0
 # Verify the runtime font files are served as fonts, with cache/security headers.
 FRONTEND_URL=http://127.0.0.1:18080 node frontend/scripts/test-font-cache.mjs
 
@@ -103,8 +109,8 @@ for admin_path in /_ /_/; do
 done
 
 docker rm -f "$frontend_name" >/dev/null
-docker run -d --name "$frontend_name" --network "$network_name" \
-  -p 127.0.0.1:18080:80 -e ENABLE_POCKETBASE_ADMIN_UI=true \
+docker run -d --name "$frontend_name" --cap-drop ALL --security-opt no-new-privileges:true --network "$network_name" \
+  -p 127.0.0.1:18080:8080 -e ENABLE_POCKETBASE_ADMIN_UI=true \
   -e TRUSTED_PROXY_CIDRS="$proxy_network_cidr" fangji-frontend:ci >/dev/null
 for _ in $(seq 1 30); do
   if curl --fail --silent http://127.0.0.1:18080/healthz >/dev/null 2>&1; then break; fi

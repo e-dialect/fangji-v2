@@ -1,6 +1,9 @@
 services:
   backend:
     build: ./backend
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
     environment:
       - APP_ADMIN_EMAIL=${APP_ADMIN_EMAIL:-}
       - APP_ADMIN_PASSWORD=${APP_ADMIN_PASSWORD:-}
@@ -18,6 +21,8 @@ services:
       timeout: 3s
       retries: 12
       start_period: 20s
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     logging:
       driver: json-file
       options:
@@ -38,7 +43,10 @@ services:
       - "traefik.http.routers.fangji.tls=true"
       - "traefik.http.routers.fangji.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
       - "traefik.http.routers.fangji.service=fangji"
-      - "traefik.http.services.fangji.loadbalancer.server.port=80"
+      - "traefik.http.routers.fangji.middlewares=fangji-security"
+      - "traefik.http.middlewares.fangji-security.headers.stsseconds=31536000"
+      - "traefik.http.middlewares.fangji-security.headers.forcestsheader=false"
+      - "traefik.http.services.fangji.loadbalancer.server.port=8080"
     environment:
       - VITE_BACKEND_URL=${BACKEND_URL:-}
       - ENABLE_POCKETBASE_ADMIN_UI=${ENABLE_POCKETBASE_ADMIN_UI:-true}
@@ -47,11 +55,13 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/healthz"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
       interval: 10s
       timeout: 3s
       retries: 6
       start_period: 5s
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     logging:
       driver: json-file
       options:
