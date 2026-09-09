@@ -29,7 +29,8 @@ RUN mkdir -p /etc/nginx/snippets \
 COPY --from=build /app/dist /usr/share/nginx/html
 
 # Runtime configuration is intentionally writable only by the application user.
-RUN sed -i 's@/var/run/nginx.pid@/tmp/nginx.pid@; /^user /d' /etc/nginx/nginx.conf \
+RUN sed -i 's@/var/run/nginx.pid@/tmp/nginx.pid@; s@/run/nginx.pid@/tmp/nginx.pid@; /^user /d' /etc/nginx/nginx.conf \
+  && grep -Eq '^pid[[:space:]]+/tmp/nginx.pid;' /etc/nginx/nginx.conf \
   && chown -R nginx:nginx /etc/nginx/conf.d /etc/nginx/snippets /var/cache/nginx /usr/share/nginx/html
 USER nginx
 EXPOSE 8080
