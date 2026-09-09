@@ -2,6 +2,13 @@ export function getPbStatus(error) {
   return error?.status || error?.response?.status || null
 }
 
+export function getUploadErrorMessage(error, kind) {
+  if (getPbStatus(error) === 413) {
+    return kind === 'pdf' ? 'PDF 文件超过 100 MiB 上限' : 'CSV 文件超过 50 MiB 上限'
+  }
+  return getPbMessage(error, kind === 'pdf' ? '上传失败，请重试' : '导入失败，请检查文件格式')
+}
+
 export function getPbMessage(error, fallback = '请求失败，请稍后重试') {
   const response = error?.response
   const details = Object.values(response?.data || {})
