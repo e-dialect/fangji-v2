@@ -1,6 +1,9 @@
 services:
   backend:
     build: ./backend
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m
     environment:
       - APP_ADMIN_EMAIL=${APP_ADMIN_EMAIL:-}
       - APP_ADMIN_PASSWORD=${APP_ADMIN_PASSWORD:-}
@@ -19,13 +22,15 @@ services:
       timeout: 3s
       retries: 12
       start_period: 20s
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
     ports:
-      - "${FRONTEND_PORT:-8080}:80"
+      - "${FRONTEND_PORT:-8080}:8080"
     environment:
       - VITE_BACKEND_URL=${BACKEND_URL:-}
       - ENABLE_POCKETBASE_ADMIN_UI=${ENABLE_POCKETBASE_ADMIN_UI:-false}
@@ -34,9 +39,11 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/healthz"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
       interval: 10s
       timeout: 3s
       retries: 6
       start_period: 5s
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     restart: unless-stopped

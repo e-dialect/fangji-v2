@@ -98,7 +98,7 @@ jobs:
           docker compose config --format json | jq -e '
             (.services.frontend.ports | length == 1) and
             (.services.frontend.ports[0].published == "8080") and
-            (.services.frontend.ports[0].target == 80) and
+            (.services.frontend.ports[0].target == 8080) and
             ((.services.frontend.labels // {}) | length == 0) and
             ((.services.backend.ports // []) | length == 0)
           '
@@ -120,8 +120,22 @@ jobs:
             (.networks.traefik.name == "traefik-global-proxy") and
             (.services.frontend.labels["traefik.docker.network"] == "traefik-global-proxy") and
             (.services.frontend.labels["traefik.http.routers.fangji.rule"] == "Host(`fangji.example.com`)") and
-            (.services.frontend.labels["traefik.http.services.fangji.loadbalancer.server.port"] == "80")
+            (.services.frontend.labels["traefik.http.services.fangji.loadbalancer.server.port"] == "8080")
           '
+
+      - name: Verify production privilege restrictions
+        env:
+          TRAEFIK_HOST: fangji.example.com
+        run: |
+          for config in docker-compose.yml docker-compose.traefik.yml; do
+            docker compose -f "$config" config --format json | jq -e '
+              (.services.backend.read_only == true) and
+              (.services.backend.cap_drop == ["ALL"]) and
+              (.services.frontend.cap_drop == ["ALL"]) and
+              (.services.backend.security_opt | index("no-new-privileges:true") != null) and
+              (.services.frontend.security_opt | index("no-new-privileges:true") != null)
+            '
+          done
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4

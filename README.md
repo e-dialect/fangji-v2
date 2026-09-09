@@ -800,3 +800,17 @@ python3 backend/tests/run_rare_characters_integration.py
 ```
 
 该测试已加入 CI 的 `Backend Unicode workflow`。浏览器测试脚本位于 `frontend/scripts/test-rare-fonts.cjs`（Chrome、Firefox、WebKit 字形与失败提示）和 `test-rare-workflow.cjs`（真实编辑/草稿/校对/仲裁/CSV 下载）。可在临时目录安装 Playwright，通过 `NODE_PATH` 指向其 `node_modules`；设置 `FRONTEND_URL`、`SCREENSHOT_DIR`，后者还需要 `RARE_BROWSER_FIXTURE` 指向前述测试保留的临时数据。每次完整浏览器流程需要一套新 fixture。普通 `npm test` 无需安装浏览器。
+
+### 生产容器权限
+
+生产后端以 UID/GID `10001:10001` 运行，根文件系统只读，仅数据卷和 512 MiB 的 `/tmp` 可写；
+前端以 Nginx 普通用户运行，容器内端口为 `8080`，本机访问仍为 `http://localhost:8080`。
+两个生产入口都移除全部 Linux capabilities，并设置 no-new-privileges。
+绑定已有 `pb_data` 时先停止服务，再由宿主机管理员将完整目录的读写权限交给 UID/GID 10001；
+例如 Linux 上执行 `sudo chown -R 10001:10001 ./pb_data`。命名卷首次创建会继承镜像内的数据目录权限。
+不要通过 `chmod 777` 解决权限问题，也不要在新版 PocketBase 中直接使用不兼容的旧数据目录。
+
+前端为支持运行时 BACKEND_URL 和 Admin UI 配置，需要写静态资源、Nginx snippets/conf.d 及缓存目录，
+因此未设整个前端根文件系统只读；其他目录仍归 root 所有。开发镜像保留现有开发用户行为。
+Traefik 的 TLS router 增加一年 HSTS，关闭强制 HTTP HSTS；本机 HTTP 入口不发送 HSTS。
+当前 Traefik Admin UI 默认开启是既有维护入口策略，正式运营应显式设置 `ENABLE_POCKETBASE_ADMIN_UI=false`。
