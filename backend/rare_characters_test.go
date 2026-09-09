@@ -3,11 +3,10 @@ package main
 import (
 	"encoding/csv"
 	"encoding/json"
+	"github.com/pocketbase/pocketbase/core"
 	"strings"
 	"testing"
 
-	"github.com/pocketbase/pocketbase/models"
-	"github.com/pocketbase/pocketbase/models/schema"
 	"github.com/pocketbase/pocketbase/tests"
 )
 
@@ -17,11 +16,11 @@ func TestRareCharactersPersistThroughPocketBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer app.Cleanup()
-	collection := &models.Collection{Name: "rare_character_roundtrip", Type: models.CollectionTypeBase, Schema: schema.NewSchema(
-		&schema.SchemaField{Name: "ocr_text", Type: schema.FieldTypeText},
-		&schema.SchemaField{Name: "proofread_row_json", Type: schema.FieldTypeText},
+	collection := &core.Collection{Name: "rare_character_roundtrip", Type: core.CollectionTypeBase, Fields: core.NewFieldsList(
+		&core.TextField{Name: "ocr_text"},
+		&core.TextField{Name: "proofread_row_json"},
 	)}
-	if err := app.Dao().SaveCollection(collection); err != nil {
+	if err := app.Save(collection); err != nil {
 		t.Fatal(err)
 	}
 	const sample = "𢶀𠮷㙟𰻞䲠"
@@ -29,13 +28,13 @@ func TestRareCharactersPersistThroughPocketBase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := models.NewRecord(collection)
+	record := core.NewRecord(collection)
 	record.Set("ocr_text", sample)
 	record.Set("proofread_row_json", string(row))
-	if err := app.Dao().SaveRecord(record); err != nil {
+	if err := app.Save(record); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := app.Dao().FindRecordById(collection.Id, record.Id)
+	loaded, err := app.FindRecordById(collection.Id, record.Id)
 	if err != nil {
 		t.Fatal(err)
 	}

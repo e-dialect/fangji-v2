@@ -15,7 +15,7 @@ function fixturePDF() {
  const xref=out.length;out+=`xref\n0 ${objects.length}\n0000000000 65535 f \n`;for(const offset of offsets.slice(1))out+=`${String(offset).padStart(10,'0')} 00000 n \n`;return out+`trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
 }
 const admin=await api('/api/collections/users/auth-with-password',{method:'POST',body:{identity:process.env.APP_ADMIN_EMAIL,password:process.env.APP_ADMIN_PASSWORD}}),token=admin.token
-const superAuth=await api('/api/admins/auth-with-password',{method:'POST',body:{identity:process.env.PB_SUPER_EMAIL,password:process.env.PB_SUPER_PASSWORD}})
+const superAuth=await api('/api/collections/_superusers/auth-with-password',{method:'POST',body:{identity:process.env.PB_SUPER_EMAIL,password:process.env.PB_SUPER_PASSWORD}})
 const project=await api('/api/fangji/projects',{method:'POST',token,body:{name:'PDF access fixture'},status:201}),users=[]
 for(let n=0;n<2;n++){
  const email=`pdf-reader-${n}@example.com`,password='PDFReader12345!'
@@ -34,10 +34,10 @@ const url=`/api/fangji/pages/${page.id}/pdf`
 async function check(path,auth,status,headers={}) {const r=await fetch(base+path,{headers:{Authorization:auth,...headers}});assert.equal(r.status,status,r.status===status?'':await r.text());return r}
 await check(url,'',401);await check(url,users[1].token,403)
 const fileURL=`/api/files/${file.collectionId}/${file.id}/${file.file}`
-await check(fileURL,'',403)
+await check(fileURL,'',404)
 const ft=await api('/api/files/token',{method:'POST',token:users[0].token})
-await check(fileURL+'?token='+ft.token,users[0].token,403)
-await check(fileURL,users[0].token,403,{Range:'bytes=0-1024'})
+await check(fileURL+'?token='+ft.token,users[0].token,404)
+await check(fileURL,users[0].token,404,{Range:'bytes=0-1024'})
 const aft=await api('/api/files/token',{method:'POST',token});await check(fileURL+'?token='+aft.token,token,200)
 const preview=await check(url,users[0].token,200)
 assert.equal(preview.headers.get('x-pdf-start-page'),'2');assert.equal(preview.headers.get('x-pdf-end-page'),'3');assert.equal(preview.headers.get('cache-control'),'private, no-store')

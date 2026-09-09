@@ -22,19 +22,19 @@ function hashLeaseToken(token) {
 }
 
 function issueLease(dao, page, userId, queueStatus) {
-  let lease = leaseForPage(dao, page.getId())
+  let lease = leaseForPage(dao, page.id)
   if (!lease) lease = new Record(dao.findCollectionByNameOrId("task_leases"))
   const token = $security.randomString(64)
   const now = new Date()
   const expiresAt = new Date(now.getTime() + leaseDurationMs).toISOString()
-  lease.set("page", page.getId())
+  lease.set("page", page.id)
   lease.set("project", page.getString("project"))
   lease.set("holder", userId)
   lease.set("token_hash", hashLeaseToken(token))
   lease.set("expires_at", expiresAt)
   lease.set("last_activity_at", now.toISOString())
   lease.set("queue_status", queueStatus === "proofread" ? "proofread" : "pending")
-  dao.saveRecord(lease)
+  dao.save(lease)
   page.set("lease_expires_at", expiresAt)
   return { lease, token, expiresAt }
 }
@@ -42,7 +42,7 @@ function issueLease(dao, page, userId, queueStatus) {
 function requireLease(dao, page, userId, token) {
   const value = String(token || "")
   if (value.length < 32 || value.length > 200) throw new BadRequestError("任务租约已失效，请重新领取")
-  const lease = leaseForPage(dao, page.getId())
+  const lease = leaseForPage(dao, page.id)
   const actualHash = hashLeaseToken(value)
   if (!lease || lease.getString("holder") !== userId || !$security.equal(lease.getString("token_hash"), actualHash)) {
     throw new BadRequestError("任务已被重新领取，本地草稿仍保留，请重新领取任务")
@@ -59,15 +59,15 @@ function renewLease(dao, page, userId, token) {
   const expiresAt = new Date(now.getTime() + leaseDurationMs).toISOString()
   lease.set("expires_at", expiresAt)
   lease.set("last_activity_at", now.toISOString())
-  dao.saveRecord(lease)
+  dao.save(lease)
   page.set("lease_expires_at", expiresAt)
-  dao.saveRecord(page)
+  dao.save(page)
   return expiresAt
 }
 
 function clearLease(dao, page) {
-  const lease = leaseForPage(dao, page.getId())
-  if (lease) dao.deleteRecord(lease)
+  const lease = leaseForPage(dao, page.id)
+  if (lease) dao.delete(lease)
   page.set("lease_expires_at", null)
 }
 
@@ -79,7 +79,7 @@ function releaseLease(dao, page, userId, token) {
   page.set("status", queueStatusForPage(page, lease))
   page.set("proofreader", null)
   clearLease(dao, page)
-  dao.saveRecord(page)
+  dao.save(page)
 }
 
 module.exports = {

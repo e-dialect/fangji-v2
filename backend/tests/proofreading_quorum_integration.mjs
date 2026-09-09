@@ -35,7 +35,7 @@ const platformAuth = await request('/api/collections/users/auth-with-password', 
   method: 'POST',
   body: { identity: platformEmail, password: platformPassword }
 })
-const superAuth = await request('/api/admins/auth-with-password', {
+const superAuth = await request('/api/collections/_superusers/auth-with-password', {
   method: 'POST',
   body: { identity: superEmail, password: superPassword }
 })
@@ -153,12 +153,9 @@ async function assertNativeProgressIsHidden(projectId, pageId, user) {
   assert.equal(task.id, pageId)
   assertBlindFieldsConcealed(task, 'proofreader task endpoint')
   if (task.project_file) {
-    const projectFile = await request(`/api/collections/project_files/records/${task.project_file}?expand=project`, {
-      token: user.token
+    await request(`/api/collections/project_files/records/${task.project_file}?expand=project`, {
+      token: user.token, expected: 404
     })
-    assert.equal(projectFile.project, projectId, 'proofreader must retain access to the source PDF record')
-    assert.equal(projectFile.expand?.project, undefined, 'native relation expansion exposed the restricted project')
-    assertBlindFieldsConcealed(projectFile, 'source PDF record')
   }
 }
 

@@ -1,258 +1,54 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
-	"strconv"
-	"strings"
-	"testing"
-	"time"
-
-	"github.com/pocketbase/dbx"
+	"bytes"
+	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/migrations"
-	"github.com/pocketbase/pocketbase/models"
-	"github.com/pocketbase/pocketbase/plugins/jsvm"
-	"github.com/pocketbase/pocketbase/tests"
-	"github.com/pocketbase/pocketbase/tools/migrate"
+	"os"
+	"testing"
 )
 
-func TestProjectAccessMigrationRollbackRestoresLegacyRules(t *testing.T) {
-	const projectAccessMigrationNumber = 20
-
-	migrationsDir, err := filepath.Abs("pb_migrations")
+func newSchemaTestApp(t *testing.T) *pocketbase.PocketBase {
+	t.Helper()
+	app := pocketbase.NewWithConfig(pocketbase.Config{DefaultDataDir: t.TempDir()})
+	if err := app.Bootstrap(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { app.ResetBootstrapState() })
+	raw, err := os.ReadFile("pb_migrations/1788940000_initial_schema.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	app, err := tests.NewTestApp()
-	if err != nil {
-		t.Fatalf("create test app: %v", err)
+	raw = raw[bytes.IndexByte(raw, '[') : bytes.LastIndex(raw, []byte("];"))+1]
+	if err := app.ImportCollectionsByMarshaledJSON(raw, false); err != nil {
+		t.Fatal(err)
 	}
-	defer app.Cleanup()
-	tempDir := t.TempDir()
-	emptyHooksDir := filepath.Join(tempDir, "empty_hooks")
-	if err := os.MkdirAll(emptyHooksDir, 0o755); err != nil {
-		t.Fatalf("create empty hooks directory: %v", err)
-	}
-
-	projectMigrations := loadProjectMigrations(t, app, migrationsDir, emptyHooksDir)
-	applyProjectMigrationsThrough(t, app, projectMigrations, projectAccessMigrationNumber)
-	secrets, err := app.Dao().FindCollectionByNameOrId("project_access_secrets")
-	if err != nil {
-		t.Fatalf("find project_access_secrets: %v", err)
-	}
-	if secrets.Type != models.CollectionTypeAuth {
-		t.Fatalf("project_access_secrets type = %q, want auth", secrets.Type)
-	}
-	if secrets.Schema.GetFieldByName("salt") != nil || secrets.Schema.GetFieldByName("password_hash") != nil {
-		t.Fatal("project secrets must not expose fast-hash storage fields")
-	}
-	if _, err := app.Dao().FindCollectionByNameOrId("project_join_attempts"); err != nil {
-		t.Fatalf("find project_join_attempts: %v", err)
-	}
-	joinSourceAttempts, err := app.Dao().FindCollectionByNameOrId("project_join_source_attempts")
-	if err != nil {
-		t.Fatalf("find project_join_source_attempts: %v", err)
-	}
-	if field := joinSourceAttempts.Schema.GetFieldByName("source_key"); field == nil {
-		t.Fatal("project_join_source_attempts.source_key is missing")
-	}
-
-	users, err := app.Dao().FindCollectionByNameOrId("users")
-	if err != nil {
-		t.Fatalf("find users: %v", err)
-	}
-	owner := models.NewRecord(users)
-	_ = owner.SetUsername("migration-test-owner")
-	_ = owner.SetEmail("migration-test-owner@example.com")
-	_ = owner.SetPassword("MigrationOwner123!")
-	owner.Set("role", "platform_admin")
-	if err := app.Dao().SaveRecord(owner); err != nil {
-		t.Fatalf("save test owner: %v", err)
-	}
-	projects, err := app.Dao().FindCollectionByNameOrId("projects")
-	if err != nil {
-		t.Fatalf("find projects: %v", err)
-	}
-	project := models.NewRecord(projects)
-	project.Set("name", "Migration password test")
-	project.Set("admin", owner.Id)
-	project.Set("access_mode", "password")
-	if err := app.Dao().SaveRecord(project); err != nil {
-		t.Fatalf("save test project: %v", err)
-	}
-	secret := models.NewRecord(secrets)
-	_ = secret.SetUsername("project_" + project.Id)
-	secret.Set("project", project.Id)
-	if err := secret.SetPassword("SlowProjectPassword123!"); err != nil {
-		t.Fatalf("hash project password: %v", err)
-	}
-	if err := app.Dao().SaveRecord(secret); err != nil {
-		t.Fatalf("save project secret: %v", err)
-	}
-	savedSecret, err := app.Dao().FindRecordById("project_access_secrets", secret.Id)
-	if err != nil {
-		t.Fatalf("reload project secret: %v", err)
-	}
-	if !strings.HasPrefix(savedSecret.PasswordHash(), "$2a$12$") {
-		t.Fatalf("project secret is not stored with bcrypt cost 12: %q", savedSecret.PasswordHash())
-	}
-	if !savedSecret.ValidatePassword("SlowProjectPassword123!") || savedSecret.ValidatePassword("wrong") {
-		t.Fatal("project secret bcrypt validation returned an unexpected result")
-	}
-
-	projectAccessMigration := findProjectMigration(t, projectMigrations, "20_project_access.js")
-	if err := app.DB().Transactional(func(tx *dbx.Tx) error {
-		return projectAccessMigration.Down(tx)
-	}); err != nil {
-		t.Fatalf("rollback project access migration: %v", err)
-	}
-
-	assertCollectionRules(t, app, "project_files", collectionRules{
-		list:   `@request.auth.id != ""`,
-		view:   `@request.auth.id != ""`,
-		create: `@request.auth.role = "admin"`,
-		update: `@request.auth.role = "admin"`,
-		delete: `@request.auth.role = "admin"`,
-	})
-	legacyPageReadRule := `@request.auth.id != "" && ( @request.auth.role = "admin" || (@request.auth.role = "proofreader" && status != "importing") )`
-	assertCollectionRules(t, app, "pages", collectionRules{
-		list:   legacyPageReadRule,
-		view:   legacyPageReadRule,
-		create: `@request.auth.role = "admin"`,
-		update: `@request.auth.role = "admin"`,
-		delete: `@request.auth.role = "admin"`,
-	})
-	assertCollectionRules(t, app, "proofreading_attempts", collectionRules{
-		list: `@request.auth.role = "admin" || proofreader = @request.auth.id`,
-		view: `@request.auth.role = "admin" || proofreader = @request.auth.id`,
-	})
-	assertCollectionRules(t, app, "import_jobs", collectionRules{
-		list:   `@request.auth.role = "admin"`,
-		view:   `@request.auth.role = "admin"`,
-		delete: `@request.auth.role = "admin"`,
-	})
-	assertCollectionRules(t, app, "import_job_errors", collectionRules{
-		list: `@request.auth.role = "admin"`,
-		view: `@request.auth.role = "admin"`,
-	})
-
-	for _, name := range []string{"project_join_source_attempts", "project_join_attempts", "project_access_secrets", "project_creator_grants", "project_memberships", "project_acls"} {
-		if _, err := app.Dao().FindCollectionByNameOrId(name); err == nil {
-			t.Fatalf("collection %q still exists after rollback", name)
-		}
-	}
+	return app
 }
-
-func loadProjectMigrations(t *testing.T, app core.App, migrationsDir, hooksDir string) []*migrate.Migration {
-	t.Helper()
-	jsvm.MustRegister(app, jsvm.Config{
-		HooksDir:      hooksDir,
-		MigrationsDir: migrationsDir,
-		TypesDir:      filepath.Join(t.TempDir(), "types"),
-	})
-
-	byName := map[string]*migrate.Migration{}
-	for _, migration := range migrations.AppMigrations.Items() {
-		if strings.HasSuffix(migration.File, ".js") {
-			byName[migration.File] = migration
+func TestFreshSchemaSecurityAndLimits(t *testing.T) {
+	app := newSchemaTestApp(t)
+	for _, name := range []string{"project_access_secrets", "project_join_attempts", "project_join_source_attempts", "task_leases"} {
+		collection, err := app.FindCollectionByNameOrId(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if collection.ListRule != nil || collection.ViewRule != nil || collection.CreateRule != nil || collection.UpdateRule != nil || collection.DeleteRule != nil {
+			t.Fatalf("%s must not expose native records", name)
 		}
 	}
-	result := make([]*migrate.Migration, 0, len(byName))
-	for _, migration := range byName {
-		result = append(result, migration)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return migrationNumber(result[i].File) < migrationNumber(result[j].File)
-	})
-	return result
-}
-
-func applyProjectMigrationsThrough(t *testing.T, app core.App, projectMigrations []*migrate.Migration, maximum int) {
-	t.Helper()
-	for index, migration := range projectMigrations {
-		if migrationNumber(migration.File) > maximum {
-			continue
-		}
-		applyProjectMigration(t, app, migration, index)
-	}
-}
-
-func applyProjectMigration(t *testing.T, app core.App, migration *migrate.Migration, order int) {
-	t.Helper()
-	err := app.DB().Transactional(func(tx *dbx.Tx) error {
-		if migration.Up != nil {
-			if err := migration.Up(tx); err != nil {
-				return fmt.Errorf("apply %s: %w", migration.File, err)
-			}
-		}
-		_, err := tx.Insert(migrate.DefaultMigrationsTable, dbx.Params{
-			"file":    migration.File,
-			"applied": time.Now().UnixMicro() + int64(order),
-		}).Execute()
-		return err
-	})
+	files, err := app.FindCollectionByNameOrId("project_files")
 	if err != nil {
 		t.Fatal(err)
 	}
-}
-
-func findProjectMigration(t *testing.T, projectMigrations []*migrate.Migration, filename string) *migrate.Migration {
-	t.Helper()
-	for _, migration := range projectMigrations {
-		if migration.File == filename {
-			return migration
-		}
+	field := files.Fields.GetByName("file").(*core.FileField)
+	if field.MaxSize != 100*1024*1024 || !field.Protected {
+		t.Fatalf("unexpected PDF settings: %+v", field)
 	}
-	t.Fatalf("project migration %q was not registered", filename)
-	return nil
-}
-
-func migrationNumber(name string) int {
-	prefix := strings.SplitN(name, "_", 2)[0]
-	number, err := strconv.Atoi(prefix)
+	pages, err := app.FindCollectionByNameOrId("pages")
 	if err != nil {
-		return int(^uint(0) >> 1)
+		t.Fatal(err)
 	}
-	return number
-}
-
-type collectionRules struct {
-	list   string
-	view   string
-	create string
-	update string
-	delete string
-}
-
-func assertCollectionRules(t *testing.T, app core.App, name string, want collectionRules) {
-	t.Helper()
-	collection, err := app.Dao().FindCollectionByNameOrId(name)
-	if err != nil {
-		t.Fatalf("find collection %q: %v", name, err)
+	if pages.Fields.GetByName("row_headers_json") == nil {
+		t.Fatal("missing column-order snapshot")
 	}
-	assertRule := func(label string, got *string, expected string) {
-		t.Helper()
-		if expected == "" {
-			if got != nil {
-				t.Fatalf("%s.%s = %q, want nil", name, label, *got)
-			}
-			return
-		}
-		if got == nil || *got != expected {
-			value := "<nil>"
-			if got != nil {
-				value = *got
-			}
-			t.Fatalf("%s.%s = %q, want %q", name, label, value, expected)
-		}
-	}
-	assertRule("listRule", collection.ListRule, want.list)
-	assertRule("viewRule", collection.ViewRule, want.view)
-	assertRule("createRule", collection.CreateRule, want.create)
-	assertRule("updateRule", collection.UpdateRule, want.update)
-	assertRule("deleteRule", collection.DeleteRule, want.delete)
 }

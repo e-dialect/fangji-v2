@@ -5,30 +5,31 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/labstack/echo/v5"
-	"github.com/labstack/echo/v5/middleware"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/forms"
-	"github.com/pocketbase/pocketbase/models"
 )
 
 func registerProfile(app core.App) {
-	app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
-		e.Router.PATCH("/api/fangji/profile", func(c echo.Context) error {
-			auth, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
+		e.Router.PATCH("/api/fangji/profile", func(c *core.RequestEvent) error {
+			auth := c.Auth
 			if auth == nil {
 				return apis.NewUnauthorizedError("请先登录。", nil)
 			}
 			// Load current values rather than trusting a stale session record.
-			record, err := app.Dao().FindRecordById("users", auth.Id)
+			record, err := app.FindRecordById("users", auth.Id)
 			if err != nil {
 				return apis.NewUnauthorizedError("登录状态已失效。", nil)
 			}
 			if record.GetBool("must_change_password") {
 				return apis.NewForbiddenError("请先修改初始密码。", nil)
 			}
-			data := apis.RequestInfo(c).Data
+			info, err := c.RequestInfo()
+			if err != nil {
+				return err
+			}
+			data := info.Body
 			for key := range data {
 				if key != "name" && key != "email" {
 					return apis.NewBadRequestError("仅可修改昵称和邮箱。", nil)
@@ -57,17 +58,19 @@ func registerProfile(app core.App) {
 			// Manage access is limited to the allowlisted fields above. PocketBase
 			// still validates email format, uniqueness and collection constraints.
 			form := forms.NewRecordUpsert(app, record)
-			form.SetFullManageAccess(true)
-			if err := form.LoadData(values); err != nil {
-				return apis.NewBadRequestError("资料格式无效。", nil)
-			}
+			form.GrantSuperuserAccess()
+			form.Load(values)
 			if err := form.Submit(); err != nil {
 				return apis.NewBadRequestError("保存失败，请检查昵称和邮箱是否有效、邮箱是否已被使用。", err)
 			}
 			// Only this authenticated owner receives the private email field.
 			record.IgnoreEmailVisibility(true)
-			return c.JSON(http.StatusOK, record)
-		}, middleware.BodyLimit(16*1024), apis.RequireRecordAuth("users"))
-		return nil
+			token, err := record.NewAuthToken()
+			if err != nil {
+				return err
+			}
+			return c.JSON(http.StatusOK, map[string]any{"record": record, "token": token})
+		}).Bind(apis.BodyLimit(16*1024), apis.RequireAuth("users"))
+		return e.Next()
 	})
 }
