@@ -6,7 +6,7 @@ function keyboardJson(record) {
     throw new BadRequestError(`键盘 ${record.getString("keyboard_id")} 的定义已损坏`)
   }
   return {
-    recordId: record.getId(),
+    recordId: record.id,
     keyboardId: record.getString("keyboard_id"),
     schemaVersion: record.getInt("schema_version"),
     name: record.getString("name"),
@@ -58,7 +58,7 @@ function enableDefaultKeyboard(dao, projectId) {
   if (!keyboards.length) return null
   const records = dao.findRecordsByFilter(
     "project_keyboards",
-    `project = "${projectId}" && keyboard = "${keyboards[0].getId()}"`,
+    `project = "${projectId}" && keyboard = "${keyboards[0].id}"`,
     "",
     1,
     0
@@ -67,11 +67,11 @@ function enableDefaultKeyboard(dao, projectId) {
     ? records[0]
     : new Record(dao.findCollectionByNameOrId("project_keyboards"))
   link.set("project", projectId)
-  link.set("keyboard", keyboards[0].getId())
+  link.set("keyboard", keyboards[0].id)
   link.set("enabled", true)
   link.set("is_default", true)
   link.set("sort_order", 0)
-  dao.saveRecord(link)
+  dao.save(link)
   return link
 }
 
@@ -94,20 +94,20 @@ function configureProjectKeyboards(dao, projectId, keyboardIds, defaultKeyboardI
   for (const link of projectLinks(dao, projectId)) linksByKeyboard.set(link.getString("keyboard"), link)
   for (const [index, keyboardId] of requested.entries()) {
     const keyboard = activeByID.get(keyboardId)
-    let link = linksByKeyboard.get(keyboard.getId())
+    let link = linksByKeyboard.get(keyboard.id)
     if (!link) link = new Record(dao.findCollectionByNameOrId("project_keyboards"))
     link.set("project", projectId)
-    link.set("keyboard", keyboard.getId())
+    link.set("keyboard", keyboard.id)
     link.set("enabled", true)
     link.set("is_default", keyboardId === chosenDefault)
     link.set("sort_order", index)
-    dao.saveRecord(link)
-    linksByKeyboard.delete(keyboard.getId())
+    dao.save(link)
+    linksByKeyboard.delete(keyboard.id)
   }
   for (const link of linksByKeyboard.values()) {
     link.set("enabled", false)
     link.set("is_default", false)
-    dao.saveRecord(link)
+    dao.save(link)
   }
   return projectConfig(dao, projectId)
 }

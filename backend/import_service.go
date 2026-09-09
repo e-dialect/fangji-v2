@@ -20,17 +20,15 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/labstack/echo/v5"
-	"github.com/labstack/echo/v5/middleware"
 	pdfapi "github.com/pdfcpu/pdfcpu/pkg/api"
 	pdfmodel "github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/daos"
+
 	"github.com/pocketbase/pocketbase/forms"
-	"github.com/pocketbase/pocketbase/models"
+
 	"github.com/pocketbase/pocketbase/tools/filesystem"
 	"github.com/pocketbase/pocketbase/tools/types"
 	"golang.org/x/text/encoding/simplifiedchinese"
@@ -60,12 +58,12 @@ func newRequestID() string {
 	return fmt.Sprintf("fallback-%d", time.Now().UnixNano())
 }
 
-func ensureRequestID(c echo.Context) string {
-	requestID := strings.TrimSpace(c.Request().Header.Get("X-Request-ID"))
+func ensureRequestID(c *core.RequestEvent) string {
+	requestID := strings.TrimSpace(c.Request.Header.Get("X-Request-ID"))
 	if requestID == "" {
 		requestID = newRequestID()
 	}
-	c.Response().Header().Set("X-Request-ID", requestID)
+	c.Response.Header().Set("X-Request-ID", requestID)
 	return requestID
 }
 
@@ -123,33 +121,27 @@ func newImportService(app *pocketbase.PocketBase) *importService {
 }
 
 func (s *importService) register() {
-	s.app.OnBeforeServe().Add(func(e *core.ServeEvent) error {
+	s.app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST(
-			"/api/fangji/projects/:projectId/imports/csv",
-			s.uploadCSV,
-			middleware.BodyLimit(51*1024*1024),
-			apis.RequireRecordAuth("users"),
-		)
+			"/api/fangji/projects/{projectId}/imports/csv",
+			s.uploadCSV).Bind(apis.BodyLimit(51*1024*1024),
+			apis.RequireAuth("users"))
 		e.Router.POST(
-			"/api/fangji/imports/:jobId/commit",
-			s.commitCSVImport,
-			apis.RequireRecordAuth("users"),
-		)
+			"/api/fangji/imports/{jobId}/commit",
+			s.commitCSVImport).Bind(apis.RequireAuth("users"))
 		e.Router.POST(
-			"/api/fangji/projects/:projectId/files/pdf",
-			s.uploadPDF,
-			middleware.BodyLimit(maxPDFBytes+1024*1024), // Allow multipart framing.
-			apis.RequireRecordAuth("users"),
-		)
+			"/api/fangji/projects/{projectId}/files/pdf",
+			s.uploadPDF).Bind(apis.BodyLimit(maxPDFBytes+1024*1024), // Allow multipart framing.
+			apis.RequireAuth("users"))
 
 		go s.runWorker()
 		go s.recoverPendingWork()
-		return nil
+		return e.Next()
 	})
 }
 
-func (s *importService) requireProjectManager(c echo.Context, projectID string) (*models.Record, *models.Record, error) {
-	auth, _ := c.Get(apis.ContextAuthRecordKey).(*models.Record)
+func (s *importService) requireProjectManager(c *core.RequestEvent, projectID string) (*core.Record, *core.Record, error) {
+	auth := c.Auth
 	if auth == nil {
 		return nil, nil, apis.NewUnauthorizedError("登录状态已失效，请重新登录。", nil)
 	}
@@ -160,7 +152,7 @@ func (s *importService) requireProjectManager(c echo.Context, projectID string) 
 	if auth.GetString("role") == "platform_admin" || project.GetString("admin") == auth.Id {
 		return auth, project, nil
 	}
-	memberships, err := s.app.Dao().FindRecordsByFilter(
+	memberships, err := s.app.FindRecordsByFilter(
 		"project_memberships",
 		fmt.Sprintf(`project = %q && user = %q && role = "manager"`, projectID, auth.Id),
 		"",
@@ -173,18 +165,18 @@ func (s *importService) requireProjectManager(c echo.Context, projectID string) 
 	return nil, nil, apis.NewForbiddenError("只有项目所有者或管理员可以上传项目文件。", err)
 }
 
-func (s *importService) findProject(projectID string) (*models.Record, error) {
-	project, err := s.app.Dao().FindRecordById("projects", projectID)
+func (s *importService) findProject(projectID string) (*core.Record, error) {
+	project, err := s.app.FindRecordById("projects", projectID)
 	if err != nil || project == nil {
 		return nil, apis.NewNotFoundError("项目不存在或已被删除。", err)
 	}
 	return project, nil
 }
 
-func (s *importService) uploadCSV(c echo.Context) error {
+func (s *importService) uploadCSV(c *core.RequestEvent) error {
 	requestID := ensureRequestID(c)
-	inspectOnly := strings.EqualFold(strings.TrimSpace(c.FormValue("inspect_only")), "true")
-	projectID := c.PathParam("projectId")
+	inspectOnly := strings.EqualFold(strings.TrimSpace(c.Request.FormValue("inspect_only")), "true")
+	projectID := c.Request.PathValue("projectId")
 	auth, _, err := s.requireProjectManager(c, projectID)
 	if err != nil {
 		logUploadRejected(requestID, "csv", projectID, "authorization", "CSV upload authorization failed", err)
@@ -198,7 +190,10 @@ func (s *importService) uploadCSV(c echo.Context) error {
 		"inspect_only": inspectOnly,
 	})
 
-	header, err := c.FormFile("file")
+	uploaded, header, err := c.Request.FormFile("file")
+	if uploaded != nil {
+		defer uploaded.Close()
+	}
 	if err != nil {
 		logUploadRejected(requestID, "csv", projectID, "multipart", "CSV file is missing", err)
 		return apis.NewBadRequestError("请选择要导入的 CSV 文件。", err)
@@ -221,7 +216,7 @@ func (s *importService) uploadCSV(c echo.Context) error {
 		hash,
 		projectFileID,
 	)
-	existing, findErr := s.app.Dao().FindRecordsByFilter("import_jobs", filter, "-created", 1, 0)
+	existing, findErr := s.app.FindRecordsByFilter("import_jobs", filter, "-created", 1, 0)
 	if findErr != nil {
 		logUpload("error", "dedup_lookup_failed", map[string]any{
 			"request_id": requestID,
@@ -244,11 +239,11 @@ func (s *importService) uploadCSV(c echo.Context) error {
 		return c.JSON(http.StatusOK, existing[0])
 	}
 
-	collection, err := s.app.Dao().FindCollectionByNameOrId("import_jobs")
+	collection, err := s.app.FindCollectionByNameOrId("import_jobs")
 	if err != nil {
 		return apis.NewBadRequestError("导入功能尚未完成数据库初始化。", err)
 	}
-	record := models.NewRecord(collection)
+	record := core.NewRecord(collection)
 	form := forms.NewRecordUpsert(s.app, record)
 	initialStatus := "queued"
 	workKind := "csv"
@@ -256,7 +251,7 @@ func (s *importService) uploadCSV(c echo.Context) error {
 		initialStatus = "inspecting"
 		workKind = "csv_inspect"
 	}
-	if err := form.LoadData(map[string]any{
+	form.Load(map[string]any{
 		"project":               projectID,
 		"created_by":            auth.Id,
 		"original_filename":     header.Filename,
@@ -271,19 +266,15 @@ func (s *importService) uploadCSV(c echo.Context) error {
 		"project_file":          projectFileID,
 		"pdf_page_limit":        pdfPageLimit,
 		"pdf_snapshot_captured": true,
-	}); err != nil {
-		return apis.NewBadRequestError("无法创建 CSV 导入作业。", err)
-	}
+	})
 	file, err := filesystem.NewFileFromMultipart(header)
 	if err != nil {
 		return apis.NewBadRequestError("无法读取上传的 CSV 文件。", err)
 	}
-	if err := form.AddFiles("source_file", file); err != nil {
-		return apis.NewBadRequestError("无法保存上传的 CSV 文件。", err)
-	}
+	record.Set("source_file", file)
 	if err := form.Submit(); err != nil {
 		// A concurrent duplicate upload may have won the unique index race.
-		existing, findErr := s.app.Dao().FindRecordsByFilter("import_jobs", filter, "-created", 1, 0)
+		existing, findErr := s.app.FindRecordsByFilter("import_jobs", filter, "-created", 1, 0)
 		if findErr != nil {
 			logUpload("error", "dedup_lookup_failed", map[string]any{
 				"request_id": requestID,
@@ -322,10 +313,10 @@ func (s *importService) uploadCSV(c echo.Context) error {
 	return c.JSON(http.StatusAccepted, record)
 }
 
-func (s *importService) commitCSVImport(c echo.Context) error {
+func (s *importService) commitCSVImport(c *core.RequestEvent) error {
 	requestID := ensureRequestID(c)
-	jobID := c.PathParam("jobId")
-	job, err := s.app.Dao().FindRecordById("import_jobs", jobID)
+	jobID := c.Request.PathValue("jobId")
+	job, err := s.app.FindRecordById("import_jobs", jobID)
 	if err != nil {
 		logUploadRejected(requestID, "csv", "", "job_lookup", "CSV inspection job was not found", err)
 		return apis.NewNotFoundError("CSV 预检作业不存在或已被删除。", err)
@@ -342,7 +333,7 @@ func (s *importService) commitCSVImport(c echo.Context) error {
 	job.Set("finished_at", "")
 	job.Set("error_code", "")
 	job.Set("error_message", "")
-	if err := s.app.Dao().SaveRecord(job); err != nil {
+	if err := s.app.Save(job); err != nil {
 		logUploadRejected(requestID, "csv", job.GetString("project"), "commit_persist", "CSV commit failed", err)
 		return apis.NewBadRequestError("无法确认 CSV 导入。", err)
 	}
@@ -359,9 +350,9 @@ func (s *importService) commitCSVImport(c echo.Context) error {
 	return c.JSON(http.StatusAccepted, job)
 }
 
-func (s *importService) uploadPDF(c echo.Context) error {
+func (s *importService) uploadPDF(c *core.RequestEvent) error {
 	requestID := ensureRequestID(c)
-	projectID := c.PathParam("projectId")
+	projectID := c.Request.PathValue("projectId")
 	_, _, err := s.requireProjectManager(c, projectID)
 	if err != nil {
 		logUploadRejected(requestID, "pdf", projectID, "authorization", "PDF upload authorization failed", err)
@@ -373,7 +364,10 @@ func (s *importService) uploadPDF(c echo.Context) error {
 		"project_id": projectID,
 	})
 
-	header, err := c.FormFile("file")
+	uploaded, header, err := c.Request.FormFile("file")
+	if uploaded != nil {
+		defer uploaded.Close()
+	}
 	if err != nil {
 		logUploadRejected(requestID, "pdf", projectID, "multipart", "PDF file is missing", err)
 		return apis.NewBadRequestError("请选择要上传的 PDF 文件。", err)
@@ -397,13 +391,13 @@ func (s *importService) uploadPDF(c echo.Context) error {
 		return apis.NewBadRequestError("无法读取上传的 PDF 文件。", err)
 	}
 
-	collection, err := s.app.Dao().FindCollectionByNameOrId("project_files")
+	collection, err := s.app.FindCollectionByNameOrId("project_files")
 	if err != nil {
 		return apis.NewBadRequestError("PDF 文件集合不存在。", err)
 	}
-	record := models.NewRecord(collection)
+	record := core.NewRecord(collection)
 	form := forms.NewRecordUpsert(s.app, record)
-	if err := form.LoadData(map[string]any{
+	form.Load(map[string]any{
 		"project":           projectID,
 		"original_filename": header.Filename,
 		"status":            "processing",
@@ -411,16 +405,12 @@ func (s *importService) uploadPDF(c echo.Context) error {
 		"file_size":         header.Size,
 		"error_code":        "",
 		"error_message":     "",
-	}); err != nil {
-		return apis.NewBadRequestError("无法创建 PDF 处理记录。", err)
-	}
+	})
 	file, err := filesystem.NewFileFromMultipart(header)
 	if err != nil {
 		return apis.NewBadRequestError("无法读取上传的 PDF 文件。", err)
 	}
-	if err := form.AddFiles("file", file); err != nil {
-		return apis.NewBadRequestError("无法保存上传的 PDF 文件。", err)
-	}
+	record.Set("file", file)
 	if err := form.Submit(); err != nil {
 		logUploadRejected(requestID, "pdf", projectID, "record_create", "PDF record creation failed", err)
 		return apis.NewBadRequestError("上传 PDF 失败。", err)
@@ -558,7 +548,7 @@ func (s *importService) runWorker() {
 }
 
 func (s *importService) recoverPendingWork() {
-	jobs, err := s.app.Dao().FindRecordsByFilter(
+	jobs, err := s.app.FindRecordsByFilter(
 		"import_jobs",
 		`status = "queued" || status = "processing" || status = "inspecting"`,
 		"created",
@@ -580,7 +570,7 @@ func (s *importService) recoverPendingWork() {
 		}
 	}
 
-	files, err := s.app.Dao().FindRecordsByFilter(
+	files, err := s.app.FindRecordsByFilter(
 		"project_files",
 		`status = "processing"`,
 		"created",
@@ -608,7 +598,7 @@ func (s *importService) markFatal(work importWork, code, message string, cause e
 	if work.kind == "pdf" {
 		collection = "project_files"
 	}
-	record, err := s.app.Dao().FindRecordById(collection, work.id)
+	record, err := s.app.FindRecordById(collection, work.id)
 	if err != nil {
 		logUpload("error", "fatal_record_lookup_failed", map[string]any{
 			"request_id": work.requestID,
@@ -636,7 +626,7 @@ func (s *importService) markFatal(work importWork, code, message string, cause e
 		}
 	}
 	persistErr, cleanupErr := persistBeforeCleanup(
-		func() error { return s.app.Dao().SaveRecord(record) },
+		func() error { return s.app.Save(record) },
 		cleanup,
 	)
 	if persistErr != nil {
@@ -659,7 +649,7 @@ func (s *importService) markFatal(work importWork, code, message string, cause e
 			"error_code": code,
 			"error":      cleanupErr.Error(),
 		})
-		if err := s.app.Dao().SaveRecord(record); err != nil {
+		if err := s.app.Save(record); err != nil {
 			logUpload("error", "fatal_cleanup_message_persist_failed", map[string]any{
 				"request_id": work.requestID,
 				"kind":       work.kind,
@@ -697,7 +687,7 @@ func persistBeforeCleanup(persist func() error, cleanup func() error) (persistEr
 
 func (s *importService) processPDF(work importWork) {
 	recordID := work.id
-	record, err := s.app.Dao().FindRecordById("project_files", recordID)
+	record, err := s.app.FindRecordById("project_files", recordID)
 	if err != nil {
 		logUpload("error", "pdf_record_lookup_failed", map[string]any{
 			"request_id": work.requestID,
@@ -726,7 +716,7 @@ func (s *importService) processPDF(work importWork) {
 
 	validatedAt := types.NowDateTime()
 	projectID := record.GetString("project")
-	err = s.app.Dao().RunInTransaction(func(txDao *daos.Dao) error {
+	err = s.app.RunInTransaction(func(txDao core.App) error {
 		previous, err := txDao.FindRecordsByFilter(
 			"project_files",
 			fmt.Sprintf(`project = %q && is_primary = true && id != %q`, projectID, recordID),
@@ -740,7 +730,7 @@ func (s *importService) processPDF(work importWork) {
 		for _, old := range previous {
 			old.Set("is_primary", false)
 			old.Set("superseded_at", validatedAt)
-			if err := txDao.SaveRecord(old); err != nil {
+			if err := txDao.Save(old); err != nil {
 				return err
 			}
 		}
@@ -756,7 +746,7 @@ func (s *importService) processPDF(work importWork) {
 		current.Set("validated_at", validatedAt)
 		current.Set("is_primary", true)
 		current.Set("superseded_at", "")
-		return txDao.SaveRecord(current)
+		return txDao.Save(current)
 	})
 	if err != nil {
 		s.markFatal(work, "PDF_STATUS_UPDATE_FAILED", "PDF 已验证，但主文件状态更新失败。", err)
@@ -792,7 +782,7 @@ func validatePDFStructure(reader io.ReadSeeker) (int, error) {
 	return context.PageCount, nil
 }
 
-func (s *importService) openRecordFile(record *models.Record, field string) (io.ReadSeeker, func(), error) {
+func (s *importService) openRecordFile(record *core.Record, field string) (io.ReadSeeker, func(), error) {
 	filename := record.GetString(field)
 	if filename == "" {
 		return nil, func() {}, errors.New("missing file field")
@@ -841,7 +831,7 @@ type csvInspection struct {
 }
 
 func (s *importService) processCSVInspection(work importWork) {
-	job, err := s.app.Dao().FindRecordById("import_jobs", work.id)
+	job, err := s.app.FindRecordById("import_jobs", work.id)
 	if err != nil {
 		logUpload("error", "csv_inspection_job_lookup_failed", map[string]any{
 			"request_id": work.requestID,
@@ -864,7 +854,7 @@ func (s *importService) processCSVInspection(work importWork) {
 		job.Set("pdf_page_limit", pdfPageLimit)
 		job.Set("pdf_snapshot_captured", true)
 	}
-	if err := s.app.Dao().SaveRecord(job); err != nil {
+	if err := s.app.Save(job); err != nil {
 		logUpload("error", "csv_inspection_start_persist_failed", map[string]any{
 			"request_id": work.requestID,
 			"job_id":     work.id,
@@ -965,7 +955,7 @@ func (s *importService) processCSVInspection(work importWork) {
 	job.Set("error_message", fmt.Sprintf("检测编码：%s；页码字段：%s", encodingName, pdfPageField))
 	job.Set("inspection_json", string(encodedInspection))
 	job.Set("finished_at", types.NowDateTime())
-	if err := s.app.Dao().SaveRecord(job); err != nil {
+	if err := s.app.Save(job); err != nil {
 		s.markFatal(work, "CSV_INSPECTION_FINALIZE_FAILED", "CSV 已预检，但预检结果保存失败。", err)
 		return
 	}
@@ -984,7 +974,7 @@ func (s *importService) processCSVInspection(work importWork) {
 
 func (s *importService) processCSV(work importWork) {
 	jobID := work.id
-	job, err := s.app.Dao().FindRecordById("import_jobs", jobID)
+	job, err := s.app.FindRecordById("import_jobs", jobID)
 	if err != nil {
 		logUpload("error", "csv_job_lookup_failed", map[string]any{
 			"request_id": work.requestID,
@@ -1002,7 +992,7 @@ func (s *importService) processCSV(work importWork) {
 	job.Set("processed_count", 0)
 	job.Set("success_count", 0)
 	job.Set("failed_count", 0)
-	if err := s.app.Dao().SaveRecord(job); err != nil {
+	if err := s.app.Save(job); err != nil {
 		logUpload("error", "csv_job_start_persist_failed", map[string]any{
 			"request_id": work.requestID,
 			"job_id":     jobID,
@@ -1065,13 +1055,13 @@ func (s *importService) processCSV(work importWork) {
 		job.Set("project_file", projectFileID)
 		job.Set("pdf_page_limit", pdfPageLimit)
 		job.Set("pdf_snapshot_captured", true)
-		if err := s.app.Dao().SaveRecord(job); err != nil {
+		if err := s.app.Save(job); err != nil {
 			s.markFatal(work, "PDF_SNAPSHOT_PERSIST_FAILED", "CSV 导入无法固定当前主 PDF。", err)
 			return
 		}
 	}
 	if pdfPageLimit > 0 {
-		projectFile, lookupErr := s.app.Dao().FindRecordById("project_files", projectFileID)
+		projectFile, lookupErr := s.app.FindRecordById("project_files", projectFileID)
 		if lookupErr != nil || projectFile.GetString("project") != job.GetString("project") || projectFile.GetString("status") != "ready" {
 			if lookupErr == nil {
 				lookupErr = errors.New("snapshotted PDF no longer belongs to the project or is not ready")
@@ -1142,7 +1132,7 @@ func (s *importService) processCSV(work importWork) {
 	job.Set("error_code", "")
 	job.Set("error_message", fmt.Sprintf("检测编码：%s", encodingName))
 	job.Set("finished_at", types.NowDateTime())
-	if err := s.app.Dao().RunInTransaction(func(txDao *daos.Dao) error {
+	if err := s.app.RunInTransaction(func(txDao core.App) error {
 		if _, err := txDao.DB().NewQuery(
 			`UPDATE pages
 			 SET status = 'pending', updated = strftime('%Y-%m-%d %H:%M:%fZ')
@@ -1150,7 +1140,7 @@ func (s *importService) processCSV(work importWork) {
 		).Bind(dbx.Params{"jobID": jobID}).Execute(); err != nil {
 			return err
 		}
-		return txDao.SaveRecord(job)
+		return txDao.Save(job)
 	}); err != nil {
 		s.markFatal(work, "JOB_FINALIZE_FAILED", "条目已处理，但作业状态更新失败。", err)
 		return
@@ -1171,11 +1161,11 @@ func (s *importService) processCSV(work importWork) {
 }
 
 func (s *importService) clearJobArtifacts(jobID string) error {
-	return clearJobArtifacts(s.app.Dao(), jobID)
+	return clearJobArtifacts(s.app, jobID)
 }
 
-func clearJobArtifacts(dao *daos.Dao, jobID string) error {
-	return dao.RunInTransaction(func(txDao *daos.Dao) error {
+func clearJobArtifacts(dao core.App, jobID string) error {
+	return dao.RunInTransaction(func(txDao core.App) error {
 		if err := deleteJobPages(txDao, jobID); err != nil {
 			return err
 		}
@@ -1184,12 +1174,12 @@ func clearJobArtifacts(dao *daos.Dao, jobID string) error {
 }
 
 func (s *importService) clearJobPages(jobID string) error {
-	return s.app.Dao().RunInTransaction(func(txDao *daos.Dao) error {
+	return s.app.RunInTransaction(func(txDao core.App) error {
 		return deleteJobPages(txDao, jobID)
 	})
 }
 
-func deleteJobPages(dao *daos.Dao, jobID string) error {
+func deleteJobPages(dao core.App, jobID string) error {
 	var attemptCount int
 	if err := dao.DB().NewQuery(
 		`SELECT COUNT(*)
@@ -1204,10 +1194,10 @@ func deleteJobPages(dao *daos.Dao, jobID string) error {
 	if err := walkRecordBatches(
 		artifactCleanupBatch,
 		true,
-		func(limit, offset int) ([]*models.Record, error) {
+		func(limit, offset int) ([]*core.Record, error) {
 			return dao.FindRecordsByFilter("pages", filter, "id", limit, offset)
 		},
-		func(pages []*models.Record) error {
+		func(pages []*core.Record) error {
 			for _, page := range pages {
 				if !isDiscardableImportPage(
 					page.GetString("status"),
@@ -1227,16 +1217,16 @@ func deleteJobPages(dao *daos.Dao, jobID string) error {
 	return deleteRecordBatches(dao, "pages", filter)
 }
 
-func deleteRecordBatches(dao *daos.Dao, collection, filter string) error {
+func deleteRecordBatches(dao core.App, collection, filter string) error {
 	return walkRecordBatches(
 		artifactCleanupBatch,
 		false,
-		func(limit, offset int) ([]*models.Record, error) {
+		func(limit, offset int) ([]*core.Record, error) {
 			return dao.FindRecordsByFilter(collection, filter, "id", limit, offset)
 		},
-		func(records []*models.Record) error {
+		func(records []*core.Record) error {
 			for _, record := range records {
-				if err := dao.DeleteRecord(record); err != nil {
+				if err := dao.Delete(record); err != nil {
 					return err
 				}
 			}
@@ -1248,8 +1238,8 @@ func deleteRecordBatches(dao *daos.Dao, collection, filter string) error {
 func walkRecordBatches(
 	batchSize int,
 	advanceOffset bool,
-	fetch func(limit, offset int) ([]*models.Record, error),
-	visit func([]*models.Record) error,
+	fetch func(limit, offset int) ([]*core.Record, error),
+	visit func([]*core.Record) error,
 ) error {
 	if batchSize <= 0 {
 		return errors.New("record batch size must be positive")
@@ -1479,7 +1469,7 @@ func buildCSVPageWithLimit(headers, values []string, pdfIndex, line, maxPDFPage 
 }
 
 func (s *importService) primaryPDFSnapshot(projectID string) (string, int) {
-	records, err := s.app.Dao().FindRecordsByFilter(
+	records, err := s.app.FindRecordsByFilter(
 		"project_files",
 		fmt.Sprintf(`project = %q && status = "ready" && is_primary = true`, projectID),
 		"-created",
@@ -1500,7 +1490,7 @@ func (s *importService) primaryPDFSnapshot(projectID string) (string, int) {
 }
 
 func (s *importService) nextProjectPageNumber(projectID string) int {
-	records, err := s.app.Dao().FindRecordsByFilter(
+	records, err := s.app.FindRecordsByFilter(
 		"pages",
 		fmt.Sprintf("project = %q", projectID),
 		"-page_number",
@@ -1514,14 +1504,14 @@ func (s *importService) nextProjectPageNumber(projectID string) int {
 }
 
 func (s *importService) flushCSVBatch(
-	job *models.Record,
+	job *core.Record,
 	rows []csvPage,
 	nextPageNumber int,
 	counters *csvCounters,
 ) int {
 	projectID := job.GetString("project")
 	projectFileID := job.GetString("project_file")
-	err := s.app.Dao().RunInTransaction(func(txDao *daos.Dao) error {
+	err := s.app.RunInTransaction(func(txDao core.App) error {
 		for index, row := range rows {
 			if err := savePage(txDao, job.Id, projectID, projectFileID, nextPageNumber+index, row); err != nil {
 				return err
@@ -1545,7 +1535,7 @@ func (s *importService) flushCSVBatch(
 	// Fall back to individual writes so one unexpected database error doesn't
 	// prevent later valid rows from importing.
 	for _, row := range rows {
-		if err := savePage(s.app.Dao(), job.Id, projectID, projectFileID, nextPageNumber, row); err != nil {
+		if err := savePage(s.app, job.Id, projectID, projectFileID, nextPageNumber, row); err != nil {
 			counters.failed++
 			s.addJobError(
 				job.Id,
@@ -1565,12 +1555,12 @@ func (s *importService) flushCSVBatch(
 	return nextPageNumber
 }
 
-func savePage(dao *daos.Dao, jobID, projectID, projectFileID string, pageNumber int, row csvPage) error {
+func savePage(dao core.App, jobID, projectID, projectFileID string, pageNumber int, row csvPage) error {
 	collection, err := dao.FindCollectionByNameOrId("pages")
 	if err != nil {
 		return err
 	}
-	record := models.NewRecord(collection)
+	record := core.NewRecord(collection)
 	record.Set("project", projectID)
 	record.Set("import_job", jobID)
 	record.Set("project_file", projectFileID)
@@ -1582,7 +1572,7 @@ func savePage(dao *daos.Dao, jobID, projectID, projectFileID string, pageNumber 
 	record.Set("proofread_round", 1)
 	record.Set("mismatch_count", 0)
 	record.Set("status", "importing")
-	return dao.SaveRecord(record)
+	return dao.Save(record)
 }
 
 func (s *importService) addJobError(
@@ -1594,7 +1584,7 @@ func (s *importService) addJobError(
 	rawValue string,
 	retryable bool,
 ) {
-	collection, err := s.app.Dao().FindCollectionByNameOrId("import_job_errors")
+	collection, err := s.app.FindCollectionByNameOrId("import_job_errors")
 	if err != nil {
 		logUpload("error", "csv_error_collection_lookup_failed", map[string]any{
 			"kind":       "csv",
@@ -1605,7 +1595,7 @@ func (s *importService) addJobError(
 		})
 		return
 	}
-	record := models.NewRecord(collection)
+	record := core.NewRecord(collection)
 	record.Set("job", jobID)
 	record.Set("row_number", rowNumber)
 	record.Set("column_name", columnName)
@@ -1613,7 +1603,7 @@ func (s *importService) addJobError(
 	record.Set("message", message)
 	record.Set("raw_value", truncateText(rawValue, 1000))
 	record.Set("retryable", retryable)
-	if err := s.app.Dao().SaveRecord(record); err != nil {
+	if err := s.app.Save(record); err != nil {
 		logUpload("error", "csv_error_persist_failed", map[string]any{
 			"kind":       "csv",
 			"job_id":     jobID,
@@ -1624,12 +1614,12 @@ func (s *importService) addJobError(
 	}
 }
 
-func (s *importService) updateJobProgress(job *models.Record, counters *csvCounters, encodingName string) {
+func (s *importService) updateJobProgress(job *core.Record, counters *csvCounters, encodingName string) {
 	job.Set("processed_count", counters.processed)
 	job.Set("success_count", counters.success)
 	job.Set("failed_count", counters.failed)
 	job.Set("error_message", fmt.Sprintf("检测编码：%s", encodingName))
-	if err := s.app.Dao().SaveRecord(job); err != nil {
+	if err := s.app.Save(job); err != nil {
 		logUpload("error", "csv_progress_persist_failed", map[string]any{
 			"kind":            "csv",
 			"job_id":          job.Id,

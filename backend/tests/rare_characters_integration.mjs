@@ -29,7 +29,7 @@ async function waitJob(id, token, statuses) {
 }
 if(process.argv.includes('--verify-persistence')) {
  const fixture=JSON.parse(await readFile(process.env.RARE_BROWSER_FIXTURE,'utf8'))
- const freshAuth=await request('/api/admins/auth-with-password',{method:'POST',body:{identity:process.env.PB_SUPER_EMAIL,password:process.env.PB_SUPER_PASSWORD}})
+ const freshAuth=await request('/api/collections/_superusers/auth-with-password',{method:'POST',body:{identity:process.env.PB_SUPER_EMAIL,password:process.env.PB_SUPER_PASSWORD}})
  for(let i=0;i<fixture.pages.length;i++) {
   const page=await request(`/api/collections/pages/records/${fixture.pages[i].id}`,{token:freshAuth.token})
   assert.deepEqual(JSON.parse(page.ocr_row_json),sourceRow)
@@ -44,7 +44,7 @@ if(process.argv.includes('--verify-persistence')) {
  process.exit(0)
 }
 const admin=await request('/api/collections/users/auth-with-password',{method:'POST',body:{identity:process.env.APP_ADMIN_EMAIL,password:process.env.APP_ADMIN_PASSWORD}})
-const superAuth=await request('/api/admins/auth-with-password',{method:'POST',body:{identity:process.env.PB_SUPER_EMAIL,password:process.env.PB_SUPER_PASSWORD}})
+const superAuth=await request('/api/collections/_superusers/auth-with-password',{method:'POST',body:{identity:process.env.PB_SUPER_EMAIL,password:process.env.PB_SUPER_PASSWORD}})
 const token=admin.token
 try {
  project=await request('/api/fangji/projects',{method:'POST',token,expected:201,body:{name:`生僻字 ${sample} ${suffix}`,description:sample}})

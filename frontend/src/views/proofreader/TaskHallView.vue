@@ -112,12 +112,17 @@
           </footer>
         </article>
       </div>
+      <nav v-if="totalPages > 1" class="admin-pagination" aria-label="项目分页">
+        <button class="btn btn-secondary" :disabled="loading || currentPage <= 1" @click="currentPage--; loadProjects()">上一页</button>
+        <span>第 {{ currentPage }} / {{ totalPages }} 页</span>
+        <button class="btn btn-secondary" :disabled="loading || currentPage >= totalPages" @click="currentPage++; loadProjects()">下一页</button>
+      </nav>
     </section>
   </main>
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { currentUserId } from '@/services/authService'
@@ -132,24 +137,34 @@ const loading = ref(true)
 const claimingProject = ref('')
 const error = ref('')
 const projectQueues = ref([])
-const queueSummary = computed(() => summarizeProofreaderQueues(projectQueues.value))
+const queueSummary = ref(summarizeProofreaderQueues([]))
+const currentPage = ref(1)
+const totalPages = ref(1)
+let loadGeneration = 0
 
 onMounted(async () => {
   await loadProjects()
 })
 
 async function loadProjects() {
+  const generation = ++loadGeneration
   loading.value = true
   error.value = ''
   try {
     const userId = currentUserId(auth.user)
     if (!userId) throw new Error('登录状态已失效，请重新登录')
-    projectQueues.value = await listProjectQueueSummaries()
+    const result = await listProjectQueueSummaries(currentPage.value)
+    if (generation !== loadGeneration) return
+    projectQueues.value = result.items
+    queueSummary.value = result.summary
+    currentPage.value = result.page
+    totalPages.value = result.totalPages
   } catch (e) {
+    if (generation !== loadGeneration) return
     error.value = formatPbError('加载项目大厅失败', e)
     projectQueues.value = []
   } finally {
-    loading.value = false
+    if (generation === loadGeneration) loading.value = false
   }
 }
 

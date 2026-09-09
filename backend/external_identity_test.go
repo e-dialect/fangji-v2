@@ -17,62 +17,27 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/models"
-	"github.com/pocketbase/pocketbase/models/schema"
-	"github.com/pocketbase/pocketbase/tests"
-	"github.com/pocketbase/pocketbase/tokens"
+
+	"github.com/pocketbase/pocketbase"
 )
 
-func newExternalIdentityTestService(t *testing.T) (*externalIdentityService, *tests.TestApp) {
+func newExternalIdentityTestService(t *testing.T) (*externalIdentityService, *pocketbase.PocketBase) {
 	t.Helper()
 	t.Setenv("TRUSTED_PROXY_CIDRS", "172.16.0.0/12")
-	app, err := tests.NewTestApp()
+	app := newSchemaTestApp(t)
+	users, err := app.FindCollectionByNameOrId("users")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(app.Cleanup)
-
-	users, err := app.Dao().FindCollectionByNameOrId("users")
-	if err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"fixture-one", "fixture-two"} {
+		user := core.NewRecord(users)
+		user.Set("username", name)
+		user.Set("role", "user")
+		user.SetPassword("FixturePassword123!")
+		if err := app.Save(user); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if users.Schema.GetFieldByName("role") == nil {
-		users.Schema.AddField(&schema.SchemaField{Name: "role", Type: schema.FieldTypeText})
-	}
-	if users.Schema.GetFieldByName("must_change_password") == nil {
-		users.Schema.AddField(&schema.SchemaField{Name: "must_change_password", Type: schema.FieldTypeBool})
-	}
-	if err := app.Dao().SaveCollection(users); err != nil {
-		t.Fatal(err)
-	}
-
-	mappings := &models.Collection{
-		Name: "external_identity_mappings",
-		Type: models.CollectionTypeBase,
-		Schema: schema.NewSchema(
-			&schema.SchemaField{Name: "user", Type: schema.FieldTypeText, Required: true},
-			&schema.SchemaField{Name: "provider", Type: schema.FieldTypeText, Required: true},
-			&schema.SchemaField{Name: "subject", Type: schema.FieldTypeText, Required: true},
-		),
-		Indexes: []string{
-			"CREATE UNIQUE INDEX idx_test_external_subject ON external_identity_mappings (provider, subject)",
-			"CREATE UNIQUE INDEX idx_test_external_user_provider ON external_identity_mappings (user, provider)",
-		},
-	}
-	if err := app.Dao().SaveCollection(mappings); err != nil {
-		t.Fatal(err)
-	}
-	memberships := &models.Collection{
-		Name: "project_memberships",
-		Type: models.CollectionTypeBase,
-		Schema: schema.NewSchema(
-			&schema.SchemaField{Name: "user", Type: schema.FieldTypeText, Required: true},
-		),
-	}
-	if err := app.Dao().SaveCollection(memberships); err != nil {
-		t.Fatal(err)
-	}
-
 	registerTrustedClientIP(app)
 	return newExternalIdentityService(app), app
 }
@@ -93,7 +58,7 @@ func TestExternalIdentityCreatesOneStableLocalMapping(t *testing.T) {
 	if first.Email() != "" || first.GetString("name") != "" {
 		t.Fatalf("remote profile data must not be synthesized: email=%q name=%q", first.Email(), first.GetString("name"))
 	}
-	if first.PasswordHash() == "" || first.ValidatePassword("remote-password") {
+	if first.GetRaw("password").(*core.PasswordFieldValue).Hash == "" || first.ValidatePassword("remote-password") {
 		t.Fatal("external users must receive an independent random local password")
 	}
 
@@ -105,14 +70,14 @@ func TestExternalIdentityCreatesOneStableLocalMapping(t *testing.T) {
 		t.Fatalf("repeated identity should reuse %q, got %q (created=%v)", first.Id, second.Id, created)
 	}
 
-	mappings, err := app.Dao().FindRecordsByFilter("external_identity_mappings", `provider = "mock"`, "created", 10, 0)
+	mappings, err := app.FindRecordsByFilter("external_identity_mappings", `provider = "mock"`, "created", 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(mappings) != 1 || mappings[0].GetString("subject") != "remote-42" {
 		t.Fatalf("unexpected mappings: %#v", mappings)
 	}
-	memberships, err := app.Dao().FindRecordsByFilter("project_memberships", `user = "`+first.Id+`"`, "created", 10, 0)
+	memberships, err := app.FindRecordsByFilter("project_memberships", `user = "`+first.Id+`"`, "created", 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +127,7 @@ func TestConcurrentExternalLoginsConvergeOnOneAccount(t *testing.T) {
 			t.Fatalf("concurrent login mapped to %q and %q", userID, result.id)
 		}
 	}
-	mappings, err := app.Dao().FindRecordsByFilter("external_identity_mappings", `subject = "concurrent-subject"`, "created", 10, 0)
+	mappings, err := app.FindRecordsByFilter("external_identity_mappings", `subject = "concurrent-subject"`, "created", 10, 0)
 	if err != nil || len(mappings) != 1 {
 		t.Fatalf("concurrent mapping count=%d err=%v", len(mappings), err)
 	}
@@ -170,7 +135,7 @@ func TestConcurrentExternalLoginsConvergeOnOneAccount(t *testing.T) {
 
 func TestExternalIdentityBindingConflictsAndIdempotency(t *testing.T) {
 	service, app := newExternalIdentityTestService(t)
-	users, err := app.Dao().FindRecordsByFilter("users", `id != ""`, "created", 2, 0)
+	users, err := app.FindRecordsByFilter("users", `id != ""`, "created", 2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,11 +219,11 @@ func TestExternalLoginRateLimitIgnoresRotatingSpoofedXFF(t *testing.T) {
 	_, app := newExternalIdentityTestService(t)
 	service := newExternalIdentityService(app, &mockExternalProvider{err: errExternalCredentials})
 	service.register()
-	e, err := apis.InitApi(app)
+	e, err := apis.NewRouter(app)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.OnBeforeServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
+	if err := app.OnServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -272,7 +237,11 @@ func TestExternalLoginRateLimitIgnoresRotatingSpoofedXFF(t *testing.T) {
 		request.RemoteAddr = "172.20.0.4:12345"
 		request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		request.Header.Set("X-Forwarded-For", fmt.Sprintf("%s, %s, 172.20.0.3", spoofedIP, clientIP))
-		e.ServeHTTP(recorder, request)
+		mux, err := e.BuildMux()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mux.ServeHTTP(recorder, request)
 		return recorder.Code
 	}
 
@@ -327,11 +296,11 @@ func TestExternalLoginRouteUsesProviderMapping(t *testing.T) {
 	service := newExternalIdentityService(app, provider)
 	service.register()
 
-	e, err := apis.InitApi(app)
+	e, err := apis.NewRouter(app)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.OnBeforeServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
+	if err := app.OnServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -343,7 +312,11 @@ func TestExternalLoginRouteUsesProviderMapping(t *testing.T) {
 			strings.NewReader(`{"identity":"remote-name","password":"remote-secret"}`),
 		)
 		request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-		e.ServeHTTP(recorder, request)
+		mux, err := e.BuildMux()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mux.ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("external login status=%d body=%s", recorder.Code, recorder.Body.String())
 		}
@@ -376,18 +349,22 @@ func TestExternalLoginRouteRejectsBadProviderCredentials(t *testing.T) {
 	_, app := newExternalIdentityTestService(t)
 	service := newExternalIdentityService(app, &mockExternalProvider{err: errExternalCredentials})
 	service.register()
-	e, err := apis.InitApi(app)
+	e, err := apis.NewRouter(app)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.OnBeforeServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
+	if err := app.OnServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
 		t.Fatal(err)
 	}
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/fangji/auth/external/mock/login", strings.NewReader(`{"identity":"bad","password":"bad"}`))
 	request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	e.ServeHTTP(recorder, request)
+	mux, err := e.BuildMux()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -397,18 +374,18 @@ func TestExternalProviderDiscoveryAndExplicitBindingRoutes(t *testing.T) {
 	_, app := newExternalIdentityTestService(t)
 	service := newExternalIdentityService(app, &mockExternalProvider{subject: "bind-subject"})
 	service.register()
-	e, err := apis.InitApi(app)
+	e, err := apis.NewRouter(app)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.OnBeforeServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
+	if err := app.OnServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
 		t.Fatal(err)
 	}
-	users, err := app.Dao().FindRecordsByFilter("users", `id != ""`, "created", 1, 0)
+	users, err := app.FindRecordsByFilter("users", `id != ""`, "created", 1, 0)
 	if err != nil || len(users) != 1 {
 		t.Fatalf("load test user: users=%d err=%v", len(users), err)
 	}
-	token, err := tokens.NewRecordAuthToken(app, users[0])
+	token, err := users[0].NewAuthToken()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +397,11 @@ func TestExternalProviderDiscoveryAndExplicitBindingRoutes(t *testing.T) {
 		if authToken != "" {
 			req.Header.Set("Authorization", authToken)
 		}
-		e.ServeHTTP(recorder, req)
+		mux, err := e.BuildMux()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mux.ServeHTTP(recorder, req)
 		return recorder
 	}
 

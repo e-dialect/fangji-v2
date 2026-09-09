@@ -4,7 +4,7 @@ const joinFailureWindowMs = 15 * 60 * 1000
 const joinBlockDurationMs = 15 * 60 * 1000
 
 function auth(c) {
-  const record = c.get("authRecord")
+  const record = c.auth
   if (!record) throw new UnauthorizedError("登录状态已失效，请重新登录")
   return record
 }
@@ -40,8 +40,8 @@ function project(dao, projectId) {
 
 function capabilities(dao, projectRecord, authRecord) {
   const platformAdmin = isPlatformAdmin(authRecord)
-  const owner = projectRecord.getString("admin") === authRecord.getId()
-  const member = owner ? null : membership(dao, projectRecord.getId(), authRecord.getId())
+  const owner = projectRecord.getString("admin") === authRecord.id
+  const member = owner ? null : membership(dao, projectRecord.id, authRecord.id)
   const projectRole = owner ? "owner" : (member ? member.getString("role") : null)
   return {
     projectRole,
@@ -67,7 +67,7 @@ function canManage(dao, projectRecord, authRecord) {
 }
 
 function canProofread(dao, projectId, authRecord) {
-  const member = membership(dao, projectId, authRecord.getId())
+  const member = membership(dao, projectId, authRecord.id)
   return Boolean(member && member.getString("role") === "proofreader")
 }
 
@@ -104,7 +104,7 @@ function ownedProjectCount(dao, userId) {
 }
 
 function creationCapability(dao, authRecord) {
-  const ownedCount = ownedProjectCount(dao, authRecord.getId())
+  const ownedCount = ownedProjectCount(dao, authRecord.id)
   if (isPlatformAdmin(authRecord)) {
     return {
       canCreateProjects: true,
@@ -115,7 +115,7 @@ function creationCapability(dao, authRecord) {
     }
   }
 
-  const grant = creatorGrant(dao, authRecord.getId())
+  const grant = creatorGrant(dao, authRecord.id)
   const enabled = Boolean(grant && grant.getBool("enabled"))
   const limit = nullableLimit(grant)
   const remaining = limit === null ? null : Math.max(limit - ownedCount, 0)
@@ -131,7 +131,7 @@ function creationCapability(dao, authRecord) {
 function projectJson(dao, projectRecord, authRecord) {
   const permissions = capabilities(dao, projectRecord, authRecord)
   const result = {
-    id: projectRecord.getId(),
+    id: projectRecord.id,
     name: projectRecord.getString("name"),
     description: projectRecord.getString("description"),
     owner: projectRecord.getString("admin"),
@@ -216,7 +216,7 @@ function recordProjectJoinFailure(dao, projectId, userId, nowMs) {
   attempt.set("failures", failures)
   attempt.set("window_started", startedAt)
   attempt.set("blocked_until", blockedUntil)
-  dao.saveRecord(attempt)
+  dao.save(attempt)
   return failures >= joinFailureLimit
 }
 
@@ -237,18 +237,18 @@ function recordProjectJoinSourceFailure(dao, projectId, sourceKey, nowMs) {
   attempt.set("failures", failures)
   attempt.set("window_started", startedAt)
   attempt.set("blocked_until", blockedUntil)
-  dao.saveRecord(attempt)
+  dao.save(attempt)
   return failures >= joinFailureLimit
 }
 
 function clearProjectJoinAttempt(dao, projectId, userId) {
   const attempt = projectJoinAttempt(dao, projectId, userId)
-  if (attempt) dao.deleteRecord(attempt)
+  if (attempt) dao.delete(attempt)
 }
 
 function clearProjectJoinSourceAttempt(dao, projectId, sourceKey) {
   const attempt = projectJoinSourceAttempt(dao, projectId, sourceKey)
-  if (attempt) dao.deleteRecord(attempt)
+  if (attempt) dao.delete(attempt)
 }
 
 function clearProjectJoinAttempts(dao, projectId) {
@@ -259,7 +259,7 @@ function clearProjectJoinAttempts(dao, projectId) {
     1000000,
     0
   )
-  for (const attempt of attempts) dao.deleteRecord(attempt)
+  for (const attempt of attempts) dao.delete(attempt)
 
   const sourceAttempts = dao.findRecordsByFilter(
     "project_join_source_attempts",
@@ -268,7 +268,7 @@ function clearProjectJoinAttempts(dao, projectId) {
     1000000,
     0
   )
-  for (const attempt of sourceAttempts) dao.deleteRecord(attempt)
+  for (const attempt of sourceAttempts) dao.delete(attempt)
 }
 
 function verifyProjectPassword(secret, password) {
@@ -306,10 +306,10 @@ function syncProjectAcl(dao, projectId) {
   acl.set("members", [projectRecord.getString("admin"), ...managerIds, ...proofreaderIds].filter(Boolean))
   acl.set("managers", managerIds)
   acl.set("proofreaders", proofreaderIds)
-  dao.saveRecord(acl)
-  if (projectRecord.getString("acl") !== acl.getId()) {
-    projectRecord.set("acl", acl.getId())
-    dao.saveRecord(projectRecord)
+  dao.save(acl)
+  if (projectRecord.getString("acl") !== acl.id) {
+    projectRecord.set("acl", acl.id)
+    dao.save(projectRecord)
   }
   return acl
 }
@@ -324,13 +324,13 @@ function setProjectPassword(dao, projectId, password) {
   secret.set("project", projectId)
   secret.set("username", `project_${projectId}`)
   secret.setPassword(value)
-  dao.saveRecord(secret)
+  dao.save(secret)
   clearProjectJoinAttempts(dao, projectId)
 }
 
 function deleteProjectSecret(dao, projectId) {
   const secret = projectSecret(dao, projectId)
-  if (secret) dao.deleteRecord(secret)
+  if (secret) dao.delete(secret)
   clearProjectJoinAttempts(dao, projectId)
 }
 
