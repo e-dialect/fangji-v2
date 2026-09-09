@@ -64,4 +64,3 @@ python3 backend/ops/backup.py restore /secure-backups/fangji-20260909 ./pb_data-
 验证数据库记录和全部文件 SHA-256 一致；损坏备份、软链接及覆盖现有数据均被拒绝。
 这是可重复的离线工具演练，不等同于实际服务器的容量、异地传输及通知链路验收。
 部署者仍须测量实际 RPO/RTO，验证容器非 root/最小权限和异地恢复。
-
