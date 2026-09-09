@@ -22,3 +22,12 @@ test('scopes remembered keyboard choices by user and project', () => {
   assert.notEqual(keyboardPreferenceKey('user-a', 'project-a'), keyboardPreferenceKey('user-b', 'project-a'))
   assert.notEqual(keyboardPreferenceKey('user-a', 'project-a'), keyboardPreferenceKey('user-a', 'project-b'))
 })
+
+test('counts exact insertion values once across shortcut and full groups', async () => {
+  const { countKeyboardValues } = await import('../src/lib/keyboardSelection.js')
+  assert.equal(countKeyboardValues(), 0)
+  assert.equal(countKeyboardValues([
+    { keys: [{ value: 'ã' }, { value: 'ɒ̃' }] },
+    { keys: [{ value: 'ã' }, { value: 'ã' }, { value: 'ɒ̃' }] }
+  ]), 3, 'do not normalize precomposed/decomposed values when counting')
+})

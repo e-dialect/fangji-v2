@@ -66,7 +66,19 @@ test('phonetic font covers every shipped keyboard code point, including BUC comb
   const { readFile } = await import('node:fs/promises')
   const keyboard = JSON.parse(await readFile(new URL('../../backend/keyboards/hinghwa-dialect.json', import.meta.url), 'utf8'))
   const manifest = JSON.parse(await readFile(new URL('../public/fonts/phonetic/manifest.json', import.meta.url), 'utf8'))
-  for (const section of keyboard.sections) for (const key of section.keys) for (const char of key.value) {
-    assert(manifest.codepoints.includes(char.codePointAt(0)), `${section.id}: ${char}`)
+  const symbols = JSON.parse(await readFile(new URL('../public/fonts/phonetic/symbols-manifest.json', import.meta.url), 'utf8'))
+  const covered = new Set([...manifest.codepoints, ...symbols.codepoints])
+  for (const cp of symbols.codepoints) assert(!manifest.codepoints.includes(cp), 'font ranges overlap')
+  const { createHash } = await import('node:crypto')
+  const css = await readFile(new URL('../src/phonetic-fonts.css', import.meta.url), 'utf8')
+  for (const item of [manifest, symbols]) {
+    const bytes = await readFile(new URL('../public/fonts/phonetic/' + item.file, import.meta.url))
+    assert.equal(bytes.length, item.bytes)
+    assert(item.file.includes(createHash('sha256').update(bytes).digest('hex').slice(0, 12)))
+    assert(css.includes(item.file))
+    for (const cp of item.codepoints) assert(css.includes('U+' + cp.toString(16).toUpperCase()))
+  }
+  for (const section of keyboard.sections) for (const key of section.keys) for (const char of key.value + (key.label || '')) {
+    assert(covered.has(char.codePointAt(0)), `${section.id}: ${char}`)
   }
 })

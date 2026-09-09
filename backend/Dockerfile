@@ -1,4 +1,4 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 WORKDIR /src
 COPY go.mod go.sum* ./
@@ -13,7 +13,11 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pocketbase .
 
 FROM alpine:3.24
 
-RUN apk add --no-cache ca-certificates curl
+RUN apk add --no-cache ca-certificates curl \
+  && addgroup -g 10001 fangji \
+  && adduser -D -u 10001 -G fangji fangji \
+  && mkdir -p /pb/pb_data \
+  && chown 10001:10001 /pb/pb_data
 
 COPY --from=builder /out/pocketbase /pb/pocketbase
 RUN chmod +x /pb/pocketbase
@@ -24,6 +28,8 @@ COPY docker-entrypoint.sh /pb/docker-entrypoint.sh
 RUN chmod +x /pb/docker-entrypoint.sh
 
 WORKDIR /pb
+
+USER 10001:10001
 
 EXPOSE 8090
 

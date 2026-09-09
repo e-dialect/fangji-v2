@@ -1,4 +1,6 @@
 const {chromium}=require('playwright');
+const preset = require('../../../backend/keyboards/hinghwa-dialect.json');
+let realPreset = false;
 (async()=>{
 const browser=await chromium.launch({headless:true,channel:process.env.BROWSER_CHANNEL || 'chrome'});const page=await browser.newPage();page.on('dialog', dialog=>dialog.accept()); const errors=[];page.on('pageerror',e=>errors.push(e.message));
 const row={'字词':'测试','读音':'tɛ','释义':'演示材料'};const record={id:'page1',project:'project1',page_number:1,pdf_page:5,ocr_row_json:JSON.stringify(row),expand:{project:{name:'虚构测试项目'},project_file:{id:'file1',collectionId:'project_files',file:'fixture.pdf'}}};
@@ -8,6 +10,7 @@ if(url.endsWith('/claim'))data={...record,leaseToken:'fixture-lease',leaseExpire
 if(url.endsWith('/mine'))data=[record];
 if(url.endsWith('/keyboards'))data={items:[{keyboardId:'ipa',name:'音标键盘',definition:{sections:[{id:'vowels',label:'元音',defaultOpen:true,keys:['ɑ','ɛ','ə','ɔ'].map(value=>({value}))},{id:'tones',label:'声调',keys:[{value:'˥'}]}]}}],defaultKeyboardId:'ipa'};
 if(url.endsWith('/arbitration'))data={page:record,attempts:[{id:'a',pass_no:1,row_json:JSON.stringify(row)},{id:'b',pass_no:2,row_json:JSON.stringify({...row,读音:'ta'})}]};
+if (url.endsWith('/keyboards') && realPreset) data={items:[{keyboardId:preset.id,name:preset.name,definition:preset}],defaultKeyboardId:preset.id};
 await route.fulfill({json:data});});
 for(const admin of [false,true]){
 await page.setViewportSize({width:1440,height:900});await page.goto('http://localhost:5173/tests/fixtures/review.html'+(admin?'?admin':''));await page.waitForTimeout(1000); await page.locator('.ipa-key').first().waitFor({timeout:3000});
@@ -59,6 +62,66 @@ for (const admin of [false, true]) {
   await page.getByRole('button', { name: '字符键盘', exact: true }).click()
   await page.getByRole('button', { name: '插入字符 ɑ', exact: true }).click()
   if (!await fieldCards.nth(1).isVisible() || await inputs.nth(1).inputValue() !== 'ɑtɛ') throw Error('Repeated resize uses stale target')
+}
+// Exercise the shipped preset with both shortcut and complete categories.
+realPreset = true;
+await page.addInitScript(() => localStorage.clear());
+for (const admin of [false, true]) for (const mobile of [false, true]) {
+  await page.setViewportSize(mobile ? {width:390,height:844} : {width:1440,height:900});
+  await page.evaluate(() => localStorage.clear());
+  await page.goto('http://localhost:5173/tests/fixtures/review.html'+(admin?'?admin':''));
+  await page.locator('.ipa-key').first().waitFor({state:'attached'});
+  await page.locator('.pdf-loading-mask').waitFor({state:'hidden'});
+  if (mobile) {
+    await page.getByRole('button',{name:'字符键盘',exact:true}).click();
+    await page.getByRole('button',{name:'钉住',exact:true}).click();
+    if(await page.locator('.keyboard-section-switcher button[aria-pressed="true"]').innerText()!=='常用校对 24')throw Error('Wrong initial mobile group');
+  } else {
+    if(await page.locator('details.ipa-section[open]').count()!==1)throw Error('Only shortcuts should start expanded');
+  }
+  const group = id => page.locator('details.ipa-section').filter({has:page.locator('summary',{hasText:preset.sections.find(s=>s.id===id).label})});
+  const choose=async id=>{
+    const section=preset.sections.find(s=>s.id===id);
+    if(mobile) await page.getByRole('button',{name:section.label+' '+section.keys.length,exact:true}).click();
+    else if(!await group(id).getAttribute('open').then(v=>v!==null)) await group(id).locator('summary').click();
+    return group(id);
+  };
+  const insert=async (id,value)=>{
+    const section=await choose(id),key=preset.sections.find(s=>s.id===id).keys.find(k=>k.value===value);
+    await section.getByRole('button',{name:key.hint||'插入字符 '+value,exact:true}).click();
+  };
+  const count=new Set(preset.sections.flatMap(s=>s.keys.map(k=>k.value))).size;
+  if(!await page.locator('.ipa-keyboard-heading').innerText().then(t=>t.includes(count+' 个字符')))throw Error('Shortcut duplicates inflated total');
+  await page.evaluate(()=>document.fonts.ready);
+  await page.screenshot({path:`/tmp/keyboard-default-${admin?'arb':'proof'}-${mobile?'mobile':'desktop'}.png`});
+  const field=page.locator('textarea:visible').first();
+  await field.fill('甲乙');await field.focus();
+  await field.evaluate(el=>{el.setSelectionRange(1,1);el.dispatchEvent(new Event('select'))});
+  await insert('common-proofreading','ã');
+  await insert('nasalized','ã');
+  if(await field.inputValue()!=='甲ãã乙')throw Error('Shortcut/category values or caret differ');
+  await field.evaluate(el=>{el.focus();el.setSelectionRange(1,3);el.dispatchEvent(new Event('select'))});
+  await insert('common-proofreading','ɒ̃');
+  if(await field.inputValue()!=='甲ɒ̃乙')throw Error('Shortcut lost replacement selection');
+  await field.fill('甲a乙');await field.focus();
+  await field.evaluate(el=>{el.setSelectionRange(2,2);el.dispatchEvent(new Event('select'))});
+  await insert('combining-marks','̃');
+  await insert('dictionary-symbols','〔');await insert('common-proofreading','〕');
+  if(await field.inputValue()!=='甲ã〔〕乙')throw Error('Mark label leaked or cross-group caret changed');
+  for(const section of preset.sections) {
+    const visible=await choose(section.id);
+    if(await visible.locator('.ipa-key:visible').count()!==section.keys.length)throw Error('Unreachable category '+section.id);
+    // Long groups scroll within the dock; even the last key must be fully reachable.
+    const last=visible.locator('.ipa-key').last();await last.scrollIntoViewIfNeeded();
+    const keyBox=await last.boundingBox(),dockBox=await page.locator('.keyboard-dock-content').boundingBox();
+    if(keyBox.y<dockBox.y-1 || keyBox.y+keyBox.height>dockBox.y+dockBox.height+1)throw Error('Clipped last key '+section.id);
+  }
+  await insert('mandarin-tones','ǖ');
+  if(await field.inputValue()!=='甲ã〔〕ǖ乙')throw Error('Complete Mandarin group lost caret');
+  const loaded=await page.evaluate(async values=>Promise.all(values.map(async value=>(await document.fonts.load('16px "Fangji Phonetic"',value)).length>0)),[...new Set(preset.sections.flatMap(s=>s.keys.map(k=>k.value)))]);
+  if(loaded.some(value=>!value))throw Error('Keyboard value has no bundled font');
+  await choose('common-proofreading');
+  await page.screenshot({path:`/tmp/keyboard-symbols-${admin?'arb':'proof'}-${mobile?'mobile':'desktop'}.png`});
 }
 if(errors.length)throw Error(errors.join('\n'));console.log('Desktop/mobile layout, group switching, protected PDF mapping, cross-breakpoint targets and per-field selections passed for both review views.');await browser.close();
 })().catch(e=>{console.error(e);process.exit(1)});

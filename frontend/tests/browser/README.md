@@ -15,3 +15,13 @@ and checks source-page mapping instead of requesting original file URLs. Screens
 
 Native iOS/Android keyboard behavior still requires device testing; desktop viewport
 emulation cannot verify the operating system's keyboard or IME.
+
+The suite also loads the real shipped preset in desktop/mobile proofreading and
+arbitration: an exact combining tilde, its dotted-circle label, and both tortoise
+shell brackets are inserted at the saved caret. Synthetic screenshots are saved
+to `/tmp/keyboard-symbols-*.png`.
+
+Regrouping checks assert the 24-key initial group, a deduplicated total, identical
+shortcut/category insertion, cross-group selection replacement, reachability of
+all categories and complete pinyin insertion. The default layouts are captured
+with synthetic data in `/tmp/keyboard-default-*.png`.

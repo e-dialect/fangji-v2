@@ -17,7 +17,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/models"
 )
 
 const defaultKeyboardID = "hinghwa-dialect"
@@ -66,11 +65,11 @@ func registerKeyboardPresets(app core.App) error {
 	// PocketBase applies pending migrations after bootstrap and before this hook.
 	// Synchronizing here ensures a direct `pocketbase serve` upgrade can create
 	// migration 21's collections and seed presets during the same process start.
-	app.OnBeforeServe().Add(func(_ *core.ServeEvent) error {
+	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		if err := syncKeyboardPresets(app, presets); err != nil {
 			return fmt.Errorf("sync embedded keyboard presets: %w", err)
 		}
-		return nil
+		return e.Next()
 	})
 	return nil
 }
@@ -179,7 +178,7 @@ func validateKeyboardDefinition(definition keyboardDefinition) error {
 }
 
 func syncKeyboardPresets(app core.App, presets map[string]keyboardPreset) error {
-	dao := app.Dao()
+	dao := app
 	collection, err := dao.FindCollectionByNameOrId("keyboards")
 	if err != nil {
 		// Numeric migrations run in separate processes. Earlier migration steps do
@@ -191,7 +190,7 @@ func syncKeyboardPresets(app core.App, presets map[string]keyboardPreset) error 
 	if err != nil {
 		return err
 	}
-	byID := make(map[string]*models.Record, len(existing))
+	byID := make(map[string]*core.Record, len(existing))
 	for _, record := range existing {
 		if record.GetString("origin") == "preset" {
 			byID[record.GetString("keyboard_id")] = record
@@ -207,7 +206,7 @@ func syncKeyboardPresets(app core.App, presets map[string]keyboardPreset) error 
 		preset := presets[id]
 		record := byID[id]
 		if record == nil {
-			record = models.NewRecord(collection)
+			record = core.NewRecord(collection)
 		}
 		record.Set("keyboard_id", preset.Definition.ID)
 		record.Set("schema_version", preset.Definition.SchemaVersion)
@@ -217,14 +216,14 @@ func syncKeyboardPresets(app core.App, presets map[string]keyboardPreset) error 
 		record.Set("origin", "preset")
 		record.Set("active", true)
 		record.Set("source_hash", preset.Hash)
-		if err := dao.SaveRecord(record); err != nil {
+		if err := dao.Save(record); err != nil {
 			return err
 		}
 		delete(byID, id)
 	}
 	for _, stale := range byID {
 		stale.Set("active", false)
-		if err := dao.SaveRecord(stale); err != nil {
+		if err := dao.Save(stale); err != nil {
 			return err
 		}
 	}
@@ -237,7 +236,7 @@ func syncKeyboardPresets(app core.App, presets map[string]keyboardPreset) error 
 }
 
 func enableDefaultKeyboardForExistingProjects(app core.App, keyboardID string) error {
-	dao := app.Dao()
+	dao := app
 	keyboards, err := dao.FindRecordsByFilter("keyboards", fmt.Sprintf(`keyboard_id = %q && active = true`, keyboardID), "", 1, 0)
 	if err != nil || len(keyboards) == 0 {
 		return fmt.Errorf("active default keyboard %q was not found", keyboardID)
@@ -264,13 +263,13 @@ func enableDefaultKeyboardForExistingProjects(app core.App, keyboardID string) e
 		if _, exists := linked[project.Id]; exists {
 			continue
 		}
-		link := models.NewRecord(linkCollection)
+		link := core.NewRecord(linkCollection)
 		link.Set("project", project.Id)
 		link.Set("keyboard", keyboards[0].Id)
 		link.Set("enabled", true)
 		link.Set("is_default", true)
 		link.Set("sort_order", 0)
-		if err := dao.SaveRecord(link); err != nil {
+		if err := dao.Save(link); err != nil {
 			return err
 		}
 	}

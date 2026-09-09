@@ -22,7 +22,7 @@ await api(`/api/fangji/projects/${project.id}/claim`,{method:'POST',token:auth.t
 const task=await api(`/api/fangji/pages/${page.id}/task`,{token:auth.token});assert.deepEqual(JSON.parse(task.row_headers_json),['词条','10','释义','2'])
 console.log('PASS: real CSV upload, inspection, import, storage and claimed task preserve source column order')
 if(process.env.COLUMN_BROWSER_FIXTURE){
- const superAuth=await api('/api/admins/auth-with-password',{method:'POST',body:{identity:process.env.PB_SUPER_EMAIL,password:process.env.PB_SUPER_PASSWORD}})
+ const superAuth=await api('/api/collections/_superusers/auth-with-password',{method:'POST',body:{identity:process.env.PB_SUPER_EMAIL,password:process.env.PB_SUPER_PASSWORD}})
  await api(`/api/collections/users/records/${admin.record.id}`,{method:'PATCH',token:superAuth.token,body:{must_change_password:false}});admin.record.must_change_password=false
  const {writeFile}=await import('node:fs/promises');await writeFile(process.env.COLUMN_BROWSER_FIXTURE,JSON.stringify({base,auth,admin,project,page}))
  const {spawnSync}=await import('node:child_process');assert.equal(spawnSync('node',[process.env.COLUMN_BROWSER_SCRIPT],{stdio:'inherit',env:process.env}).status,0)

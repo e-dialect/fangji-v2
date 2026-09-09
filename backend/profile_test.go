@@ -6,7 +6,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
-	"github.com/pocketbase/pocketbase/tokens"
+
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,7 +20,7 @@ func TestProfileUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := tokens.NewRecordAuthToken(app, user)
+	token, err := user.NewAuthToken()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,15 +29,15 @@ func TestProfileUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	other.SetEmail("taken@example.com")
-	if err := app.Dao().SaveRecord(other); err != nil {
+	if err := app.Save(other); err != nil {
 		t.Fatal(err)
 	}
 	registerProfile(app)
-	e, err := apis.InitApi(app)
+	e, err := apis.NewRouter(app)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := app.OnBeforeServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
+	if err := app.OnServe().Trigger(&core.ServeEvent{App: app, Router: e}); err != nil {
 		t.Fatal(err)
 	}
 	request := func(body, auth string, status int) map[string]any {
@@ -48,13 +48,21 @@ func TestProfileUpdate(t *testing.T) {
 			req.Header.Set(echo.HeaderAuthorization, auth)
 		}
 		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
+		mux, err := e.BuildMux()
+		if err != nil {
+			t.Fatal(err)
+		}
+		mux.ServeHTTP(rec, req)
 		if rec.Code != status {
 			t.Fatalf("status=%d want=%d body=%s", rec.Code, status, rec.Body.String())
 		}
 		var result map[string]any
 		if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 			t.Fatal(err)
+		}
+		if rec.Code == 200 {
+			token = result["token"].(string)
+			return result["record"].(map[string]any)
 		}
 		return result
 	}
@@ -66,12 +74,12 @@ func TestProfileUpdate(t *testing.T) {
 	if result["name"] != "测试𢶀" || result["email"] != "new@example.com" || result["verified"] != false || result["role"] != "user" {
 		t.Fatalf("unexpected profile %#v", result)
 	}
-	saved, err := app.Dao().FindRecordById("users", user.Id)
+	saved, err := app.FindRecordById("users", user.Id)
 	if err != nil || saved.GetString("name") != "测试𢶀" || saved.Verified() {
 		t.Fatalf("profile not persisted: %v", err)
 	}
 	saved.SetVerified(true)
-	if err := app.Dao().SaveRecord(saved); err != nil {
+	if err := app.Save(saved); err != nil {
 		t.Fatal(err)
 	}
 	result = request(`{"name":"新昵称"}`, token, 200)
@@ -79,12 +87,12 @@ func TestProfileUpdate(t *testing.T) {
 		t.Fatal("nickname edit cleared verification")
 	}
 	request(`{"email":""}`, token, 200)
-	saved, _ = app.Dao().FindRecordById("users", user.Id)
+	saved, _ = app.FindRecordById("users", user.Id)
 	if saved.Email() != "" || saved.Verified() {
 		t.Fatal("clearing email must clear verification")
 	}
 	saved.Set("must_change_password", true)
-	if err := app.Dao().SaveRecord(saved); err != nil {
+	if err := app.Save(saved); err != nil {
 		t.Fatal(err)
 	}
 	request(`{"name":"blocked"}`, token, 403)
@@ -97,7 +105,7 @@ func TestExternalNicknameOnlySeedsNewUser(t *testing.T) {
 		t.Fatalf("nickname not inherited: %v", err)
 	}
 	first.Set("name", "本地修改")
-	if err := app.Dao().SaveRecord(first); err != nil {
+	if err := app.Save(first); err != nil {
 		t.Fatal(err)
 	}
 	second, created, err := service.resolveOrCreateUserWithName("mock", "nickname-test", "外部修改")

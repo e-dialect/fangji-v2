@@ -15,14 +15,17 @@ import (
 // accepted only when the immediate peer belongs to an explicitly trusted
 // proxy range; direct clients cannot spoof their rate-limit identity.
 func registerTrustedClientIP(app core.App) {
-	app.OnBeforeServe().PreAdd(func(event *core.ServeEvent) error {
+	app.OnServe().BindFunc(func(event *core.ServeEvent) error {
 		rawCIDRs := strings.TrimSpace(os.Getenv("TRUSTED_PROXY_CIDRS"))
 		extractor, err := trustedClientIPExtractor(rawCIDRs)
 		if err != nil {
 			return fmt.Errorf("configure trusted proxy IP extraction: %w", err)
 		}
-		event.Router.IPExtractor = extractor
-		return nil
+		event.Router.BindFunc(func(e *core.RequestEvent) error {
+			e.Set("fangjiClientIP", extractor(e.Request))
+			return e.Next()
+		})
+		return event.Next()
 	})
 }
 

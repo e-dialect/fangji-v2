@@ -195,13 +195,13 @@
         <div class="section-heading admin-entry-heading">
           <div>
             <h2>条目管理</h2>
-            <p>共 {{ pages.length }} 条<span v-if="hasActiveListFilter">，当前条件显示 {{ filteredPages.length }} 条</span>。</p>
+            <p>共 {{ pageStats.total }} 条<span v-if="hasActiveListFilter">，当前条件显示 {{ totalFilteredItems }} 条</span>。</p>
           </div>
           <button v-if="hasActiveListFilter" type="button" class="btn btn-quiet btn-sm" @click="resetListFilters">查看全部条目</button>
         </div>
         <div v-if="mutationSuccess" class="alert alert-success" role="status">{{ mutationSuccess }}</div>
         <div v-if="mutationError" class="alert alert-error" role="alert">{{ mutationError }}</div>
-        <div v-if="pages.length" class="admin-list-filters mb-4">
+        <div v-if="pageStats.total" class="admin-list-filters mb-4">
           <label class="admin-filter-field">
             <span>搜索条目</span>
             <input
@@ -221,6 +221,8 @@
               </option>
             </select>
           </label>
+          <label class="admin-filter-field"><span>PDF 起始页</span><input v-model="minPdfPage" type="number" min="1" class="form-control" /></label>
+          <label class="admin-filter-field"><span>PDF 结束页</span><input v-model="maxPdfPage" type="number" min="1" class="form-control" /></label>
           <label class="admin-filter-field admin-filter-size">
             <span>每页显示</span>
             <select v-model.number="listPageSize" class="form-control">
@@ -244,7 +246,7 @@
           {{ pagesError }}
           <button type="button" class="btn btn-secondary btn-sm ml-2" @click="loadPages">重新加载</button>
         </div>
-        <div v-else-if="pages.length === 0" class="empty-state">
+        <div v-else-if="pageStats.total === 0" class="empty-state">
           <div class="empty-state-mark" aria-hidden="true">条</div>
           <div class="empty-state-text">暂无条目，请上传 CSV 文件</div>
         </div>
@@ -271,7 +273,7 @@
               <button class="btn btn-secondary btn-sm" @click="selectByRange" :disabled="mutatingRows || !rangeSelectInput">
                 范围选中
               </button>
-              <button class="btn btn-secondary btn-sm" @click="toggleSelectAllPending" :disabled="mutatingRows || pendingPages.length === 0">
+              <button class="btn btn-secondary btn-sm" @click="toggleSelectAllPending" :disabled="mutatingRows || pageStats.unstarted === 0">
                 {{ allPendingSelected ? '取消全选待校对' : '全选待校对' }}
               </button>
               <button class="btn btn-secondary btn-sm" @click="moveSelectedRowsDown" :disabled="mutatingRows || selectedPendingIds.length === 0">
@@ -379,7 +381,7 @@
 import { orderedRowHeaders } from '@/composables/useStructuredRow'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
-import { filterAdminPages, paginateItems, parseRangeInput } from '@/lib/adminPageList'
+import { parseRangeInput } from '@/lib/adminPageList'
 import { summarizePages } from '@/lib/workspaceInsights'
 import { safeParseRowJson } from '@/composables/useStructuredRow'
 import {
@@ -390,7 +392,7 @@ import {
 } from '@/constants/pageStatus'
 import {
   deletePendingPages,
-  getPagedProjectPages,
+  listAdminProjectPages,
   listAllProjectPages,
   reorderPendingPages
 } from '@/services/pagesService'
@@ -399,7 +401,7 @@ import { commitCsvImport, createCsvInspection, getImportJob, listImportJobErrors
 import { csvFatalMessage, parseCsvInspection } from '@/lib/csvInspection'
 import { toSafeCsvCell } from '@/lib/csvExport'
 import { getProject } from '@/services/projectsService'
-import { getPbMessage, getPbStatus } from '@/utils/pbErrors'
+import { getPbMessage, getPbStatus, getUploadErrorMessage } from '@/utils/pbErrors'
 
 const route = useRoute()
 const router = useRouter()
@@ -413,7 +415,13 @@ const pages = ref([])
 const pagesError = ref('')
 const loadingProject = ref(true)
 const loadingPages = ref(true)
-const pageStats = computed(() => summarizePages(pages.value))
+const pageStats = ref(summarizePages([]))
+const totalFilteredItems = ref(0)
+const serverTotalPages = ref(1)
+const minPdfPage = ref('')
+const maxPdfPage = ref('')
+let pageLoadGeneration = 0
+let searchTimer
 
 const pdfInput = ref(null)
 const csvInput = ref(null)
@@ -453,33 +461,13 @@ const statusOptions = Object.entries(PAGE_STATUS_LABELS).map(([value, label]) =>
 
 const approvedPct = computed(() => pageStats.value.completionPct)
 
-const pendingPages = computed(() => pages.value.filter((p) => p.status === PAGE_STATUS.PENDING))
-const filteredPages = computed(() => {
-  const filtered = filterAdminPages(pages.value, {
-    query: searchQuery.value,
-    status: selectedStatus.value === ACTIVE_STATUS_FILTER ? '' : selectedStatus.value
-  })
-  if (selectedStatus.value !== ACTIVE_STATUS_FILTER) return filtered
-  return filtered.filter((page) => [PAGE_STATUS.CLAIMED, PAGE_STATUS.PROOFREADING].includes(page.status))
-})
-const listPagination = computed(() => paginateItems(
-  filteredPages.value,
-  currentListPage.value,
-  listPageSize.value
-))
-const displayedPages = computed(() => listPagination.value.items)
-const displayedPageOffset = computed(() => (listPagination.value.page - 1) * listPagination.value.perPage)
-const hasActiveListFilter = computed(() => Boolean(searchQuery.value.trim() || selectedStatus.value))
+const filteredPages = computed(() => pages.value)
+const listPagination = computed(() => ({ page: currentListPage.value, perPage: listPageSize.value, totalItems: totalFilteredItems.value, totalPages: serverTotalPages.value }))
+const displayedPages = computed(() => pages.value)
+const displayedPageOffset = computed(() => (currentListPage.value - 1) * listPageSize.value)
+const hasActiveListFilter = computed(() => Boolean(searchQuery.value.trim() || selectedStatus.value || minPdfPage.value || maxPdfPage.value))
 const allPendingSelected = computed(() => {
-  if (!pendingPages.value.length) return false
-  return pendingPages.value.every((p) => selectedPendingIds.value.includes(p.id))
-})
-const pendingIndexById = computed(() => {
-  const map = {}
-  pendingPages.value.forEach((p, i) => {
-    map[p.id] = i
-  })
-  return map
+  return pageStats.value.unstarted > 0 && selectedPendingIds.value.length === pageStats.value.unstarted
 })
 const csvJobProgress = computed(() => {
   const processed = Number(csvJob.value?.processed_count || 0)
@@ -500,12 +488,14 @@ const csvJobStatusLabel = computed(() => ({
 const csvInspection = computed(() => parseCsvInspection(csvJob.value?.inspection_json))
 const csvPreviewHeaders = computed(() => csvInspection.value?.headers.slice(0, 6) || [])
 
-watch([searchQuery, selectedStatus, listPageSize], () => {
+watch([searchQuery, selectedStatus, listPageSize, minPdfPage, maxPdfPage], () => {
   currentListPage.value = 1
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(loadPages, 200)
 })
-
-watch(() => listPagination.value.page, (page) => {
-  if (currentListPage.value !== page) currentListPage.value = page
+watch(currentListPage, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(loadPages, 200)
 })
 
 onMounted(async () => {
@@ -541,34 +531,43 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   pdfPollGeneration += 1
   csvPollGeneration += 1
+  pageLoadGeneration += 1
+  clearTimeout(searchTimer)
 })
 
 async function loadPages() {
+  const generation = ++pageLoadGeneration
   loadingPages.value = true
   pagesError.value = ''
   try {
-    const perPage = 500
-    const allPages = []
-    let page = 1
-    let result
-    do {
-      result = await getPagedProjectPages(projectId, page, perPage, {
-        expand: 'proofreader'
-      })
-      allPages.push(...result.items)
-      page += 1
-    } while (page <= result.totalPages)
-    pages.value = allPages
-    selectedPendingIds.value = selectedPendingIds.value.filter((id) => allPages.some((p) => p.id === id && p.status === PAGE_STATUS.PENDING))
+    const result = await listAdminProjectPages(projectId, {
+      page: currentListPage.value, perPage: listPageSize.value,
+      q: searchQuery.value, status: selectedStatus.value,
+      minPage: minPdfPage.value, maxPage: maxPdfPage.value
+    })
+    if (generation !== pageLoadGeneration) return
+    pages.value = result.items
+    totalFilteredItems.value = result.totalItems
+    serverTotalPages.value = result.totalPages
+    currentListPage.value = result.page
+    pageStats.value = result.stats
   } catch (e) {
-    pagesError.value = getPbMessage(e, '条目列表加载失败，请稍后重试。')
+    if (generation === pageLoadGeneration) pagesError.value = getPbMessage(e, '条目列表加载失败，请稍后重试。')
   } finally {
-    loadingPages.value = false
+    if (generation === pageLoadGeneration) loadingPages.value = false
   }
+}
+
+// Full lightweight metadata is fetched only for explicit global bulk operations.
+async function operationRows() {
+  mutatingRows.value = true
+  try { return await listAllProjectPages(projectId, { fields: 'id,status,page_number', sort: 'page_number,id' }) } finally { mutatingRows.value = false }
 }
 
 function resetListFilters() {
   searchQuery.value = ''
+  minPdfPage.value = ''
+  maxPdfPage.value = ''
   selectedStatus.value = ''
   currentListPage.value = 1
   syncStatusQuery('')
@@ -647,9 +646,7 @@ async function uploadPdf() {
       pdfError.value = record.error_message || 'PDF 后端校验失败'
     }
   } catch (e) {
-    pdfError.value = getPbStatus(e) === 413
-      ? 'PDF 文件超过 50 MB 上限'
-      : getPbMessage(e, '上传失败，请重试')
+    pdfError.value = getUploadErrorMessage(e, 'pdf')
     pdfProcessing.value = false
   } finally {
     if (generation === pdfPollGeneration) uploadingPdf.value = false
@@ -692,9 +689,7 @@ async function uploadCsv() {
       await loadPages()
     }
   } catch (e) {
-    csvError.value = getPbStatus(e) === 413
-      ? 'CSV 文件超过 50 MB 上限'
-      : getPbMessage(e, '导入失败，请检查文件格式')
+    csvError.value = getUploadErrorMessage(e, 'csv')
   } finally {
     if (generation === csvPollGeneration) uploadingCsv.value = false
   }
@@ -808,40 +803,40 @@ function toggleRowSelection(id, checked) {
   selectedPendingIds.value = selectedPendingIds.value.filter((x) => x !== id)
 }
 
-function toggleSelectAllPending() {
+async function toggleSelectAllPending() {
   if (mutatingRows.value) return
   if (allPendingSelected.value) {
     selectedPendingIds.value = []
     return
   }
-  selectedPendingIds.value = pendingPages.value.map((p) => p.id)
+  try { selectedPendingIds.value = (await operationRows()).filter(isPending).map(p => p.id) } catch (e) { mutationError.value = getPbMessage(e, '选择失败，请重试') }
 }
 
 function canMoveUp(id) {
-  const idx = pendingIndexById.value[id]
-  return Number.isInteger(idx) && idx > 0
+  return Number(pages.value.find(row => row.id === id)?.page_number) > 1
 }
 
 function canMoveDown(id) {
-  const idx = pendingIndexById.value[id]
-  return Number.isInteger(idx) && idx < pendingPages.value.length - 1
+  return Number(pages.value.find(row => row.id === id)?.page_number) < pageStats.value.total
 }
 
 async function movePendingRow(id, direction) {
   if (mutatingRows.value) return
-  const idx = pendingIndexById.value[id]
-  if (!Number.isInteger(idx)) return
+  let pending
+  try { pending = (await operationRows()).filter(isPending) } catch (e) { mutationError.value = getPbMessage(e, '加载顺序失败'); return }
+  const idx = pending.findIndex(row => row.id === id)
+  if (idx < 0) return
   const targetIdx = idx + direction
-  if (targetIdx < 0 || targetIdx >= pendingPages.value.length) return
+  if (targetIdx < 0 || targetIdx >= pending.length) return
 
-  const current = pendingPages.value[idx]
-  if (!current || !pendingPages.value[targetIdx]) return
+  const current = pending[idx]
+  if (!current || !pending[targetIdx]) return
 
   mutatingRows.value = true
   clearMutationFeedback()
   try {
     const currentPageNum = Number(current.page_number)
-    const orderedIds = pendingPages.value.map((page) => page.id)
+    const orderedIds = pending.map((page) => page.id)
     ;[orderedIds[idx], orderedIds[targetIdx]] = [orderedIds[targetIdx], orderedIds[idx]]
     await reorderPendingPages(projectId, orderedIds)
     await loadPages()
@@ -853,10 +848,12 @@ async function movePendingRow(id, direction) {
   }
 }
 
-function selectByRange() {
+async function selectByRange() {
   if (mutatingRows.value) return
   clearMutationFeedback()
-  const indexes = parseRangeInput(rangeSelectInput.value, pages.value.length)
+  let rows
+  try { rows = await operationRows() } catch (e) { mutationError.value = getPbMessage(e, '选择失败，请重试'); return }
+  const indexes = parseRangeInput(rangeSelectInput.value, rows.length)
   if (!indexes.length) {
     mutationError.value = '范围格式无效，请输入如 1-33 或 1,3,5-8。'
     return
@@ -864,7 +861,7 @@ function selectByRange() {
 
   const ids = []
   for (const idx of indexes) {
-    const row = pages.value[idx]
+    const row = rows[idx]
     if (row && isPending(row)) ids.push(row.id)
   }
 
@@ -883,7 +880,8 @@ async function applyPendingOrderByIds(orderedPendingIds) {
 
 async function moveSelectedRowsDown() {
   if (mutatingRows.value || selectedPendingIds.value.length === 0) return
-  const pending = pendingPages.value
+  let pending
+  try { pending = (await operationRows()).filter(isPending) } catch (e) { mutationError.value = getPbMessage(e, '加载顺序失败'); return }
   if (!pending.length) return
 
   const ids = pending.map((p) => p.id)

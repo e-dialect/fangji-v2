@@ -2,7 +2,7 @@ function proofreadAttempts(dao, page) {
   const round = page.getInt("proofread_round") || 1
   return dao.findRecordsByFilter(
     "proofreading_attempts",
-    `page = "${page.getId()}" && round = ${round} && kind = "proofread"`,
+    `page = "${page.id}" && round = ${round} && kind = "proofread"`,
     "pass_no,created",
     1000,
     0
@@ -13,7 +13,7 @@ function arbitrationAttempt(dao, page) {
   const round = page.getInt("proofread_round") || 1
   const attempts = dao.findRecordsByFilter(
     "proofreading_attempts",
-    `page = "${page.getId()}" && round = ${round} && kind = "arbitration"`,
+    `page = "${page.id}" && round = ${round} && kind = "arbitration"`,
     "created",
     1,
     0
@@ -39,7 +39,7 @@ function setAttemptOutcomes(dao, attempts, outcome) {
   for (const attempt of attempts) {
     if (attempt.getString("outcome") === outcome) continue
     attempt.set("outcome", outcome)
-    dao.saveRecord(attempt)
+    dao.save(attempt)
   }
 }
 
@@ -52,7 +52,7 @@ function resetPageForMoreProofreads(dao, page, attempts) {
   page.set("status", attempts.length ? "proofread" : "pending")
   clearLease(dao, page)
   setAttemptOutcomes(dao, attempts, "waiting")
-  dao.saveRecord(page)
+  dao.save(page)
   return { status: page.getString("status"), count: attempts.length, outcome: "waiting" }
 }
 
@@ -74,7 +74,7 @@ function evaluatePage(dao, page) {
     page.set("proofread_at", String(source.get("submitted_at") || new Date().toISOString()))
     page.set("status", "approved")
     setAttemptOutcomes(dao, attempts, "matched")
-    dao.saveRecord(page)
+    dao.save(page)
     return { status: "approved", count: attempts.length, outcome: "matched" }
   }
 
@@ -87,7 +87,7 @@ function evaluatePage(dao, page) {
     page.set("last_mismatch_at", new Date().toISOString())
   }
   setAttemptOutcomes(dao, attempts, "mismatched")
-  dao.saveRecord(page)
+  dao.save(page)
   return { status: "arbitration", count: attempts.length, outcome: "mismatched" }
 }
 
@@ -102,16 +102,16 @@ function reconcileProjectQuorum(dao, projectId) {
     page.set("proofread_count", attempts.length)
     const active = ["claimed", "proofreading"].includes(page.getString("status"))
     if (active) {
-      const lease = leaseForPage(dao, page.getId())
+      const lease = leaseForPage(dao, page.id)
       if (lease && !leaseExpired(lease)) {
-        dao.saveRecord(page)
+        dao.save(page)
         continue
       }
       clearLease(dao, page)
     }
     if (attempts.length >= required) evaluatePage(dao, page)
     else if (page.getString("status") === "approved" || active) resetPageForMoreProofreads(dao, page, attempts)
-    else dao.saveRecord(page)
+    else dao.save(page)
   }
 }
 

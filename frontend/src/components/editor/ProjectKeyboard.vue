@@ -54,7 +54,7 @@
 import { computed, onMounted, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { currentUserId } from '@/services/authService'
 import { getProjectKeyboards } from '@/services/keyboardsService'
-import { chooseProjectKeyboard, keyboardPreferenceKey } from '@/lib/keyboardSelection'
+import { chooseProjectKeyboard, countKeyboardValues, keyboardPreferenceKey } from '@/lib/keyboardSelection'
 
 const props = defineProps({ projectId: { type: String, default: '' } })
 const emit = defineEmits(['insert', 'availability'])
@@ -76,7 +76,7 @@ watch(selectedKeyboard, (keyboard) => {
   emit('availability', Boolean(keyboard))
   activeSection.value = sections.value.find((section) => section.defaultOpen)?.id || sections.value[0]?.id || ''
 }, { immediate: true })
-const keyCount = computed(() => selectedKeyboard.value?.definition?.sections?.reduce((total, section) => total + section.keys.length, 0) || 0)
+const keyCount = computed(() => countKeyboardValues(sections.value))
 
 watch(() => props.projectId, load, { immediate: true })
 watch(selectedKeyboardId, (keyboardId) => {

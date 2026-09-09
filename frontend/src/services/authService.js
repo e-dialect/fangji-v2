@@ -72,12 +72,12 @@ export function clearAuth() {
 }
 
 export async function updateProfile({ name, email }) {
-  const record = await pb.send('/api/fangji/profile', {
+  const { record, token } = await pb.send('/api/fangji/profile', {
     method: 'PATCH', body: { name, email }, requestKey: null
   })
   // Never restore a session that was logged out or replaced during the request.
   if (pb.authStore.isValid && pb.authStore.model?.id === record.id) {
-    pb.authStore.save(pb.authStore.token, record)
+    pb.authStore.save(token, record)
   }
   return record
 }

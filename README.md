@@ -52,6 +52,12 @@
 - 页面运行异常会显示可恢复的错误界面，管理员列表加载和批量操作均提供页面内反馈。
 - 浏览器保存的登录身份会在应用启动时向后端刷新；账号失效时自动回到登录页。
 
+## PocketBase 0.40 重建升级
+
+当前后端使用 PocketBase 0.40.3 / Go 1.27，前端使用 Node 24 LTS / PocketBase SDK 0.28.1。
+旧版本尚无正式运营数据，本次采用新目录重建；不要直接复用旧 pb_data。
+部署切换、回滚及验证证据见 [升级决策](docs/dependency-upgrades.md)。
+
 ## 快速启动
 
 ### Docker Compose 本地生产模式
@@ -312,7 +318,7 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 - 所有用户登录后进入 `/workspace`，入口按当前项目能力显示。
 - 平台管理员可进入“创建权限”，向普通用户授权、设置额度或撤销授权。
 - 获得项目管理能力的用户可进入 `/admin`；项目校对员可进入 `/tasks`。
-- 旧的全局 `admin` 会迁移为 `platform_admin`，旧的全局 `proofreader` 会迁移为 `user` 并保留为现有项目的校对成员。
+- 新数据库直接使用 `platform_admin` / `user` 及项目成员职责；历史角色转换仅保留在旧迁移参考目录中，不在本次重建时运行。
 
 #### 外部统一身份
 
@@ -346,6 +352,8 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 1. 进入项目详情页。
 2. 在“上传 PDF 文件”区域选择 PDF。
 3. 点击“上传 PDF”。
+
+单个 PDF 最大 100 MiB（104,857,600 字节），CSV 仍为 50 MiB。后端 PDF 请求和内置 Nginx 请求上限为 101 MiB，为 multipart 编码预留空间。升级时需同时重新部署后端和前端 Nginx；后端启动迁移会更新已有数据库的 PDF 字段限制。若部署了额外网关，也需允许至少 101 MiB 的请求体。
 
 PDF 用于校对员编辑时预览原文。文件只上传一次，后端会检查大小、扩展名、文件签名并使用 pdfcpu 深度解析 PDF 结构；校验成功后记录页数、校验器和校验时间。每个项目只有一个主 PDF，新文件成功后会原子替换主文件，旧文件保留为历史记录；只有状态为 `ready` 且标记为主文件的 PDF 才会用于预览。PDF 不会自动 OCR 或生成条目，待校对文本主要通过 CSV 导入。
 
@@ -704,6 +712,8 @@ node backend/tests/upload_jobs_integration.mjs
 
 可通过 `REAL_PDF_PATH` 和 `REAL_CSV_PATH` 传入本地真实文件；脚本只读取文件，并会创建和清理临时项目。较大的 PDF 会获得 300 秒的异步校验等待预算。
 
+设置 `TEST_LARGE_PDF=1` 可额外验证 80 MiB、100 MiB PDF 上传并完成深度校验，以及 100 MiB + 1 字节文件被拒绝；使用合成文件和临时项目，需要预留足够的内存与临时磁盘空间。将 `PB_URL` 指向前端 Nginx 地址可同时验证代理限制。
+
 上传服务输出单行 JSON 结构化日志，包含 `request_id`、项目/作业/文件标识、哈希、计数、耗时和稳定错误码。可使用 `docker compose logs -f backend` 查看，并用响应头 `X-Request-ID` 关联一次请求的接收、排队、处理和终态事件。
 
 ## 常见问题
@@ -770,7 +780,7 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up --bui
 
 ### 个人中心
 
-点击导航头像进入个人中心，可修改当前账号的昵称和邮箱。保存后导航即时更新。邮箱是选填项，修改或清空邮箱会撤销原验证状态；不会修改外部身份的邮箱，也不会改变角色或项目权限。`PATCH /api/fangji/profile` 仅接受当前登录用户的 `name`、`email`，使用 PocketBase 校验邮箱格式和唯一性，无需数据迁移。
+点击导航头像进入个人中心，可修改当前账号的昵称和邮箱。保存后导航即时更新。邮箱是选填项，修改或清空邮箱会撤销原验证状态；不会修改外部身份的邮箱，也不会改变角色或项目权限。`PATCH /api/fangji/profile` 仅接受当前登录用户的 `name`、`email`，使用 PocketBase 校验邮箱格式和唯一性，保存成功返回新的认证令牌与用户记录，前端同步刷新会话。
 
 ### 生僻字与 Unicode 验证
 
@@ -796,3 +806,17 @@ python3 backend/tests/run_rare_characters_integration.py
 ```
 
 该测试已加入 CI 的 `Backend Unicode workflow`。浏览器测试脚本位于 `frontend/scripts/test-rare-fonts.cjs`（Chrome、Firefox、WebKit 字形与失败提示）和 `test-rare-workflow.cjs`（真实编辑/草稿/校对/仲裁/CSV 下载）。可在临时目录安装 Playwright，通过 `NODE_PATH` 指向其 `node_modules`；设置 `FRONTEND_URL`、`SCREENSHOT_DIR`，后者还需要 `RARE_BROWSER_FIXTURE` 指向前述测试保留的临时数据。每次完整浏览器流程需要一套新 fixture。普通 `npm test` 无需安装浏览器。
+
+### 生产容器权限
+
+生产后端以 UID/GID `10001:10001` 运行，根文件系统只读，仅数据卷和 512 MiB 的 `/tmp` 可写；
+前端以 Nginx 普通用户运行，容器内端口为 `8080`，本机访问仍为 `http://localhost:8080`。
+两个生产入口都移除全部 Linux capabilities，并设置 no-new-privileges。
+绑定已有 `pb_data` 时先停止服务，再由宿主机管理员将完整目录的读写权限交给 UID/GID 10001；
+例如 Linux 上执行 `sudo chown -R 10001:10001 ./pb_data`。命名卷首次创建会继承镜像内的数据目录权限。
+不要通过 `chmod 777` 解决权限问题，也不要在新版 PocketBase 中直接使用不兼容的旧数据目录。
+
+前端为支持运行时 BACKEND_URL 和 Admin UI 配置，需要写静态资源、Nginx snippets/conf.d 及缓存目录，
+因此未设整个前端根文件系统只读；其他目录仍归 root 所有。开发镜像保留现有开发用户行为。
+Traefik 的 TLS router 增加一年 HSTS，关闭强制 HTTP HSTS；本机 HTTP 入口不发送 HSTS。
+当前 Traefik Admin UI 默认开启是既有维护入口策略，正式运营应显式设置 `ENABLE_POCKETBASE_ADMIN_UI=false`。
