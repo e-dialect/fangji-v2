@@ -399,7 +399,7 @@ import { commitCsvImport, createCsvInspection, getImportJob, listImportJobErrors
 import { csvFatalMessage, parseCsvInspection } from '@/lib/csvInspection'
 import { toSafeCsvCell } from '@/lib/csvExport'
 import { getProject } from '@/services/projectsService'
-import { getPbMessage, getUploadErrorMessage } from '@/utils/pbErrors'
+import { getPbMessage, getPbStatus, getUploadErrorMessage } from '@/utils/pbErrors'
 
 const route = useRoute()
 const router = useRouter()
