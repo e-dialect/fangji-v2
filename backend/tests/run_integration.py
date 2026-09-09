@@ -46,6 +46,12 @@ with tempfile.TemporaryDirectory(prefix='fangji-integration-') as temp:
                 raise RuntimeError('Temporary server did not become ready')
             args = ['node', str(backend / 'tests' / sys.argv[1])]
             subprocess.run(args, env=env, check=True)
+        except Exception:
+            # Emit diagnostics before TemporaryDirectory removes the evidence.
+            # This server only contains generated, disposable test identities.
+            print(f'FAILED integration: {sys.argv[1]}', file=sys.stderr)
+            print((root / 'server.log').read_text()[-20000:], file=sys.stderr)
+            raise
         finally:
             server.terminate()
             try:
