@@ -15,8 +15,24 @@ import (
 )
 
 func (s *importService) registerPDFPreview() {
+	stop := make(chan struct{})
+	s.app.OnTerminate().BindFunc(func(e *core.TerminateEvent) error { close(stop); return e.Next() })
 	s.app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.GET("/api/fangji/pages/{pageId}/pdf", s.taskPDF).Bind(apis.RequireAuth("users"))
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case now := <-ticker.C:
+					pdfCacheMu.Lock()
+					cleanupPDFCache(s.pdfCacheDir(), now, 0)
+					pdfCacheMu.Unlock()
+				}
+			}
+		}()
 		return e.Next()
 	})
 	s.app.OnFileDownloadRequest("project_files").BindFunc(func(e *core.FileDownloadRequestEvent) error {
@@ -66,17 +82,11 @@ func (s *importService) taskPDF(c *core.RequestEvent) error {
 	if start < 1 || start > count {
 		return apis.NewBadRequestError("任务 PDF 页码超出文件范围。", nil)
 	}
-	reader, closeFile, err := s.openRecordFile(file, "file")
-	if err != nil {
-		return apis.NewNotFoundError("无法读取 PDF。", err)
-	}
-	defer closeFile()
 	end := start + 1
 	if end > count {
 		end = count
 	}
-	stamp := fmt.Sprintf("Fangji | %s | %s | %s UTC", auth.Id, page.Id, time.Now().UTC().Format("2006-01-02 15:04:05"))
-	output, err := buildTaskPDF(reader, start, end, stamp)
+	output, err := s.cachedTaskPDF(file, start, end, auth.Id, page.Id)
 	if err != nil {
 		return apis.NewBadRequestError("PDF 分页或水印生成失败，请联系项目管理员。", err)
 	}
@@ -95,15 +105,20 @@ func buildTaskPDF(reader io.ReadSeeker, start, end int, stamp string) ([]byte, e
 	pdfapi.DisableConfigDir()
 	config := pdfmodel.NewDefaultConfiguration()
 	config.ValidationMode = pdfmodel.ValidationRelaxed
-	var excerpt, output bytes.Buffer
+	var excerpt bytes.Buffer
 	if err := pdfapi.Trim(reader, &excerpt, []string{fmt.Sprintf("%d-%d", start, end)}, config); err != nil {
 		return nil, err
 	}
+	return watermarkTaskPDF(bytes.NewReader(excerpt.Bytes()), stamp)
+}
+
+func watermarkTaskPDF(reader io.ReadSeeker, stamp string) ([]byte, error) {
+	var output bytes.Buffer
 	watermark, err := pdfapi.TextWatermark(stamp, "fontname:Helvetica, points:11, scale:1 abs, rotation:25, opacity:0.18", true, false, pdftypes.POINTS)
 	if err != nil {
 		return nil, err
 	}
-	if err := pdfapi.AddWatermarks(bytes.NewReader(excerpt.Bytes()), &output, nil, watermark, config); err != nil {
+	if err := pdfapi.AddWatermarks(reader, &output, nil, watermark, pdfConfig()); err != nil {
 		return nil, err
 	}
 	return output.Bytes(), nil

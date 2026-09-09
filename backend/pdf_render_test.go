@@ -101,13 +101,17 @@ func TestTaskPDFBrowserRegression(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pagesDir := t.TempDir()
+	if err := splitPDFPages(bytes.NewReader(data), pagesDir, pdfBookBudget); err != nil {
+		t.Fatal(err)
+	}
 	const stamp = "Fangji | regression-user | regression-task | 2026-09-09 UTC"
 	for start := 1; start <= count; start++ {
 		end := start + 1
 		if end > count {
 			end = count
 		}
-		output, err := buildTaskPDF(bytes.NewReader(data), start, end, stamp)
+		output, err := mergeCachedPDFPages(pagesDir, start, end, stamp)
 		if err != nil {
 			t.Fatalf("page %d: %v", start, err)
 		}
