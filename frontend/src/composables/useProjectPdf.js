@@ -1,4 +1,5 @@
-import { computed, ref } from 'vue'
+import { computed, ref, onBeforeUnmount } from 'vue'
+import { createPdfPreviewCache } from '@/lib/pdfPreviewCache'
 import pb from '@/lib/pocketbase'
 
 export function useProjectPdf(page) {
@@ -9,6 +10,13 @@ export function useProjectPdf(page) {
   const lastPage = ref(1)
   const totalPdfPages = ref(0)
   const pdfUrl = ref(null)
+  const cache = createPdfPreviewCache()
+  let currentUser = pb.authStore.record?.id || pb.authStore.model?.id || ''
+  const unsubscribe = pb.authStore.onChange((_token, record) => {
+    if (!record || record.id !== currentUser) resetPdf()
+    currentUser = record?.id || ''
+  })
+  onBeforeUnmount(() => { unsubscribe(); resetPdf() })
   let generation = 0
   let controller = null
   const basePdfPage = computed(() => Number(page.value?.pdf_page) || Number(page.value?.page_number) || 1)
@@ -19,7 +27,7 @@ export function useProjectPdf(page) {
   function resetPdf() {
     generation++
     controller?.abort()
-    if (pdfUrl.value) URL.revokeObjectURL(pdfUrl.value)
+    cache.clear()
     pdfUrl.value = null
     pdfError.value = ''
     pdfLoading.value = false
@@ -29,25 +37,54 @@ export function useProjectPdf(page) {
   }
   async function resolveProjectPdf() {
     const request = ++generation
-    pdfLoading.value = true
+    controller?.abort()
     controller = new AbortController()
+    const signal = controller.signal
+    const userId = currentUser
+    pdfLoading.value = true
+    pdfError.value = ''
     try {
-      const response = await fetch(pb.buildURL(`/api/fangji/pages/${encodeURIComponent(page.value.id)}/pdf`), {
-        headers: { Authorization: pb.authStore.token }, signal: controller.signal, cache: 'no-store'
-      })
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}))
+      const base = pb.buildURL(`/api/fangji/pages/${encodeURIComponent(page.value.id)}/pdf`)
+      const options = { headers: { Authorization: pb.authStore.token }, signal, cache: 'no-store' }
+      const info = await fetch(`${base}/descriptor`, options)
+      if (!info.ok) {
+        const body = await info.json().catch(() => ({}))
         throw new Error(body.message || '加载任务 PDF 失败')
       }
-      const blob = await response.blob()
+      let descriptor = await info.json()
       if (request !== generation) return
-      firstPage.value = Number(response.headers.get('X-PDF-Start-Page')) || basePdfPage.value
-      lastPage.value = Number(response.headers.get('X-PDF-End-Page')) || firstPage.value
-      totalPdfPages.value = Number(response.headers.get('X-PDF-Total-Pages')) || lastPage.value
-      currentPdfPage.value = firstPage.value
-      pdfUrl.value = URL.createObjectURL(blob)
+      let entry = cache.get(userId, descriptor)
+      if (!entry) {
+        // A different range/version must not keep showing the previous task PDF.
+        cache.clear()
+        pdfUrl.value = null
+        const response = await fetch(base, options)
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}))
+          throw new Error(body.message || '加载任务 PDF 失败')
+        }
+        const blob = await response.blob()
+        if (request !== generation) return
+        // The five-minute window or primary source can change between requests.
+        descriptor = {
+          key: response.headers.get('X-PDF-Preview-Key'), expiresAt: response.headers.get('X-PDF-Expires-At'),
+          start: Number(response.headers.get('X-PDF-Start-Page')),
+          end: Number(response.headers.get('X-PDF-End-Page')),
+          total: Number(response.headers.get('X-PDF-Total-Pages'))
+        }
+        if (!descriptor.key || !Number.isFinite(Date.parse(descriptor.expiresAt))) throw new Error('PDF 预览信息无效，请刷新后重试')
+        entry = cache.put(userId, descriptor, blob)
+        currentPdfPage.value = descriptor.start
+      }
+      firstPage.value = descriptor.start
+      lastPage.value = descriptor.end
+      totalPdfPages.value = descriptor.total
+      pdfUrl.value = entry.url
     } catch (error) {
-      if (request === generation && error.name !== 'AbortError') pdfError.value = error.message || '加载任务 PDF 失败'
+      if (request === generation && error.name !== 'AbortError') {
+        cache.clear(); pdfUrl.value = null
+        pdfError.value = error.message || '加载任务 PDF 失败'
+      }
     } finally {
       if (request === generation) pdfLoading.value = false
     }

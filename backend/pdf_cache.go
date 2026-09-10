@@ -160,12 +160,13 @@ func splitPDFPages(reader io.ReadSeeker, dir string, budget int64) error {
 	}
 	return nil
 }
-func (s *importService) cachedTaskPDF(file *core.Record, start, end int, userID, pageID string) ([]byte, error) {
+func (s *importService) cachedTaskPDF(file *core.Record, descriptor pdfPreviewDescriptor, userID string) ([]byte, error) {
 	pdfCacheMu.Lock()
 	defer pdfCacheMu.Unlock()
 	now := time.Now()
+	start, end := descriptor.Start, descriptor.End
 	root := s.pdfCacheDir()
-	outputPath := filepath.Join(root, "watermark-"+pdfCacheKey(pdfSourceKey(file), fmt.Sprint(start), fmt.Sprint(end), userID, pageID)+".pdf")
+	outputPath := filepath.Join(root, "watermark-"+descriptor.Key+".pdf")
 	// The handler checks live permissions and leases BEFORE every cache lookup.
 	if info, err := os.Stat(outputPath); err == nil && info.ModTime().Add(pdfPreviewTTL).After(now) {
 		if data, err := os.ReadFile(outputPath); err == nil {
@@ -173,7 +174,7 @@ func (s *importService) cachedTaskPDF(file *core.Record, start, end int, userID,
 		}
 	}
 	cleanupPDFCache(root, now, pdfBookBudget)
-	stamp := fmt.Sprintf("Fangji | %s | %s | %s UTC", userID, pageID, now.UTC().Format("2006-01-02 15:04:05"))
+	stamp := fmt.Sprintf("Fangji | %s | %s p%d-%d | %s UTC", userID, pdfSourceKey(file)[:12], start, end, descriptor.ExpiresAt.Add(-pdfPreviewTTL).UTC().Format("2006-01-02 15:04:05"))
 	dir, err := s.preparePDFPages(file)
 	var output []byte
 	if err == nil {

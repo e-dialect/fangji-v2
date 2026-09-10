@@ -153,10 +153,11 @@ export async function listProofreaderNeighborTasks(projectId, userId) {
   })
 }
 
-export async function claimNextProjectPage(projectId, userId) {
+export async function claimNextProjectPage(projectId, userId, previousTaskId = '') {
   if (!projectId || !userId) throw new Error('缺少项目或校对员身份')
   return pb.send(`/api/fangji/projects/${encodeURIComponent(projectId)}/claim`, {
     method: 'POST',
+    body: { previousTaskId },
     requestKey: null
   })
 }

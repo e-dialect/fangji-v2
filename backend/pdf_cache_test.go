@@ -107,3 +107,26 @@ func TestOversizedPDFSkipsRepeatedWholeBookPreparation(t *testing.T) {
 		t.Fatal("oversize marker did not expire")
 	}
 }
+
+func TestPDFDescriptorWindowAndIdentity(t *testing.T) {
+	app := newSchemaTestApp(t)
+	collection, _ := app.FindCollectionByNameOrId("project_files")
+	file := core.NewRecord(collection)
+	file.Id = "fixturefile0001"
+	file.Set("file", "source.pdf")
+	file.Set("file_hash", "v1")
+	file.Set("page_count", 10)
+	now := time.Date(2026, 9, 10, 0, 1, 0, 0, time.UTC)
+	first := describePDF(file, 2, 3, "alice", now)
+	if first.Key != describePDF(file, 2, 3, "alice", now.Add(time.Minute)).Key {
+		t.Fatal("same window not reusable")
+	}
+	for _, d := range []pdfPreviewDescriptor{describePDF(file, 2, 3, "bob", now), describePDF(file, 3, 4, "alice", now), describePDF(file, 2, 3, "alice", now.Add(pdfPreviewTTL))} {
+		if d.Key == first.Key {
+			t.Fatal("wrong cache identity")
+		}
+	}
+	if !first.ExpiresAt.Equal(now.Truncate(pdfPreviewTTL).Add(pdfPreviewTTL)) {
+		t.Fatal("wrong window expiry")
+	}
+}

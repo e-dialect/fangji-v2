@@ -4,6 +4,7 @@
     :keyboard-available="keyboardAvailable"
     :suspended="(mobile && overview) || reviewingSubmission"
     :loading="loadingPage"
+    :pdf-enabled="!leaseLost && (!!leaseToken || saving || loadingPage)"
     :watermark-user-id="currentUserId"
     return-to="/tasks"
     return-label="返回大厅"
@@ -594,7 +595,7 @@ async function submitProofread() {
     )
 
     try {
-      const nextPage = await claimNextProjectPage(projectId, userId)
+      const nextPage = await claimNextProjectPage(projectId, userId, page.value.id)
       if (nextPage?.id) {
         saveClaimedLease(nextPage)
         setTaskFlash(window.sessionStorage, saved.value)
