@@ -65,14 +65,54 @@ python3 backend/ops/backup.py restore /secure-backups/fangji-20260909 ./pb_data-
 这是可重复的离线工具演练，不等同于实际服务器的容量、异地传输及通知链路验收。
 部署者仍须测量实际 RPO/RTO，验证容器非 root/最小权限和异地恢复。
 
-## 大 PDF 首次上传在 60 秒附近失败
+## PDF 分块上传
+
+用户仍选择一份不超过 100 MiB 的完整 PDF。浏览器按 1 MiB 顺序传输，显示整体
+进度并可取消；网络错误、408/429/5xx 最多重试三次（1、2、4 秒退避）。已完成
+分片不会因后续失败而重传。浏览器用 Blob.slice 截取字节，无需解析或手动拆分 PDF。
+
+接口位于 `/api/fangji/projects/{projectId}/pdf-uploads`：POST 创建会话，
+PUT `/{id}/chunks/{index}` 提交分片，POST `/{id}/complete` 完成，DELETE `/{id}`
+取消。每次核对登录用户和项目管理权限。创建请求用客户端随机 requestId 保证
+响应丢失可重试；相同分片返回成功，内容冲突返回 409。完成时校验分片哈希、
+总长度及 PDF 头，按顺序拼接后进入既有深度校验队列；重复完成返回同一文件记录。
+
+每用户一个进行中会话，全局最多四个。按每文件两倍大小预留临时预算（全局
+1 GiB），私有目录为 `pb_data/pdf-upload-staging-v1`，目录 0700、文件 0600。
+取消立即删除分片，闲置一小时后由每分钟清理任务回收，重启时清空全部遗留
+分片。完成结果在进程内保留到会话过期，支持网络响应丢失后的幂等重试。
+刷新页面、退出页面后重传或服务重启后的续传由 [#88](https://github.com/e-dialect/fangji-v2/issues/88) 单独跟踪。
+
+正常上传无需调整共享 Traefik：60 秒限制作用于每个分片请求，而非整本书的
+累计传输时间。极慢到单个 1 MiB 分片也超过入口超时的网络仍可能失败；此时
+可使用下述可选部署排障设置。旧整文件 API 保留供现有客户端兼容使用。
+
+验证（临时数据库，不连接生产）：
+
+```sh
+go test -C backend ./...
+FANGJI_SLOW_UPLOAD=1 python3 backend/tests/run_integration.py pdf_chunks_integration.mjs
+npm --prefix frontend test
+npm --prefix frontend run build
+# 已安装 Playwright Chromium 后运行；macOS 可设置 BROWSER_CHANNEL=chrome。
+PDF_UPLOAD_BROWSER_SCRIPT="$PWD/backend/tests/pdf_upload_browser.cjs" \
+PDF_BROWSER_FIXTURE=/tmp/fangji-upload-browser-fixture.json \
+python3 backend/tests/run_integration.py pdf_chunks_integration.mjs
+```
+
+慢网测试使完整 HTTP 流程超过 60 秒并校验原件字节完全一致，未模拟生产 Traefik。
+浏览器回归模拟分片 503 和完成响应丢失，确认自动重试只创建一条 ready 文件记录。
+Go/前端测试另覆盖重复与冲突分片、取消、超限、权限撤销、重启和闲置清理。
+浏览器 fixture 只包含一次性测试凭据，不得提交生产凭据。
+
+## 可选排障：旧整文件上传在 60 秒附近失败
 
 100 MiB 的容量上限不代表允许传输足够久。Traefik 的入口
 `transport.respondingTimeouts.readTimeout` 默认 60 秒，计时包含整个请求体。
 慢速上传会在到达 PocketBase 前断开；Nginx 常记录空响应的 400，后端没有对应
 `upload_received`。同一文件重试若恰好在 60 秒以内传完就会成功。
 
-在 **Traefik 自身的静态配置**中保留其他设置并合入：
+确需放宽入口超时时，可在 **Traefik 自身的静态配置**中保留其他设置并合入：
 
 ```yaml
 entryPoints:
