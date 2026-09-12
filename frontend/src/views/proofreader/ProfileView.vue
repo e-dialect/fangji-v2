@@ -12,6 +12,7 @@
 
     <section class="card mb-6" aria-labelledby="profile-details-title">
       <h3 id="profile-details-title" class="card-title">个人资料</h3>
+      <UserAvatar :user="auth.user" style="width:4rem;height:4rem;margin-bottom:1rem" />
       <form @submit.prevent="saveProfile">
         <div class="form-group">
           <label for="profile-name" class="form-label">昵称</label>
@@ -72,7 +73,7 @@
 
       <section v-if="providers.length" class="card mt-6">
         <div class="card-title">统一身份绑定</div>
-        <p class="profile-note mb-4">绑定后可以使用外部账号登录方辑。绑定不会覆盖你的方辑资料；新用户首次通过外部账号登录时会继承可用的昵称，邮箱与密码不会同步。</p>
+        <p class="profile-note mb-4">绑定后可以使用外部账号登录方辑。登录或绑定时会尝试补齐昵称、邮箱和头像，保留你已填写的资料。同步的邮箱仍需验证；资料服务暂时不可用不影响登录。</p>
         <div class="identity-list">
           <div v-for="provider in providers" :key="provider.id" class="identity-card">
             <div class="identity-heading">
@@ -119,6 +120,7 @@
 </template>
 
 <script setup>
+import UserAvatar from '@/components/UserAvatar.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { bindExternalIdentity, currentUserId, listExternalProviders, updateProfile } from '@/services/authService'
@@ -190,7 +192,11 @@ async function bindProvider(provider) {
   bindingError[provider.id] = ''
   try {
     const entry = credentials[provider.id]
+    const before = { name: auth.user?.name || '', email: auth.user?.email || '' }
     await bindExternalIdentity(provider.id, entry.identity.trim(), entry.password)
+    // Refresh untouched fields without discarding an in-progress local edit.
+    if (profile.name === before.name) profile.name = auth.user?.name || ''
+    if (profile.email === before.email) profile.email = auth.user?.email || ''
     entry.identity = ''
     entry.password = ''
     provider.bound = true

@@ -32,11 +32,13 @@ export async function loginWithExternalProvider(provider, identity, password) {
 }
 
 export async function bindExternalIdentity(provider, identity, password) {
-  return pb.send(`/api/fangji/auth/external/${encodeURIComponent(provider)}/bind`, {
+  const result = await pb.send(`/api/fangji/auth/external/${encodeURIComponent(provider)}/bind`, {
     method: 'POST',
     body: { identity, password },
     requestKey: null
   })
+  if (result.token && result.record) pb.authStore.save(result.token, result.record)
+  return result
 }
 
 export async function refreshStoredAuth() {

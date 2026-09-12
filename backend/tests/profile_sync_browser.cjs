@@ -1,0 +1,50 @@
+// Mock identity responses, real built Vue app and production CSP. No real accounts.
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const {chromium} = require('playwright')
+const dist = path.resolve(__dirname,'../../frontend/dist')
+const csp = fs.readFileSync(path.resolve(__dirname,'../../frontend/nginx.conf'),'utf8').match(/add_header Content-Security-Policy "([^"]+)"/)[1]
+const output = process.env.PROFILE_SCREENSHOTS || path.resolve(__dirname,'../../output/playwright/profile-sync')
+const user = {id:'fixtureuser0001',collectionId:'_pb_users_auth_',collectionName:'users',name:'兴化校对员',email:'reader@example.com',avatar:'fixture.png',role:'user',verified:false}
+const token = 'fixture.'+Buffer.from(JSON.stringify({id:user.id,exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')+'.fixture'
+;(async()=>{
+ const browser = await chromium.launch({channel:process.env.BROWSER_CHANNEL||'chrome',headless:true})
+ try{
+  const page=await browser.newPage({viewport:{width:1280,height:900}})
+  let broken=false; const errors=[]
+  page.on('pageerror',e=>errors.push(e.message))
+  await page.route('**/*',async route=>{
+   const url=new URL(route.request().url());assert.equal(url.origin,'http://localhost')
+   const json=body=>route.fulfill({contentType:'application/json',body:JSON.stringify(body)})
+   if(url.pathname.startsWith('/api/files/'))return broken?route.fulfill({status:404,body:''}):route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64')})
+   if(url.pathname==='/api/fangji/auth/providers')return json({providers:[{id:'hinghwa',name:'兴化语记',bound:true}]})
+   if(url.pathname.includes('/auth/external/')||url.pathname.endsWith('/auth-refresh'))return json({token,record:user})
+   if(url.pathname==='/api/fangji/access-context')return json({managedProjectIds:[],proofreadingProjectIds:[],canCreateProjects:false})
+   if(url.pathname==='/api/fangji/proofreader-stats')return route.fulfill({status:503,contentType:'application/json',body:'{"message":"统计暂时不可用"}'})
+   assert(!url.pathname.startsWith('/api/'),'unhandled API '+url.pathname)
+   let file=path.resolve(dist,'.'+url.pathname);assert(file.startsWith(dist+path.sep)||file===dist)
+   if(!fs.existsSync(file)||fs.statSync(file).isDirectory())file=path.join(dist,'index.html')
+   return route.fulfill({path:file,headers:{'Content-Security-Policy':csp}})
+  })
+  await page.goto('http://localhost/login?redirect=/tasks/profile')
+  await page.getByRole('button',{name:'兴化语记',exact:true}).click()
+  await page.getByPlaceholder('请输入兴化语记账号').fill('fixture')
+  await page.getByPlaceholder('请输入密码').fill('fixture-password')
+  await page.getByRole('button',{name:'通过 兴化语记 登录',exact:true}).click()
+  await page.waitForURL('**/tasks/profile')
+  await page.locator('#profile-email').waitFor()
+  assert.equal(await page.locator('#profile-email').inputValue(),user.email)
+  assert.equal(await page.locator('#profile-name').inputValue(),user.name)
+  await page.waitForFunction(()=>[...document.querySelectorAll('.user-avatar img')].length===2&&[...document.querySelectorAll('.user-avatar img')].every(i=>i.complete&&i.naturalWidth>0))
+  fs.mkdirSync(output,{recursive:true})
+  await page.screenshot({path:path.join(output,'desktop.png'),fullPage:true})
+  await page.setViewportSize({width:390,height:844});broken=true;await page.reload()
+  await page.locator('#profile-email').waitFor()
+  await page.waitForFunction(()=>document.querySelectorAll('.user-avatar').length===2&&document.querySelectorAll('.user-avatar img').length===0)
+  assert.equal(await page.locator('.user-avatar').first().innerText(),'兴')
+  await page.screenshot({path:path.join(output,'mobile-avatar-fallback.png'),fullPage:true})
+  assert.deepEqual(errors,[])
+  console.log('PASS external login profile/email, two local avatars, mobile failed-avatar fallback and independent stats error')
+ }finally{await browser.close()}
+})().catch(e=>{console.error(e);process.exitCode=1})
