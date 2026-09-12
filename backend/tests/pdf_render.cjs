@@ -5,6 +5,8 @@ const path = require('node:path')
 const { chromium } = require('playwright')
 const output = path.resolve(process.argv[2])
 const assets = path.resolve(__dirname, '../../frontend/public/pdfjs')
+const nginx = fs.readFileSync(path.resolve(__dirname, '../../frontend/nginx.conf'), 'utf8')
+const csp = nginx.match(/add_header Content-Security-Policy "([^"]+)"/)[1]
 const manifest = JSON.parse(fs.readFileSync(path.join(output, 'manifest.json')))
 
 ;(async () => {
@@ -21,17 +23,20 @@ const manifest = JSON.parse(fs.readFileSync(path.join(output, 'manifest.json')))
         assert(file.startsWith(assets + path.sep))
         return route.fulfill({ path: file })
       }
-      return route.fulfill({ contentType: 'text/html', body: '<canvas></canvas>' })
+      return route.fulfill({ contentType: 'text/html', headers: {'Content-Security-Policy': csp}, body: '<canvas></canvas>' })
     })
     await page.goto('http://localhost/')
-    await page.addScriptTag({ path: path.join(assets, 'pdf.min.js') })
+    await page.addScriptTag({ url: 'http://localhost/pdfjs/pdf.min.js' })
     await page.evaluate(() => {
       pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.js'
-      window.openPDF = async encoded => pdfjsLib.getDocument({
-        data: Uint8Array.from(atob(encoded), ch => ch.charCodeAt(0)),
+      window.openPDF = async encoded => {
+        const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(encoded), ch => ch.charCodeAt(0))], {type:'application/pdf'}))
+        try { return await pdfjsLib.getDocument({
+        url,
         cMapUrl: '/pdfjs/cmaps/', cMapPacked: true,
         standardFontDataUrl: '/pdfjs/standard_fonts/', isEvalSupported: false,
-      }).promise
+      }).promise } finally { URL.revokeObjectURL(url) }
+      }
       window.signature = async (doc, number, hideWatermark = false) => {
         const pg = await doc.getPage(number), viewport = pg.getViewport({ scale: 1 })
         await pg.getOperatorList()

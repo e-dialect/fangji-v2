@@ -40,24 +40,23 @@
         </details>
       </header>
       <div class="editor-panel-body editor-panel-body--pdf">
-        <div v-if="loading || pdfLoading" class="panel-loading" aria-live="polite">正在加载原文…</div>
+        <div v-if="loading || pdfLoading" class="panel-loading pdf-transition-mask" aria-live="polite">正在加载原文…</div>
+        <div v-else-if="!pdfEnabled" class="alert alert-error">任务租约已失效，请重新领取。</div>
         <div v-else-if="!page" class="alert alert-error">页面不存在</div>
         <div v-else-if="pdfError" class="alert alert-error editor-inline-alert">{{ pdfError }}</div>
-        <template v-else>
-          <div v-if="pdfPageWarning" class="alert alert-error editor-inline-alert">{{ pdfPageWarning }}</div>
-          <PdfSinglePageViewer
-            v-if="pdfUrl"
-            :src="pdfUrl"
-            :page-number="localPdfPage"
-            :source-page-number="currentPdfPage"
-            :source-total-pages="totalPdfPages"
-          />
-          <div v-else class="empty-state">
-            <div class="empty-state-mark" aria-hidden="true">PDF</div>
-            <div class="empty-state-text">这个项目没有可预览的 PDF</div>
-            <p>{{ emptyPdfDescription }}</p>
-          </div>
-        </template>
+        <div v-if="pdfPageWarning && !loading && !pdfLoading" class="alert alert-error editor-inline-alert">{{ pdfPageWarning }}</div>
+        <PdfSinglePageViewer
+          v-if="pdfUrl"
+          :style="{ visibility: loading || pdfLoading ? 'hidden' : 'visible' }"
+          :src="pdfUrl"
+          :page-number="localPdfPage"
+          :source-page-number="currentPdfPage"
+          :source-total-pages="totalPdfPages"
+        />
+        <div v-else-if="!loading && !pdfLoading && !pdfError && pdfEnabled && page" class="empty-state">
+          <div class="empty-state-text">暂无可预览的 PDF</div>
+          <p>{{ emptyPdfDescription }}</p>
+        </div>
       </div>
     </section>
 
@@ -92,6 +91,7 @@ const props = defineProps({
   suspended: { type: Boolean, default: false },
   page: { type: Object, default: null },
   loading: { type: Boolean, default: false },
+  pdfEnabled: { type: Boolean, default: true },
   watermarkUserId: { type: String, default: '' },
   returnTo: { type: String, default: '' },
   returnLabel: { type: String, default: '返回' },
@@ -163,12 +163,12 @@ watch(currentPdfPage, (value) => {
   pdfPageInput.value = value
 })
 
-watch(() => props.page?.id, async (pageId) => {
-  resetPdf()
-  if (!pageId) return
-  syncToBasePage()
-  pdfPageInput.value = currentPdfPage.value
+watch([() => props.page?.id, () => props.loading, () => props.pdfEnabled], async ([pageId, loading, enabled]) => {
+  if (!enabled) { resetPdf(); return }
+  if (loading) return
+  if (!pageId) { resetPdf(); return }
   await resolveProjectPdf()
+  pdfPageInput.value = currentPdfPage.value
 }, { immediate: true })
 
 onBeforeUnmount(resetPdf)
@@ -178,3 +178,8 @@ function applyPdfPageInput() {
   pdfPageInput.value = currentPdfPage.value
 }
 </script>
+
+<style scoped>
+.editor-panel-body--pdf { position: relative; }
+.pdf-transition-mask { position: absolute; inset: 0; z-index: 1; background: var(--surface, #fff); }
+</style>

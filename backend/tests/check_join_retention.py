@@ -29,7 +29,10 @@ with tempfile.TemporaryDirectory(prefix='fangji-retention-') as temp:
                     assert name in plan, plan
     migrate('up')
     check(True)
-    migrate('down', '1')
+    # Later additive migrations must be rolled back before the retention one.
+    with sqlite3.connect(data / 'data.db') as db:
+        rollback_count = db.execute("SELECT COUNT(*) FROM _migrations WHERE file >= '1788942000_join_attempt_retention.js'").fetchone()[0]
+    migrate('down', str(rollback_count))
     check(False)
     migrate('up')
     check(True)

@@ -6,6 +6,11 @@ export function getUploadErrorMessage(error, kind) {
   if (getPbStatus(error) === 413) {
     return kind === 'pdf' ? 'PDF 文件超过 100 MiB 上限' : 'CSV 文件超过 50 MiB 上限'
   }
+  const status = getPbStatus(error)
+  const hasServerMessage = Boolean(error?.response?.message)
+  if ([408, 502, 504].includes(status) || (status === 400 && !hasServerMessage)) {
+    return '上传连接中断或超时，请重试；若大文件反复失败，请联系管理员检查上传超时设置'
+  }
   return getPbMessage(error, kind === 'pdf' ? '上传失败，请重试' : '导入失败，请检查文件格式')
 }
 

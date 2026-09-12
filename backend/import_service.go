@@ -121,6 +121,7 @@ func newImportService(app *pocketbase.PocketBase) *importService {
 }
 
 func (s *importService) register() {
+	s.registerChunkUploads()
 	s.app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST(
 			"/api/fangji/projects/{projectId}/imports/csv",
@@ -714,6 +715,13 @@ func (s *importService) processPDF(work importWork) {
 		return
 	}
 
+	// Prepare private single-page sources in the serial import worker.
+	pdfCacheMu.Lock()
+	_, cacheErr := s.preparePDFPages(record)
+	pdfCacheMu.Unlock()
+	if cacheErr != nil {
+		logUpload("warn", "pdf_cache_prepare_failed", map[string]any{"file_id": recordID, "error": cacheErr.Error()})
+	}
 	validatedAt := types.NowDateTime()
 	projectID := record.GetString("project")
 	err = s.app.RunInTransaction(func(txDao core.App) error {
