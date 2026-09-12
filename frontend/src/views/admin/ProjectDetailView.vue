@@ -65,12 +65,17 @@
             <h4 class="font-semibold mb-2">上传 PDF 文件</h4>
             <p class="text-sm text-muted mb-3">上传扫描版 PDF 作为校对原文预览。当前系统不会自动 OCR 或生成条目，请通过 CSV 导入待校对文本。</p>
             <input type="file" accept=".pdf" @change="onPdfSelected" ref="pdfInput" style="display:none" />
-            <button class="btn btn-secondary" @click="$refs.pdfInput.click()">选择 PDF 文件</button>
+            <button class="btn btn-secondary" @click="$refs.pdfInput.click()" :disabled="uploadingPdf">选择 PDF 文件</button>
             <span v-if="pdfFile" class="text-sm ml-2">{{ pdfFile.name }}</span>
             <div v-if="pdfFile" class="mt-3">
               <button class="btn btn-primary" @click="uploadPdf" :disabled="uploadingPdf">
                 {{ uploadingPdf ? '上传处理中...' : '上传 PDF' }}
               </button>
+            </div>
+            <div v-if="uploadingPdf && !pdfProcessing" class="mt-2" role="status">
+              <progress :value="pdfUploadProgress" max="100" aria-label="PDF 上传进度"></progress>
+              <span>已上传 {{ pdfUploadProgress }}%{{ pdfUploadProgress === 100 ? '，正在保存…' : '' }}</span>
+              <button class="btn btn-quiet btn-sm" @click="pdfUploadController?.abort()">取消上传</button>
             </div>
             <div v-if="pdfProcessing" class="alert mt-2">PDF 已上传，后端正在校验文件...</div>
             <div v-if="pdfSuccess" class="alert alert-success mt-2">
@@ -426,6 +431,8 @@ let searchTimer
 const pdfInput = ref(null)
 const csvInput = ref(null)
 const pdfFile = ref(null)
+const pdfUploadProgress = ref(0)
+let pdfUploadController = null
 const csvFile = ref(null)
 const uploadingPdf = ref(false)
 const uploadingCsv = ref(false)
@@ -529,6 +536,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  pdfUploadController?.abort()
   pdfPollGeneration += 1
   csvPollGeneration += 1
   pageLoadGeneration += 1
@@ -629,7 +637,12 @@ async function uploadPdf() {
   pdfProcessing.value = false
   const generation = ++pdfPollGeneration
   try {
-    let record = await createProjectPdf({ projectId, file: pdfFile.value })
+    pdfUploadController = new AbortController()
+    const signal = pdfUploadController.signal
+    let record = await createProjectPdf({ projectId, file: pdfFile.value, signal,
+      onProgress: value => { if (generation === pdfPollGeneration) pdfUploadProgress.value = value }
+    })
+    if (generation !== pdfPollGeneration) return
     pdfProcessing.value = record.status === 'processing'
     pdfFile.value = null
     if (pdfInput.value) pdfInput.value.value = ''
@@ -646,7 +659,8 @@ async function uploadPdf() {
       pdfError.value = record.error_message || 'PDF 后端校验失败'
     }
   } catch (e) {
-    pdfError.value = getUploadErrorMessage(e, 'pdf')
+    if (generation !== pdfPollGeneration) return
+    pdfError.value = pdfUploadController?.signal.aborted ? '上传已取消' : getUploadErrorMessage(e, 'pdf')
     pdfProcessing.value = false
   } finally {
     if (generation === pdfPollGeneration) uploadingPdf.value = false

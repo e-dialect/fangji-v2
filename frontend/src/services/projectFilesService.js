@@ -1,18 +1,13 @@
 import pb from '@/lib/pocketbase'
+import { uploadPdfInChunks } from '@/lib/chunkedPdfUpload'
 
 export function getFileUrl(record, fileName) {
   if (!record || !fileName) return null
   return pb.files.getURL(record, fileName)
 }
 
-export async function createProjectPdf({ projectId, file }) {
-  const formData = new FormData()
-  formData.append('file', file)
-  return pb.send(`/api/fangji/projects/${encodeURIComponent(projectId)}/files/pdf`, {
-    method: 'POST',
-    body: formData,
-    requestKey: null
-  })
+export async function createProjectPdf(options) {
+  return uploadPdfInChunks({ ...options, send: (path, request) => pb.send(path, request) })
 }
 
 export async function getProjectFile(recordId) {

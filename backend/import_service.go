@@ -121,6 +121,7 @@ func newImportService(app *pocketbase.PocketBase) *importService {
 }
 
 func (s *importService) register() {
+	s.registerChunkUploads()
 	s.app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.POST(
 			"/api/fangji/projects/{projectId}/imports/csv",
