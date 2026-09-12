@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [core_logic, upload_jobs, proofreading_quorum, task_leases, project_access, phase1, pdf_access, keyboards, column_order, volunteer_accounts]
+        suite: [core_logic, upload_jobs, proofreading_quorum, task_leases, project_access, phase1, pdf_access, pdf_reuse, keyboards, column_order, volunteer_accounts]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
@@ -127,6 +127,8 @@ jobs:
       - name: Run backend tests
         working-directory: backend
         run: go test ./...
+      - name: Verify PDF affinity migration and rollback
+        run: python3 backend/tests/check_pdf_affinity.py
       - name: Verify join retention migration and rollback
         run: python3 backend/tests/check_join_retention.py
       - name: Verify offline backup and restore
@@ -308,3 +310,11 @@ jobs:
           FANGJI_PDF_RENDER: "1"
           NODE_PATH: ${{ runner.temp }}/pdf-browser/node_modules
         run: go test -C backend -run '^TestTaskPDFBrowserRegression$' -count=1 -v
+      - name: Build production UI for same-page reuse regression
+        run: npm --prefix frontend ci && npm --prefix frontend run build
+      - name: Verify cross-task PDF reader reuse
+        env:
+          NODE_PATH: ${{ runner.temp }}/pdf-browser/node_modules
+          PDF_REUSE_BROWSER_SCRIPT: ${{ github.workspace }}/backend/tests/pdf_reuse_browser.cjs
+          PDF_BROWSER_FIXTURE: ${{ runner.temp }}/pdf-reuse-fixture.json
+        run: python3 backend/tests/run_integration.py pdf_reuse_integration.mjs

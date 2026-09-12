@@ -41,7 +41,12 @@ await check(fileURL,users[0].token,404,{Range:'bytes=0-1024'})
 const aft=await api('/api/files/token',{method:'POST',token});await check(fileURL+'?token='+aft.token,token,200)
 const preview=await check(url,users[0].token,200)
 assert.equal(preview.headers.get('x-pdf-start-page'),'2');assert.equal(preview.headers.get('x-pdf-end-page'),'3');assert.equal(preview.headers.get('cache-control'),'private, no-store')
-assert.equal(Buffer.from(await preview.arrayBuffer()).subarray(0,5).toString(),'%PDF-')
+const firstBytes = Buffer.from(await preview.arrayBuffer())
+assert.equal(firstBytes.subarray(0,5).toString(),'%PDF-')
+const warm = await check(url,users[0].token,200)
+assert.deepEqual(Buffer.from(await warm.arrayBuffer()),firstBytes,'warm preview should reuse the watermarked artifact')
+await check(url,users[1].token,403) // Warm cache never bypasses ownership.
+
 if(process.env.PDF_BROWSER_FIXTURE){
  await writeFile(process.env.PDF_BROWSER_FIXTURE,JSON.stringify({base,auth:users[0],page,project,fileURL}))
  if(process.env.PDF_BROWSER_SCRIPT){const {spawnSync}=await import('node:child_process');assert.equal(spawnSync('node',[process.env.PDF_BROWSER_SCRIPT],{stdio:'inherit',env:process.env}).status,0)}

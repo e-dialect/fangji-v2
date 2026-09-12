@@ -15,8 +15,25 @@ import (
 )
 
 func (s *importService) registerPDFPreview() {
+	stop := make(chan struct{})
+	s.app.OnTerminate().BindFunc(func(e *core.TerminateEvent) error { close(stop); return e.Next() })
 	s.app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		e.Router.GET("/api/fangji/pages/{pageId}/pdf", s.taskPDF).Bind(apis.RequireAuth("users"))
+		e.Router.GET("/api/fangji/pages/{pageId}/pdf/descriptor", s.taskPDFDescriptor).Bind(apis.RequireAuth("users"))
+		go func() {
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case now := <-ticker.C:
+					pdfCacheMu.Lock()
+					cleanupPDFCache(s.pdfCacheDir(), now, 0)
+					pdfCacheMu.Unlock()
+				}
+			}
+		}()
 		return e.Next()
 	})
 	s.app.OnFileDownloadRequest("project_files").BindFunc(func(e *core.FileDownloadRequestEvent) error {
@@ -25,24 +42,24 @@ func (s *importService) registerPDFPreview() {
 	})
 }
 
-func (s *importService) taskPDF(c *core.RequestEvent) error {
+func (s *importService) resolveTaskPDF(c *core.RequestEvent) (*core.Record, int, int, error) {
 	auth := c.Auth
 	if auth == nil || auth.GetBool("must_change_password") {
-		return apis.NewForbiddenError("请先登录并完成初始密码修改。", nil)
+		return nil, 0, 0, apis.NewForbiddenError("请先登录并完成初始密码修改。", nil)
 	}
 	page, err := s.app.FindRecordById("pages", c.Request.PathValue("pageId"))
 	if err != nil {
-		return apis.NewNotFoundError("条目不存在。", nil)
+		return nil, 0, 0, apis.NewNotFoundError("条目不存在。", nil)
 	}
 	projectID := page.GetString("project")
 	if _, _, err := s.requireProjectManager(c, projectID); err != nil {
 		members, lookupErr := s.app.FindRecordsByFilter("project_memberships", fmt.Sprintf(`project = %q && user = %q && role = "proofreader"`, projectID, auth.Id), "", 1, 0)
 		if lookupErr != nil || len(members) == 0 || page.GetString("proofreader") != auth.Id || (page.GetString("status") != "claimed" && page.GetString("status") != "proofreading") {
-			return apis.NewForbiddenError("只能查看当前分配给你的任务 PDF。", nil)
+			return nil, 0, 0, apis.NewForbiddenError("只能查看当前分配给你的任务 PDF。", nil)
 		}
 		leases, err := s.app.FindRecordsByFilter("task_leases", fmt.Sprintf(`page = %q && holder = %q`, page.Id, auth.Id), "", 1, 0)
 		if err != nil || len(leases) == 0 || !leases[0].GetDateTime("expires_at").Time().After(time.Now()) {
-			return apis.NewForbiddenError("任务租约已失效，请重新领取。", nil)
+			return nil, 0, 0, apis.NewForbiddenError("任务租约已失效，请重新领取。", nil)
 		}
 	}
 	var file *core.Record
@@ -56,7 +73,7 @@ func (s *importService) taskPDF(c *core.RequestEvent) error {
 		}
 	}
 	if err != nil || file == nil || file.GetString("project") != projectID || file.GetString("status") != "ready" {
-		return apis.NewNotFoundError("没有可预览的 PDF。", nil)
+		return nil, 0, 0, apis.NewNotFoundError("没有可预览的 PDF。", nil)
 	}
 	start := page.GetInt("pdf_page")
 	if start < 1 {
@@ -64,19 +81,42 @@ func (s *importService) taskPDF(c *core.RequestEvent) error {
 	}
 	count := file.GetInt("page_count")
 	if start < 1 || start > count {
-		return apis.NewBadRequestError("任务 PDF 页码超出文件范围。", nil)
+		return nil, 0, 0, apis.NewBadRequestError("任务 PDF 页码超出文件范围。", nil)
 	}
-	reader, closeFile, err := s.openRecordFile(file, "file")
-	if err != nil {
-		return apis.NewNotFoundError("无法读取 PDF。", err)
-	}
-	defer closeFile()
 	end := start + 1
 	if end > count {
 		end = count
 	}
-	stamp := fmt.Sprintf("Fangji | %s | %s | %s UTC", auth.Id, page.Id, time.Now().UTC().Format("2006-01-02 15:04:05"))
-	output, err := buildTaskPDF(reader, start, end, stamp)
+	return file, start, end, nil
+}
+
+type pdfPreviewDescriptor struct {
+	Key       string    `json:"key"`
+	Start     int       `json:"start"`
+	End       int       `json:"end"`
+	Total     int       `json:"total"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+func describePDF(file *core.Record, start, end int, userID string, now time.Time) pdfPreviewDescriptor {
+	bucket := now.UTC().Truncate(pdfPreviewTTL)
+	return pdfPreviewDescriptor{Key: pdfCacheKey(pdfSourceKey(file), userID, fmt.Sprint(start), fmt.Sprint(end), bucket.Format(time.RFC3339)), Start: start, End: end, Total: file.GetInt("page_count"), ExpiresAt: bucket.Add(pdfPreviewTTL)}
+}
+func (s *importService) taskPDFDescriptor(c *core.RequestEvent) error {
+	file, start, end, err := s.resolveTaskPDF(c)
+	if err != nil {
+		return err
+	}
+	c.Response.Header().Set("Cache-Control", "private, no-store")
+	return c.JSON(http.StatusOK, describePDF(file, start, end, c.Auth.Id, time.Now()))
+}
+func (s *importService) taskPDF(c *core.RequestEvent) error {
+	file, start, end, err := s.resolveTaskPDF(c)
+	if err != nil {
+		return err
+	}
+	descriptor := describePDF(file, start, end, c.Auth.Id, time.Now())
+	output, err := s.cachedTaskPDF(file, descriptor, c.Auth.Id)
 	if err != nil {
 		return apis.NewBadRequestError("PDF 分页或水印生成失败，请联系项目管理员。", err)
 	}
@@ -84,10 +124,12 @@ func (s *importService) taskPDF(c *core.RequestEvent) error {
 	c.Response.Header().Set("X-Content-Type-Options", "nosniff")
 	c.Response.Header().Set("Content-Disposition", `inline; filename="task-preview.pdf"`)
 	// Metadata is also available across separately hosted frontend/backend deployments.
-	c.Response.Header().Set("Access-Control-Expose-Headers", "X-PDF-Start-Page, X-PDF-End-Page, X-PDF-Total-Pages")
+	c.Response.Header().Set("Access-Control-Expose-Headers", "X-PDF-Start-Page, X-PDF-End-Page, X-PDF-Total-Pages, X-PDF-Preview-Key, X-PDF-Expires-At")
 	c.Response.Header().Set("X-PDF-Start-Page", fmt.Sprint(start))
 	c.Response.Header().Set("X-PDF-End-Page", fmt.Sprint(end))
-	c.Response.Header().Set("X-PDF-Total-Pages", fmt.Sprint(count))
+	c.Response.Header().Set("X-PDF-Total-Pages", fmt.Sprint(descriptor.Total))
+	c.Response.Header().Set("X-PDF-Preview-Key", descriptor.Key)
+	c.Response.Header().Set("X-PDF-Expires-At", descriptor.ExpiresAt.Format(time.RFC3339))
 	return c.Blob(http.StatusOK, "application/pdf", output)
 }
 
@@ -95,15 +137,20 @@ func buildTaskPDF(reader io.ReadSeeker, start, end int, stamp string) ([]byte, e
 	pdfapi.DisableConfigDir()
 	config := pdfmodel.NewDefaultConfiguration()
 	config.ValidationMode = pdfmodel.ValidationRelaxed
-	var excerpt, output bytes.Buffer
+	var excerpt bytes.Buffer
 	if err := pdfapi.Trim(reader, &excerpt, []string{fmt.Sprintf("%d-%d", start, end)}, config); err != nil {
 		return nil, err
 	}
+	return watermarkTaskPDF(bytes.NewReader(excerpt.Bytes()), stamp)
+}
+
+func watermarkTaskPDF(reader io.ReadSeeker, stamp string) ([]byte, error) {
+	var output bytes.Buffer
 	watermark, err := pdfapi.TextWatermark(stamp, "fontname:Helvetica, points:11, scale:1 abs, rotation:25, opacity:0.18", true, false, pdftypes.POINTS)
 	if err != nil {
 		return nil, err
 	}
-	if err := pdfapi.AddWatermarks(bytes.NewReader(excerpt.Bytes()), &output, nil, watermark, config); err != nil {
+	if err := pdfapi.AddWatermarks(reader, &output, nil, watermark, pdfConfig()); err != nil {
 		return nil, err
 	}
 	return output.Bytes(), nil

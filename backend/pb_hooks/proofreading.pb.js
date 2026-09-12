@@ -3,7 +3,8 @@
 const FANGJI_API = "/api/fangji"
 
 // Claiming is serialized in a database transaction. An existing active task in
-// the same project always wins; otherwise the first eligible queue item is used.
+// the same project always wins; then prefer a verified completed task's PDF range
+// before falling back to the original eligible queue order.
 routerAdd("POST", `${FANGJI_API}/projects/{projectId}/claim`, (c) => {
   const { canProofread: proofCanProofread } = require(`${__hooks}/lib/project_access.js`)
   const {
@@ -35,6 +36,9 @@ routerAdd("POST", `${FANGJI_API}/projects/{projectId}/claim`, (c) => {
   const userId = auth.id
   const projectId = c.request.pathValue("projectId")
   let response = null
+  const claimBody = new DynamicModel({ previousTaskId: "" })
+  if (c.request.contentLength !== 0) c.bindBody(claimBody)
+  const previousTaskId = String(claimBody.previousTaskId || "")
 
   $app.runInTransaction((txDao) => {
     try {
@@ -63,35 +67,57 @@ routerAdd("POST", `${FANGJI_API}/projects/{projectId}/claim`, (c) => {
       return
     }
 
-    const candidates = txDao.findRecordsByFilter(
-      "pages",
-      `project = "${projectId}" && (status = "pending" || status = "proofread" || status = "claimed" || status = "proofreading")`,
-      "page_number",
-      100000,
-      0
-    )
-    for (const page of candidates) {
-      const status = page.getString("status")
-      let queueStatus = status
-      if (status === "claimed" || status === "proofreading") {
-        const existingLease = proofLeaseForPage(txDao, page.id)
-        if (existingLease && !proofLeaseExpired(existingLease)) continue
-        queueStatus = proofQueueStatusForPage(page, existingLease)
-        if (!existingLease) proofClearLease(txDao, page)
+    const queueFilter = `project = "${projectId}" && (status = "pending" || status = "proofread" || status = "claimed" || status = "proofreading")`
+    const filters = []
+    if (previousTaskId) {
+      if (!/^[a-z0-9]{15}$/.test(previousTaskId)) throw new BadRequestError("上一任务标识无效")
+      let previous = null
+      try { previous = txDao.findRecordById("pages", previousTaskId) } catch { throw new BadRequestError("上一任务不存在") }
+      if (previous.getString("project") !== projectId || !proofAttempts(txDao, previous).some(a => a.getString("proofreader") === userId)) {
+        throw new ForbiddenError("上一任务尚未由你完成校对")
       }
-      const attempts = proofAttempts(txDao, page)
-      if (attempts.some((attempt) => attempt.getString("proofreader") === userId)) continue
-      if (attempts.length >= proofRequiredProofreads(txDao, projectId)) {
-        proofEvaluatePage(txDao, page)
-        continue
+      const primary = txDao.findRecordsByFilter("project_files", `project = "${projectId}" && status = "ready" && is_primary = true`, "-created", 1, 0)[0]
+      const fileId = previous.getString("project_file") || primary?.id || ""
+      const start = previous.getInt("pdf_page") || previous.getInt("page_number")
+      if (fileId && start > 0) {
+        let file = null
+        try { file = txDao.findRecordById("project_files", fileId) } catch {}
+        if (file && file.getString("project") === projectId && file.getString("status") === "ready") {
+          const source = primary?.id === fileId ? `(project_file = "${fileId}" || project_file = "")` : `project_file = "${fileId}"`
+          filters.push(`${queueFilter} && ${source} && ((pdf_page > 0 && pdf_page = ${start}) || (pdf_page <= 0 && page_number = ${start}))`)
+        }
       }
-      queueStatus = attempts.length ? "proofread" : "pending"
-      const issued = proofIssueLease(txDao, page, userId, queueStatus)
-      page.set("proofreader", userId)
-      page.set("status", "proofreading")
-      txDao.save(page)
-      response = summarize(page, issued)
-      break
+    }
+    filters.push(queueFilter)
+    const seen = new Set()
+    for (const filter of filters) {
+      if (response) break
+      const candidates = txDao.findRecordsByFilter("pages", filter, "page_number,id", 100000, 0)
+      for (const page of candidates) {
+        if (seen.has(page.id)) continue
+        seen.add(page.id)
+        const status = page.getString("status")
+        let queueStatus = status
+        if (status === "claimed" || status === "proofreading") {
+          const existingLease = proofLeaseForPage(txDao, page.id)
+          if (existingLease && !proofLeaseExpired(existingLease)) continue
+          queueStatus = proofQueueStatusForPage(page, existingLease)
+          if (!existingLease) proofClearLease(txDao, page)
+        }
+        const attempts = proofAttempts(txDao, page)
+        if (attempts.some((attempt) => attempt.getString("proofreader") === userId)) continue
+        if (attempts.length >= proofRequiredProofreads(txDao, projectId)) {
+          proofEvaluatePage(txDao, page)
+          continue
+        }
+        queueStatus = attempts.length ? "proofread" : "pending"
+        const issued = proofIssueLease(txDao, page, userId, queueStatus)
+        page.set("proofreader", userId)
+        page.set("status", "proofreading")
+        txDao.save(page)
+        response = summarize(page, issued)
+        break
+      }
     }
   })
 
