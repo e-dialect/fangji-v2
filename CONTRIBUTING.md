@@ -1,6 +1,8 @@
 # 贡献指南
 
-感谢你参与方辑（Fangji v2）。本文件补充本仓库特有的开发和评审要求；组织级规则以 [e-dialect 贡献指南](https://github.com/e-dialect/.github/blob/main/CONTRIBUTING.md) 为准。
+感谢你参与万语校坊。本文件补充本仓库特有的开发和评审要求；组织级规则以 [E-Dialect 贡献指南](https://github.com/e-dialect/.github/blob/main/CONTRIBUTING.md) 为准。
+
+本项目原名“方辑（Fangji v2）”；历史 commit、migration、package 或兼容字段中可能仍保留旧名，不应仅为品牌 rename 做破坏性重命名。
 
 提交贡献前，请同时阅读：
 

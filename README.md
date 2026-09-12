@@ -1,12 +1,37 @@
 # 万语校坊
 
-万语校坊是“乡声万语”体系中面向方言、地方语言与民族语言资料整理团队的智能协同校勘平台。它可以独立部署和使用，具有独立产品与商业价值；在乡声万语内部也承担 Candidate → Trusted / Gold 的专业工作台职责，但不是乡声集盒的管理后台。
+万语校坊是面向方言、地方语言与民族语言资料整理团队的协同校勘平台。
+
+它把 PDF、CSV、词典等批量资料交给多位校对者独立核对：结果一致时可自动确认，存在差异时进入管理员仲裁，并完整保留来源、修改记录和最终决策。
+
+在“乡声万语”内部，这套流程承担 Candidate → Trusted / Gold 的专业工作台职责；但万语校坊也可以独立部署、独立使用，并具有独立产品与商业价值。它不是乡声集盒的管理后台。
 
 产品定位与乡声集盒的协作边界见 [docs/PRODUCT_POSITIONING.md](docs/PRODUCT_POSITIONING.md)。
 
 2027 春节阶段采用 **Data First + Product Polish**，总控 Issue 见 [SF-W · 2027 春节万语校坊 Sprint Tracking](https://github.com/e-dialect/wanyu-proofreader/issues/91)；本阶段不重写核心架构。
 
 当前版本采用“可配置多人独立校对 + 管理员仲裁”流程：每个项目可设置每条材料所需的校对人数（默认且最少为 2）。收齐 N 份独立结果后，全部完全一致时条目自动完成；存在任意差异时，系统会永久保留全部结果并转入管理员仲裁。
+
+### 当前稳定能力
+
+- PDF / CSV 导入；
+- 项目与角色管理；
+- 多人独立校对；
+- 差异检测；
+- 管理员仲裁；
+- provenance / 可审计导出；
+- 专用语言键盘；
+- task lease / draft / progress。
+
+### Spring 2027 重点增强
+
+- 智能错误发现与校勘辅助；
+- 真实莆仙资料试点；
+- 蒙古语 20k+ 数据试点；
+- Review Bundle v0；
+- Gold / Trusted corpus QA。
+
+“智能协同校勘”描述产品方向，不表示当前已经具备成熟的 AI 自动校勘模型。
 
 ## 目录
 
@@ -30,7 +55,7 @@
 核心能力：
 
 - 基于 PocketBase 的注册、登录、平台角色和项目级能力控制。
-- 可选接入“兴化语记”统一身份；外部身份只按稳定 subject 映射本地用户，不自动合并邮箱或姓名。
+- 当前代码保留 `hinghwa` external identity provider，作为历史兼容路径；外部身份只按稳定 provider-local subject 映射本地用户，不自动按邮箱或姓名猜测合并。长期方向是以乡声集盒稳定身份作为“乡声万语”主要外部身份入口；万语校坊本地用户、项目角色和独立登录仍保留。乡声集盒 SSO 尚未宣称已实现。
 - 项目创建默认采用白名单：平台管理员不限量，普通用户须获授权并可设置额度。
 - 项目支持指定成员、公开加入和口令加入；加入后成员身份持久保留。
 - 同一用户可在不同项目承担不同职责，同一项目内管理员和校对员互斥。
@@ -82,7 +107,7 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up -d --
 
 `.env` 里通常只需要先改：
 
-- `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD`：方辑业务管理员账号。
+- `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD`：万语校坊业务管理员账号。
 - `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`：需要创建 PocketBase 管理员时再改；生产入口默认不会公开 Admin UI。
 - `ENABLE_POCKETBASE_ADMIN_UI`：Traefik 模式默认 `true`，本地生产入口默认 `false`；可显式设置 `false` 关闭后台入口。后台始终要求独立的 PocketBase 管理员登录。
 
@@ -282,7 +307,7 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 
 - 使用 `.env` 里的 `APP_ADMIN_EMAIL` 和 `APP_ADMIN_PASSWORD` 登录网站。
 - Traefik 模式默认开放 **`https://你的域名/_/`** 的 PocketBase 管理员登录页；输入 `/_` 会相对跳转到 `/_/`，不会跳向容器地址或降级为 HTTP。
-- 这里使用 **`PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`** 对应的 PocketBase 管理员账号，与方辑的 `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD` 账号不同。
+- 这里使用 **`PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`** 对应的 PocketBase 管理员账号，与万语校坊的 `APP_ADMIN_EMAIL` / `APP_ADMIN_PASSWORD` 业务管理员账号不同。
 - 如果旧 `.env` 中有 `ENABLE_POCKETBASE_ADMIN_UI=false`，它会继续覆盖默认值并返回 404。改为 `true` 后执行 `docker compose -f docker-compose.traefik.yml up -d --build --force-recreate frontend`（仅 restart 不会更新容器环境变量）。
 - 要关闭后台，显式设置 `ENABLE_POCKETBASE_ADMIN_UI=false` 并重新创建 frontend。backend 仍不发布宿主机端口，不需要给 Traefik 新增 backend 路由。
 - PocketBase collections、字段和 API rules 会由迁移自动应用，不需要进后台手动配置业务规则。
@@ -326,7 +351,7 @@ docker compose -f docker-compose.traefik.yml logs -f backend frontend
 
 #### 外部统一身份
 
-在 `.env` 设置 `HINGHWA_IDENTITY_BASE_URL=https://identity.example.com` 后，登录页会显示“兴化语记”入口，方辑后端向该地址的 `/login` 发送 `username`、`password`。首次验证成功时系统创建一个没有项目权限的本地 `user` 并保存 provider subject 映射；已登录用户也可在个人主页显式绑定。系统不会按邮箱或姓名自动合并账号，登录或绑定后会从公开 `/users/{id}` 详情核对 ID 并补齐空缺的昵称、邮箱和头像；已有用户也会补齐，保留已填写的本地资料。邮箱通过本地格式/唯一性校验后保存为未验证，冲突时跳过；头像仅从已知兴化语记存储域读取有效的 PNG/JPEG/GIF/WebP（最多 2 MiB、边长最多 4096 像素），保存到本地头像字段，不转发远端令牌或跟踪图片 URL。资料补齐共用 5 秒超时，失败不阻断登录；密码、角色与项目权限不从远端导入。
+在 `.env` 设置 `HINGHWA_IDENTITY_BASE_URL=https://identity.example.com` 后，登录页会显示“兴化语记”入口，万语校坊后端向该地址的 `/login` 发送 `username`、`password`。这是当前保留的 `hinghwa` 历史兼容路径，不表示乡声集盒 SSO 已经实现。首次验证成功时系统创建一个没有项目权限的本地 `user` 并保存 provider-local subject 映射；已登录用户也可在个人主页显式绑定。系统不会按邮箱或姓名自动合并账号，登录或绑定后会从公开 `/users/{id}` 详情核对 ID 并补齐空缺的昵称、邮箱和头像；已有用户也会补齐，保留已填写的本地资料。邮箱通过本地格式/唯一性校验后保存为未验证，冲突时跳过；头像仅从已知兴化语记存储域读取有效的 PNG/JPEG/GIF/WebP（最多 2 MiB、边长最多 4096 像素），保存到本地头像字段，不转发远端令牌或跟踪图片 URL。资料补齐共用 5 秒超时，失败不阻断登录；密码、角色与项目权限不从远端导入。
 
 远端返回的 HS256 token 只在单次后端请求内读取后立即丢弃，不写数据库、日志或浏览器响应，也不需要共享远端签名密钥。适配器强制 HTTPS、5 秒超时、禁止重定向、限制响应为 64 KiB，并按来源地址执行登录限流；日志只记录 provider 与脱敏后的结果类别。`HINGHWA_IDENTITY_BASE_URL` 为空时该入口不会显示。
 
@@ -656,7 +681,7 @@ cd backend
 go test ./...
 ```
 
-部署环境只在获得一次性测试账号时进行人工联调，CI 不依赖外部服务。适配行为依据上游 Django [`/login` 接口](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/user/views.py)及其[令牌实现](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/utils/token.py)；方辑使用响应中的稳定用户 ID，不消费远端 token；登录和绑定后另外读取公开用户详情并核对 ID，补齐本地空缺资料。
+部署环境只在获得一次性测试账号时进行人工联调，CI 不依赖外部服务。适配行为依据上游 Django [`/login` 接口](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/user/views.py)及其[令牌实现](https://github.com/e-dialect/hinghwa-dict-backend/blob/develop/hinghwa-dict-backend/utils/token.py)；万语校坊使用响应中的稳定用户 ID，不消费远端 token；登录和绑定后另外读取公开用户详情并核对 ID，补齐本地空缺资料。
 
 容器 CI 还会经过实际 Nginx 代理轮换伪造的 `X-Forwarded-For`，确认同一可信 `X-Real-IP` 仍共享客户端额度，并确认另一客户端不会被该额度连带封锁。
 
@@ -790,7 +815,7 @@ docker compose -f docker-compose.yml -f docker-compose.named-volume.yml up --bui
 
 ### 生僻字与 Unicode 验证
 
-网页字体链包含自托管的 Fangji Rare Han 补充字体（思源黑体及遍黑体 OFL 子集），覆盖源字体包含的扩展 A–J 及兼容汉字，共 82,007 个码位。283 个 WOFF2 分片总计约 13.6 MB，使用精确 `unicode-range` 按需下载；常用汉字/ASCII 页面不请求这些字体。字体声明增加约 24 KB gzip CSS，不预加载整套字体。字体来源、许可证、覆盖清单和可复现构建方式见 [字体说明](frontend/public/fonts/rare-han/README.md)。
+网页字体链包含自托管的 `Fangji Rare Han` 补充字体（思源黑体及遍黑体 OFL 子集）；这是为兼容保留的历史内部资产名，不代表当前产品名称。覆盖源字体包含的扩展 A–J 及兼容汉字，共 82,007 个码位。283 个 WOFF2 分片总计约 13.6 MB，使用精确 `unicode-range` 按需下载；常用汉字/ASCII 页面不请求这些字体。字体声明增加约 24 KB gzip CSS，不预加载整套字体。字体来源、许可证、覆盖清单和可复现构建方式见 [字体说明](frontend/public/fonts/rare-han/README.md)。
 
 UTF-8、SQLite 和 PocketBase 能存储四字节生僻字，不需要 schema 迁移。差异高亮、头像/列表截断及后端仲裁说明按 Unicode 码位处理；输入光标仍使用浏览器规定的 UTF-16 偏移。校对/仲裁中的生僻字补充字体加载失败时显示码位提示，原始内容保持不变。PDF 字形仍取决于原始 PDF。
 
