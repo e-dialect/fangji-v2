@@ -1,8 +1,10 @@
 # 万语校坊
 
-万语校坊是“乡声万语”体系中面向方言资料整理团队的智能协同校勘平台。
+万语校坊是“乡声万语”体系中面向方言、地方语言与民族语言资料整理团队的智能协同校勘平台。它可以独立部署和使用，具有独立产品与商业价值；在乡声万语内部也承担 Candidate → Trusted / Gold 的专业工作台职责，但不是乡声集盒的管理后台。
 
 产品定位与乡声集盒的协作边界见 [docs/PRODUCT_POSITIONING.md](docs/PRODUCT_POSITIONING.md)。
+
+2027 春节阶段采用 **Data First + Product Polish**，总控 Issue 见 [SF-W · 2027 春节万语校坊 Sprint Tracking](https://github.com/e-dialect/wanyu-proofreader/issues/91)；本阶段不重写核心架构。
 
 当前版本采用“可配置多人独立校对 + 管理员仲裁”流程：每个项目可设置每条材料所需的校对人数（默认且最少为 2）。收齐 N 份独立结果后，全部完全一致时条目自动完成；存在任意差异时，系统会永久保留全部结果并转入管理员仲裁。
 

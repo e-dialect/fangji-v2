@@ -8,7 +8,7 @@
 
 ## 1. 定位
 
-万语校坊是“乡声万语”体系中的**方言资料智能协同校勘平台**。
+万语校坊是“乡声万语”体系中面向**方言、地方语言与民族语言资料**的智能协同校勘平台。
 
 它解决的不是普通用户随手补充一个词条，而是：
 
@@ -19,7 +19,14 @@
 - 管理员仲裁；
 - 批量导出可审计结果。
 
-因此它可以继续保留独立 PocketBase 后端、独立部署和专业工作台，不需要为了“品牌统一”强行与乡声集盒合并数据库。
+它有双重但不冲突的身份：
+
+- 对外是可独立部署、独立使用并具有独立商业价值的资料数字化产品；
+- 对内是乡声万语 `Candidate → Trusted / Gold` 的专业工作台。
+
+因此它继续保留独立 PocketBase 后端、数据库、认证、权限和专业工作台，不需要为了“品牌统一”强行与乡声集盒合并，也不能降格为乡声集盒的管理后台。
+
+2027 春节阶段使用 **Data First + Product Polish**：用真实莆仙和蒙古语资料验证导入、独立校对、仲裁、导出与志愿者旅程，同时修复产品摩擦，不重写核心架构。执行总控见 [SF-W · 2027 春节万语校坊 Sprint Tracking](https://github.com/e-dialect/wanyu-proofreader/issues/91)。
 
 ## 2. 与乡声集盒的分工
 
@@ -48,15 +55,20 @@
 
 ## 4. 数据交换
 
-近期实行人工可控的批次交换，而不是实时双向同步：
+近期实行 Review Contract v0 的人工可控批次交换，而不是实时双向同步：
 
 ```text
-来源系统导出
-→ manifest + schema version + source IDs
-→ 人工审核
-→ 目标系统导入
-→ import report
+X export Review Bundle
+→ human check
+→ W import
+→ independent proofreading
+→ arbitration if needed
+→ W export Review Result
+→ human check
+→ X import
 ```
+
+原则是：**先打通语义，再打通网络。** 春节阶段不建设 realtime API、webhook、message queue、distributed transaction、shared database 或 full OIDC。
 
 每批至少保留：
 
