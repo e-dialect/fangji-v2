@@ -24,6 +24,8 @@
 - 对外是可独立部署、独立使用并具有独立商业价值的资料数字化产品；
 - 对内是乡声万语 `Candidate → Trusted / Gold` 的专业工作台。
 
+万语校坊项目内的 `approved` 只表示校勘工作流完成，不自动把数据提升为 Trusted 或 Gold。跨产品质量层级仍须经过 [#97](https://github.com/e-dialect/wanyu-proofreader/issues/97) 定义的 provenance、QA、可信/专家决策和版本化流程。
+
 因此它继续保留独立 PocketBase 后端、数据库、认证、权限和专业工作台，不需要为了“品牌统一”强行与乡声集盒合并，也不能降格为乡声集盒的管理后台。
 
 2027 春节阶段使用 **Data First + Product Polish**：用真实莆仙和蒙古语资料验证导入、独立校对、仲裁、导出与志愿者旅程，同时修复产品摩擦，不重写核心架构。执行总控见 [SF-W · 2027 春节万语校坊 Sprint Tracking](https://github.com/e-dialect/wanyu-proofreader/issues/91)。

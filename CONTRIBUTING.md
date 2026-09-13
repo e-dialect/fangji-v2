@@ -63,8 +63,7 @@ python3 backend/tests/run_integration.py task_leases_integration.mjs
 
 每个命令会构建后端、在新临时目录按数字顺序执行全部迁移、启动测试服务，并在成功或失败后停止服务、删除数据。
 失败时输出测试名称和后端日志尾部；测试身份均为临时身份。Go 缓存按 `backend/go.sum`、npm 缓存按锁文件管理；数据库不缓存。
-这些检查和现有 Frontend、Containers、Backend Unicode workflow 及其他集成检查均须通过后才能合并。
-main 已启用分支保护，现有 7 项 CI 为 required checks；本 PR 的 Core workflow 合并进入 main 后，将新矩阵检查加入 required checks。
+贡献者应运行本文列出的适用本地检查；PR 中所有适用的 required checks 都必须通过后才能合并。当前 required checks 与 review requirement 以 GitHub branch protection / ruleset 显示为最终真源，不在 CONTRIBUTING 中维护固定数量。
 
 提交前执行 `git diff --check`（暂存后使用 `git diff --cached --check`）。
 `.gitattributes` 仅对 `frontend/public/fonts/rare-han/OFL.txt`、

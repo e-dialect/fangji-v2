@@ -12,6 +12,8 @@
 
 当前版本采用“可配置多人独立校对 + 管理员仲裁”流程：每个项目可设置每条材料所需的校对人数（默认且最少为 2）。收齐 N 份独立结果后，全部完全一致时条目自动完成；存在任意差异时，系统会永久保留全部结果并转入管理员仲裁。
 
+万语校坊项目内的 `approved` 是校勘工作流完成状态，不自动等同于“乡声万语”跨产品数据质量层的 Trusted 或 Gold；是否进入 Trusted / Gold，仍须按 [#97](https://github.com/e-dialect/wanyu-proofreader/issues/97) 的 provenance、QA、可信/专家决策与版本化流程确定。
+
 ### 当前稳定能力
 
 - PDF / CSV 导入；
@@ -623,7 +625,7 @@ proofreading -> arbitration -> approved
 | `proofreading` | 校对员正在编辑 |
 | `proofread` | 已有独立结果，尚未收齐项目要求的人数 |
 | `arbitration` | 收齐结果后存在差异，等待管理员仲裁 |
-| `approved` | N 份结果全部一致或仲裁完成，条目完成 |
+| `approved` | N 份结果全部一致或仲裁完成，条目在本项目校勘工作流中完成；不自动等同于 Trusted / Gold |
 
 `reviewing`、`rejected` 是旧流程遗留状态，当前路由和主要业务流程不再使用。
 
